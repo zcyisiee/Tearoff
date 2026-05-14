@@ -99,7 +99,10 @@ final class ShortcutSettings {
     /// Space change) and stays visible until explicitly dismissed via Escape or the
     /// global toggle shortcut. Useful when copy-pasting back and forth with another app.
     var isPanelPinned: Bool {
-        didSet { UserDefaults.standard.set(isPanelPinned, forKey: isPanelPinnedKey) }
+        didSet {
+            UserDefaults.standard.set(isPanelPinned, forKey: isPanelPinnedKey)
+            NotificationCenter.default.post(name: .panelPinStateChanged, object: nil)
+        }
     }
 
     /// Whether swipe-right in header navigates back.
@@ -310,4 +313,5 @@ final class ShortcutSettings {
 
 extension Notification.Name {
     static let shortcutSettingsChanged = Notification.Name("shortcutSettingsChanged")
+    static let panelPinStateChanged = Notification.Name("panelPinStateChanged")
 }

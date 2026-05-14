@@ -164,6 +164,14 @@ final class SidePanelController: NSWindowController {
             name: .shortcutSettingsChanged,
             object: nil,
         )
+
+        // Listen for pin state changes to toggle window draggability
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePinStateChanged),
+            name: .panelPinStateChanged,
+            object: nil,
+        )
     }
 
     @available(*, unavailable)
@@ -193,6 +201,47 @@ final class SidePanelController: NSWindowController {
         } else {
             // Reposition to safe parked location (edge may have changed so old position is stale)
             window.setFrame(parkedFrame(panelWidth: panelWidth), display: false)
+        }
+    }
+
+    // MARK: - Pin State Change
+
+    @objc private func handlePinStateChanged() {
+        guard let window else { return }
+        let pinned = ShortcutSettings.shared.isPanelPinned
+        // Allow dragging the panel by its header background when pinned.
+        // NSView.mouseDownCanMoveWindow = false on buttons and scroll views ensures
+        // existing controls remain fully interactive — only background areas drag.
+        window.isMovableByWindowBackground = pinned
+        if !pinned {
+            snapToEdge()
+        }
+    }
+
+    /// Animate the panel back to its configured edge position after unpinning.
+    /// If the panel is already at the edge frame, skips the animation.
+    private func snapToEdge() {
+        guard let window, isShown else { return }
+        let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first!
+        let side = ShortcutSettings.shared.edgeSide
+        let (edgeFrame, _) = panelFrames(visibleFrame: screen.visibleFrame, side: side)
+
+        // Already at the edge — nothing to animate
+        guard window.frame != edgeFrame else { return }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            guard let self else { return }
+            window.setFrame(edgeFrame, display: true)
+            contentHostingView?.layer?.maskedCorners = Self.maskedCorners(for: side)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                window.animator().alphaValue = 1
+            }
         }
     }
 
