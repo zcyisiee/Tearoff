@@ -90,15 +90,24 @@ enum FileStorage {
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
-    /// Reloads a note's content + tags from disk, preserving the in-memory UUID.
-    /// Returns nil if the file can't be read.
-    static func reloadContent(for note: Note) -> (content: String, modifiedAt: Date, tags: [TagColor])? {
+    /// Reloads a note's content + tags from disk after an external change is detected.
+    static func reloadContent(for note: Note) -> (content: String, modifiedAt: Date, savedAt: Date, tags: [TagColor])? {
         let url = rootURL.appendingPathComponent(diskRelativePath(for: note))
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let modifiedAt = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date) ?? Date()
+        let diskDate = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date) ?? Date()
+
+        // Body may still have YAML if this note wasn't migrated yet — strip it.
         let (metadata, body) = parseFrontMatter(text)
-        let tags = parseTagList(metadata["tags"] ?? "")
-        return (content: body, modifiedAt: modifiedAt, tags: tags)
+        let content = metadata.isEmpty ? text : body
+
+        let tags: [TagColor] = if let entry = SidecarStore.shared.noteEntry(for: note.id) {
+            entry.tags.compactMap { TagColor(rawValue: $0) }
+        } else {
+            parseTagList(metadata["tags"] ?? "")
+        }
+        // After an external edit, savedAt should advance to the new disk date so the
+        // watcher doesn't fire again for the same change.
+        return (content: content, modifiedAt: diskDate, savedAt: diskDate, tags: tags)
     }
 
     // MARK: - Asset Directory
@@ -202,7 +211,7 @@ enum FileStorage {
     /// Also renames the co-located asset directory and rewrites image paths in the body.
     /// Returns the new filename and, if image paths were rewritten, the updated content.
     @discardableResult
-    static func writeNote(_ note: Note) throws -> (filename: String, updatedContent: String?) {
+    static func writeNote(_ note: Note) throws -> (filename: String, updatedContent: String?, savedAt: Date) {
         try ensureRootExists()
         if !note.folder.isEmpty {
             try ensureFolderExists(note.folder)
@@ -219,9 +228,9 @@ enum FileStorage {
             Log.storage.info("[FileStorage] filename conflict: \(newFilename, privacy: .public), keeping \(savedFilename, privacy: .public)")
             let currentRelative = note.folder.isEmpty ? savedFilename : "\(note.folder)/\(savedFilename)"
             let currentURL = rootURL.appendingPathComponent(currentRelative)
-            let text = serializeFrontMatter(note: note) + note.content
-            try text.data(using: .utf8)?.write(to: currentURL, options: .atomic)
-            return (filename: savedFilename, updatedContent: nil)
+            try Data(note.content.utf8).write(to: currentURL, options: .atomic)
+            upsertSidecarEntry(for: note, filename: savedFilename)
+            return (filename: savedFilename, updatedContent: nil, savedAt: modificationDate(for: note) ?? Date())
         }
 
         // Rename old file first if title changed (preserves macOS metadata)
@@ -273,18 +282,46 @@ enum FileStorage {
             }
         }
 
-        // Write content to the (possibly renamed) file
+        // Write body only — no YAML header
         let bodyToWrite = updatedContent ?? note.content
-        let text = serializeFrontMatter(note: note) + bodyToWrite
-        try text.data(using: .utf8)?.write(to: newURL, options: .atomic)
+        try Data(bodyToWrite.utf8).write(to: newURL, options: .atomic)
 
-        return (filename: newFilename, updatedContent: updatedContent)
+        // Sync sidecar — use actual disk mtime as savedAt so the external-change
+        // detector sees no diff on the next poll cycle.
+        var noteForSidecar = note
+        if updatedContent != nil { noteForSidecar.content = bodyToWrite }
+        upsertSidecarEntry(for: noteForSidecar, filename: newFilename)
+
+        let savedAt = modificationDate(for: noteForSidecar) ?? Date()
+        return (filename: newFilename, updatedContent: updatedContent, savedAt: savedAt)
+    }
+
+    /// Update (or insert) the sidecar entry for a note after writing its file.
+    private static func upsertSidecarEntry(for note: Note, filename: String) {
+        let relativePath = note.folder.isEmpty ? filename : "\(note.folder)/\(filename)"
+        let savedAt = (try? FileManager.default.attributesOfItem(
+            atPath: rootURL.appendingPathComponent(relativePath).path,
+        ))?[.modificationDate] as? Date ?? Date()
+
+        SidecarStore.shared.upsertNote(
+            SidecarStore.NoteEntry(
+                path: relativePath,
+                createdAt: note.createdAt,
+                modifiedAt: note.modifiedAt,
+                savedAt: savedAt,
+                tags: note.tags.map(\.rawValue),
+            ),
+            for: note.id,
+        )
+        try? SidecarStore.shared.save()
     }
 
     static func deleteNote(_ note: Note) throws {
         let actualFilename = note.savedFilename ?? note.filename
         let relativePath = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
         try FileManager.default.removeItem(at: rootURL.appendingPathComponent(relativePath))
+        SidecarStore.shared.removeNote(id: note.id)
+        try? SidecarStore.shared.save()
     }
 
     /// Returns the full file URL for a note (for Finder reveal).
@@ -314,7 +351,8 @@ enum FileStorage {
         try FileManager.default.moveItem(at: oldURL, to: newURL)
     }
 
-    static func moveNote(_ note: Note, toFolder: String) throws {
+    @discardableResult
+    static func moveNote(_ note: Note, toFolder: String) throws -> Date {
         let actualFilename = note.savedFilename ?? note.filename
         let oldRelative = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
         let oldURL = rootURL.appendingPathComponent(oldRelative)
@@ -322,8 +360,8 @@ enum FileStorage {
         if !toFolder.isEmpty {
             try ensureFolderExists(toFolder)
         }
-        let newFilename = note.filename
-        let newRelative = toFolder.isEmpty ? newFilename : "\(toFolder)/\(newFilename)"
+        // Use actualFilename so notes with a savedFilename different from title keep their name
+        let newRelative = toFolder.isEmpty ? actualFilename : "\(toFolder)/\(actualFilename)"
         let newURL = rootURL.appendingPathComponent(newRelative)
         try FileManager.default.moveItem(at: oldURL, to: newURL)
 
@@ -335,6 +373,16 @@ enum FileStorage {
             try? FileManager.default.moveItem(at: srcAsset, to: dstAsset)
             Log.storage.debug("[Image] moved asset dir for '\(note.title, privacy: .public)' to folder '\(toFolder, privacy: .public)'")
         }
+
+        // Update path and savedAt in sidecar — moveItem advances mtime
+        let movedMtime = (try? FileManager.default.attributesOfItem(atPath: newURL.path))?[.modificationDate] as? Date ?? Date()
+        if var entry = SidecarStore.shared.noteEntry(for: note.id) {
+            entry.path = newRelative
+            entry.savedAt = movedMtime
+            SidecarStore.shared.upsertNote(entry, for: note.id)
+            try? SidecarStore.shared.save()
+        }
+        return movedMtime
     }
 
     // MARK: - Trash I/O (Individual Notes)
@@ -347,14 +395,29 @@ enum FileStorage {
         let trashFilename = "\(note.id.uuidString)_\(sanitizeForFilename(note.title)).md"
         let destURL = trashURL.appendingPathComponent(trashFilename)
 
-        // Write the trashed note (with folder + trashed fields) to .trash/
-        let text = serializeFrontMatter(note: note) + note.content
-        try text.data(using: .utf8)?.write(to: destURL, options: .atomic)
+        // Write body only to .trash/
+        try Data(note.content.utf8).write(to: destURL, options: .atomic)
 
         // Remove original file
         let actualFilename = note.savedFilename ?? note.filename
         let oldRelative = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
         try? FileManager.default.removeItem(at: rootURL.appendingPathComponent(oldRelative))
+
+        // Move sidecar entry from notes → trash
+        SidecarStore.shared.removeNote(id: note.id)
+        let originalPath = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
+        SidecarStore.shared.upsertTrash(
+            SidecarStore.TrashEntry(
+                filename: trashFilename,
+                originalPath: originalPath,
+                trashedAt: note.trashedAt ?? Date(),
+                createdAt: note.createdAt,
+                modifiedAt: note.modifiedAt,
+                tags: note.tags.map(\.rawValue),
+            ),
+            for: note.id,
+        )
+        try? SidecarStore.shared.save()
 
         // Move asset dir to trash: .My-Note/ → .trash/.<UUID>_My-Note/
         let stem = sanitizeForFilename(note.title)
@@ -369,7 +432,7 @@ enum FileStorage {
 
     /// Restore a note from `.trash/` back to its original folder.
     /// Returns the new `savedFilename`.
-    static func restoreNote(_ note: Note) throws -> String {
+    static func restoreNote(_ note: Note) throws -> (filename: String, savedAt: Date) {
         // Recreate original folder if needed
         if !note.folder.isEmpty {
             try ensureFolderExists(note.folder)
@@ -383,8 +446,25 @@ enum FileStorage {
         let destRelative = restored.folder.isEmpty ? newFilename : "\(restored.folder)/\(newFilename)"
         let destURL = rootURL.appendingPathComponent(destRelative)
 
-        let text = serializeFrontMatter(note: restored) + restored.content
-        try text.data(using: .utf8)?.write(to: destURL, options: .atomic)
+        // Write body only
+        try Data(restored.content.utf8).write(to: destURL, options: .atomic)
+
+        // Move sidecar entry from trash → notes
+        SidecarStore.shared.removeTrash(id: note.id)
+        let savedAt = (try? FileManager.default.attributesOfItem(atPath: destURL.path))?[.modificationDate] as? Date ?? Date()
+        SidecarStore.shared.upsertNote(
+            SidecarStore.NoteEntry(
+                path: destRelative,
+                createdAt: note.createdAt,
+                modifiedAt: note.modifiedAt,
+                savedAt: savedAt,
+                tags: note.tags.map(\.rawValue),
+            ),
+            for: note.id,
+        )
+        try? SidecarStore.shared.save()
+
+        let restoredSavedAt = savedAt
 
         // Remove from .trash/
         if let savedFilename = note.savedFilename {
@@ -401,7 +481,7 @@ enum FileStorage {
             }
         }
 
-        return newFilename
+        return (filename: newFilename, savedAt: restoredSavedAt)
     }
 
     /// Delete a trashed note from `.trash/`. Also deletes its asset directory.
@@ -417,6 +497,8 @@ enum FileStorage {
                 Log.storage.debug("[Image] deleted asset dir for permanently deleted note '\(note.title, privacy: .public)'")
             }
         }
+        SidecarStore.shared.removeTrash(id: note.id)
+        try? SidecarStore.shared.save()
     }
 
     /// Load individually trashed notes from `.trash/` (top-level `.md` files only).
@@ -425,7 +507,7 @@ enum FileStorage {
         let contents = try FileManager.default.contentsOfDirectory(
             at: trashURL,
             includingPropertiesForKeys: nil,
-            options: [],
+            options: [.skipsHiddenFiles],
         )
         let notes = contents.compactMap { url -> Note? in
             guard url.pathExtension == "md", !url.hasDirectoryPath else { return nil }
@@ -449,6 +531,30 @@ enum FileStorage {
 
         try FileManager.default.moveItem(at: sourceURL, to: destURL)
 
+        // Move sidecar note entries → trash entries for every note inside this folder.
+        // The trash entry's `filename` is relative to .trash/ (e.g. "UUID_Projects/Note.md")
+        // so `readNote` can find it by full relative path on the next launch.
+        let folderPrefix = name + "/"
+        let noteKeys = SidecarStore.shared.data.notes.compactMap { kv -> String? in
+            kv.value.path.hasPrefix(folderPrefix) ? kv.key : nil
+        }
+        for key in noteKeys {
+            if let entry = SidecarStore.shared.data.notes.removeValue(forKey: key),
+               let noteID = UUID(uuidString: key)
+            {
+                let relativeWithinFolder = String(entry.path.dropFirst(folderPrefix.count))
+                SidecarStore.shared.upsertTrash(SidecarStore.TrashEntry(
+                    filename: "\(trashDirname)/\(relativeWithinFolder)",
+                    originalPath: entry.path,
+                    trashedAt: trashedAt,
+                    createdAt: entry.createdAt,
+                    modifiedAt: entry.modifiedAt,
+                    tags: entry.tags,
+                ), for: noteID)
+            }
+        }
+        try? SidecarStore.shared.save()
+
         // Write .folder.md metadata
         let folderMeta = """
         ---
@@ -457,7 +563,7 @@ enum FileStorage {
         ---
         """
         let metaURL = destURL.appendingPathComponent(".folder.md")
-        try folderMeta.data(using: .utf8)?.write(to: metaURL, options: .atomic)
+        try Data(folderMeta.utf8).write(to: metaURL, options: .atomic)
     }
 
     /// Restore a trashed folder back to its original path.
@@ -476,12 +582,50 @@ enum FileStorage {
 
         let destURL = rootURL.appendingPathComponent(folder.originalPath, isDirectory: true)
         try FileManager.default.moveItem(at: sourceURL, to: destURL)
+
+        // Move sidecar trash entries back to notes for every note in the restored folder
+        let trashPrefix = folder.savedDirname + "/"
+        let trashKeys = SidecarStore.shared.data.trash.compactMap { kv -> String? in
+            kv.value.filename.hasPrefix(trashPrefix) ? kv.key : nil
+        }
+        for key in trashKeys {
+            if let entry = SidecarStore.shared.data.trash.removeValue(forKey: key),
+               let noteID = UUID(uuidString: key)
+            {
+                // Read actual mtime after moveItem so savedAt matches disk reality.
+                // moveItem advances mtime to now; using entry.modifiedAt (the old value)
+                // would make checkForExternalChanges see file mtime > savedAt immediately.
+                let noteURL = rootURL.appendingPathComponent(entry.originalPath)
+                let actualMtime = (try? FileManager.default.attributesOfItem(
+                    atPath: noteURL.path,
+                ))?[.modificationDate] as? Date ?? entry.modifiedAt
+
+                SidecarStore.shared.upsertNote(SidecarStore.NoteEntry(
+                    path: entry.originalPath,
+                    createdAt: entry.createdAt,
+                    modifiedAt: entry.modifiedAt,
+                    savedAt: actualMtime,
+                    tags: entry.tags,
+                ), for: noteID)
+            }
+        }
+        try? SidecarStore.shared.save()
     }
 
     /// Permanently delete a trashed folder from `.trash/`.
     static func deleteTrashedFolder(_ folder: TrashedFolder) throws {
         let url = trashURL.appendingPathComponent(folder.savedDirname, isDirectory: true)
         try FileManager.default.removeItem(at: url)
+
+        // Remove sidecar trash entries for every note inside this folder
+        let trashPrefix = folder.savedDirname + "/"
+        let keysToRemove = SidecarStore.shared.data.trash.compactMap { kv -> String? in
+            kv.value.filename.hasPrefix(trashPrefix) ? kv.key : nil
+        }
+        for key in keysToRemove {
+            SidecarStore.shared.data.trash.removeValue(forKey: key)
+        }
+        if !keysToRemove.isEmpty { try? SidecarStore.shared.save() }
     }
 
     /// Load trashed folders from `.trash/` (directories with `.folder.md` metadata).
@@ -583,52 +727,150 @@ enum FileStorage {
     }
 
     private static func readNote(at url: URL, folder: String) -> Note? {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8)
-        else { return nil }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let filename = url.lastPathComponent
 
+        // Determine relative path for sidecar lookup.
+        // Trash files live under trashURL, active notes under rootURL.
+        let isTrash = url.path.hasPrefix(trashURL.path)
+        // Full path relative to its storage root (.trash/ or rootURL) so sidecar
+        // lookups work for both bare files ("UUID_Title.md") and folder-nested files
+        // ("UUID_Projects/SubFolder/Note.md").
+        let relativePath: String
+        if isTrash {
+            let prefix = trashURL.path
+            relativePath = url.path.hasPrefix(prefix)
+                ? String(url.path.dropFirst(prefix.count + 1))
+                : filename
+        } else {
+            let prefix = rootURL.path
+            relativePath = url.path.hasPrefix(prefix)
+                ? String(url.path.dropFirst(prefix.count + 1))
+                : filename
+        }
+
+        // --- Sidecar path (preferred) ---
+        if isTrash {
+            if let (id, entry) = SidecarStore.shared.trashEntry(forFilename: relativePath) {
+                let (_, body) = parseFrontMatter(text) // strip any residual YAML
+                let content = text.hasPrefix("---") ? body : text
+                let tags = entry.tags.compactMap { TagColor(rawValue: $0) }
+                let folder = (entry.originalPath as NSString).deletingLastPathComponent
+                let resolvedFolder = folder == "." || folder.isEmpty ? "" : folder
+                return Note(
+                    id: id,
+                    title: extractTitle(from: content),
+                    content: content,
+                    createdAt: entry.createdAt,
+                    modifiedAt: entry.modifiedAt,
+                    savedAt: entry.modifiedAt,
+                    folder: resolvedFolder,
+                    tags: tags,
+                    trashedAt: entry.trashedAt,
+                    savedFilename: filename,
+                )
+            }
+        } else {
+            if let (id, entry) = SidecarStore.shared.noteEntry(forPath: relativePath) {
+                let (_, body) = parseFrontMatter(text)
+                let content = text.hasPrefix("---") ? body : text
+                let tags = entry.tags.compactMap { TagColor(rawValue: $0) }
+                return Note(
+                    id: id,
+                    title: extractTitle(from: content),
+                    content: content,
+                    createdAt: entry.createdAt,
+                    modifiedAt: entry.modifiedAt,
+                    savedAt: entry.savedAt,
+                    folder: folder,
+                    tags: tags,
+                    savedFilename: filename,
+                )
+            }
+        }
+
+        // --- YAML fallback (unmigrated file or sidecar entry missing) ---
         let (metadata, body) = parseFrontMatter(text)
+        if !metadata.isEmpty {
+            let id = metadata["id"].flatMap { UUID(uuidString: $0) } ?? UUID()
+            let title = metadata["title"] ?? extractTitle(from: body)
+            let created = metadata["created"].flatMap { dateFormatter.date(from: $0) } ?? Date()
+            let modified = metadata["modified"].flatMap { dateFormatter.date(from: $0) } ?? Date()
+            let trashed = metadata["trashed"].flatMap { dateFormatter.date(from: $0) }
+            let tags = parseTagList(metadata["tags"] ?? "")
+            let resolvedFolder = metadata["folder"] ?? folder
 
-        if metadata.isEmpty {
-            // External file — no YAML front matter. Inject it using file system dates.
-            let resourceValues = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-            let created = resourceValues?.creationDate ?? Date()
-            let modified = resourceValues?.contentModificationDate ?? Date()
-            let title = url.deletingPathExtension().lastPathComponent
+            // Inject into sidecar so future reads don't need to parse YAML
+            if isTrash {
+                let originalPath = resolvedFolder.isEmpty ? "\(title).md" : "\(resolvedFolder)/\(title).md"
+                SidecarStore.shared.upsertTrash(SidecarStore.TrashEntry(
+                    filename: relativePath,
+                    originalPath: originalPath,
+                    trashedAt: trashed ?? modified,
+                    createdAt: created,
+                    modifiedAt: modified,
+                    tags: tags.map(\.rawValue),
+                ), for: id)
+            } else {
+                SidecarStore.shared.upsertNote(SidecarStore.NoteEntry(
+                    path: relativePath,
+                    createdAt: created,
+                    modifiedAt: modified,
+                    savedAt: modified,
+                    tags: tags.map(\.rawValue),
+                ), for: id)
+            }
+            try? SidecarStore.shared.save()
 
-            let note = Note(
-                id: UUID(),
+            return Note(
+                id: id,
                 title: title,
                 content: body,
                 createdAt: created,
                 modifiedAt: modified,
-                folder: folder,
-                savedFilename: url.lastPathComponent,
+                savedAt: modified,
+                folder: resolvedFolder,
+                tags: tags,
+                trashedAt: trashed,
+                savedFilename: filename,
             )
-            let newText = serializeFrontMatter(note: note) + body
-            try? newText.data(using: .utf8)?.write(to: url, options: .atomic)
-            return note
         }
 
-        let id = metadata["id"].flatMap { UUID(uuidString: $0) } ?? UUID()
-        let title = metadata["title"] ?? extractTitle(from: body)
-        let created = metadata["created"].flatMap { dateFormatter.date(from: $0) } ?? Date()
-        let modified = metadata["modified"].flatMap { dateFormatter.date(from: $0) } ?? Date()
-        let trashed = metadata["trashed"].flatMap { dateFormatter.date(from: $0) }
-        let tags = parseTagList(metadata["tags"] ?? "")
-        // For trashed notes in .trash/, folder is stored in YAML; otherwise use the directory path.
-        let resolvedFolder = metadata["folder"] ?? folder
+        // --- External file: no sidecar entry, no YAML ---
+        let resourceValues = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        let created = resourceValues?.creationDate ?? Date()
+        let modified = resourceValues?.contentModificationDate ?? Date()
+        let id = UUID()
+
+        if isTrash {
+            SidecarStore.shared.upsertTrash(SidecarStore.TrashEntry(
+                filename: relativePath,
+                originalPath: "\(folder.isEmpty ? "" : folder + "/")\(filename)",
+                trashedAt: modified,
+                createdAt: created,
+                modifiedAt: modified,
+                tags: [],
+            ), for: id)
+        } else {
+            SidecarStore.shared.upsertNote(SidecarStore.NoteEntry(
+                path: relativePath,
+                createdAt: created,
+                modifiedAt: modified,
+                savedAt: modified,
+                tags: [],
+            ), for: id)
+        }
+        try? SidecarStore.shared.save()
 
         return Note(
             id: id,
-            title: title,
-            content: body,
+            title: extractTitle(from: text),
+            content: text,
             createdAt: created,
             modifiedAt: modified,
-            folder: resolvedFolder,
-            tags: tags,
-            trashedAt: trashed,
-            savedFilename: url.lastPathComponent,
+            savedAt: modified,
+            folder: folder,
+            savedFilename: filename,
         )
     }
 
@@ -739,15 +981,20 @@ enum FileStorage {
                     note.content = lines.joined(separator: "\n")
                 }
                 let newURL = rootURL.appendingPathComponent(note.relativePath)
-                let text = serializeFrontMatter(note: note) + note.content
-                try text.data(using: .utf8)?.write(to: newURL, options: .atomic)
+                try Data(note.content.utf8).write(to: newURL, options: .atomic)
                 if oldURL != newURL {
                     try? FileManager.default.removeItem(at: oldURL)
                 }
                 note.savedFilename = note.filename
+                // Update sidecar path for the renamed note
+                if var entry = SidecarStore.shared.noteEntry(for: note.id) {
+                    entry.path = note.relativePath
+                    SidecarStore.shared.upsertNote(entry, for: note.id)
+                }
                 result[duplicateIndex] = note
             }
         }
+        try? SidecarStore.shared.save()
         return result
     }
 

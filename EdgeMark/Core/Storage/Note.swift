@@ -7,6 +7,10 @@ struct Note: Identifiable {
     var content: String
     var createdAt: Date
     var modifiedAt: Date
+    /// When EdgeMark last wrote this file to disk. Used as the external-change
+    /// detection sentinel — separate from `modifiedAt` so auto-saves without
+    /// content changes don't advance the user-visible timestamp.
+    var savedAt: Date
     var folder: String
 
     /// Color tags assigned to this note (Finder-style multi-tag).
@@ -46,6 +50,7 @@ struct Note: Identifiable {
         content: String = "",
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
+        savedAt: Date = Date(),
         folder: String = "",
         tags: [TagColor] = [],
         trashedAt: Date? = nil,
@@ -56,6 +61,7 @@ struct Note: Identifiable {
         self.content = content
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
+        self.savedAt = savedAt
         self.folder = folder
         self.tags = tags
         self.trashedAt = trashedAt

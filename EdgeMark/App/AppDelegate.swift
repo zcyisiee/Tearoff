@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ShortcutSettings.shared.applyAppearance()
         setupMenuBar()
         panelController = SidePanelController()
+        SidecarMigration.runIfNeeded()
+        try? SidecarStore.shared.load()
         panelController?.noteStore.loadFromDisk()
         ShortcutManager.shared.setup(panelController: panelController!)
 

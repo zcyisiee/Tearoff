@@ -45,6 +45,8 @@ final class NoteStore {
     struct PendingExternalChange {
         let noteID: UUID
         let diskContent: String
+        let diskDate: Date
+        let diskTags: [TagColor]
     }
 
     var pendingExternalChange: PendingExternalChange?
@@ -284,6 +286,7 @@ final class NoteStore {
                         content: note.content,
                         createdAt: note.createdAt,
                         modifiedAt: note.modifiedAt,
+                        savedAt: note.savedAt,
                         folder: note.folder,
                         trashedAt: note.trashedAt,
                         savedFilename: note.savedFilename,
@@ -322,8 +325,10 @@ final class NoteStore {
                 Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — file not found on disk")
                 continue
             }
-            let inMemDate = note.modifiedAt
-            let diff = diskDate.timeIntervalSince(inMemDate)
+            // Compare file mtime against savedAt (last time EdgeMark wrote this file).
+            // Using savedAt instead of modifiedAt prevents false positives from auto-saves
+            // that write the file without changing content.
+            let diff = diskDate.timeIntervalSince(note.savedAt)
             let t = note.title
             Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — diff: \(String(format: "%.3f", diff))s")
             guard diff > 1 else { continue }
@@ -335,23 +340,32 @@ final class NoteStore {
             guard let reloaded = FileStorage.reloadContent(for: notes[i]) else { continue }
             let diskContent = reloaded.content
             let diskModifiedAt = reloaded.modifiedAt
+            let diskSavedAt = reloaded.savedAt
             let diskTags = reloaded.tags
 
             let title = notes[i].title
             if isOpen, isDirty {
                 // Both EdgeMark and external have changes — prompt user
                 Log.storage.info("[NoteStore] external conflict on open note '\(title, privacy: .public)'")
-                pendingExternalChange = PendingExternalChange(noteID: noteID, diskContent: diskContent)
+                pendingExternalChange = PendingExternalChange(noteID: noteID, diskContent: diskContent, diskDate: diskDate, diskTags: diskTags)
             } else {
                 // Safe to auto-reload: note not open, or open but no EdgeMark edits
                 Log.storage.info("[NoteStore] auto-syncing '\(title, privacy: .public)' from external change")
                 notes[i].content = diskContent
                 notes[i].modifiedAt = diskModifiedAt
+                notes[i].savedAt = diskSavedAt
                 notes[i].tags = diskTags
                 dirtyNoteIDs.remove(noteID)
+                // Persist updated savedAt to sidecar so the watcher doesn't re-fire on next launch
+                if var entry = SidecarStore.shared.noteEntry(for: noteID) {
+                    entry.savedAt = diskSavedAt
+                    entry.modifiedAt = diskModifiedAt
+                    entry.tags = diskTags.map(\.rawValue)
+                    SidecarStore.shared.upsertNote(entry, for: noteID)
+                    try? SidecarStore.shared.save()
+                }
                 if isOpen {
                     selectedNote = notes[i]
-                    // Push content directly to the editor — don't rely on SwiftUI update cycle
                     onNeedEditorReload?(diskContent)
                 }
                 recomputeAllUsedTags()
@@ -367,7 +381,19 @@ final class NoteStore {
            let i = notes.firstIndex(where: { $0.id == conflict.noteID })
         {
             notes[i].content = conflict.diskContent
+            notes[i].modifiedAt = conflict.diskDate
+            notes[i].savedAt = conflict.diskDate
+            notes[i].tags = conflict.diskTags
             dirtyNoteIDs.remove(conflict.noteID)
+            // Persist updated savedAt + tags so the watcher doesn't re-fire on next launch
+            if var entry = SidecarStore.shared.noteEntry(for: conflict.noteID) {
+                entry.savedAt = conflict.diskDate
+                entry.modifiedAt = conflict.diskDate
+                entry.tags = conflict.diskTags.map(\.rawValue)
+                SidecarStore.shared.upsertNote(entry, for: conflict.noteID)
+                try? SidecarStore.shared.save()
+            }
+            recomputeAllUsedTags()
             if selectedNote?.id == conflict.noteID {
                 selectedNote = notes[i]
                 onNeedEditorReload?(conflict.diskContent)
@@ -408,6 +434,7 @@ final class NoteStore {
         do {
             let result = try FileStorage.writeNote(note)
             note.savedFilename = result.filename
+            note.savedAt = result.savedAt
         } catch {
             Log.storage.error("[NoteStore] writeNote failed — \(error)")
         }
@@ -555,9 +582,10 @@ final class NoteStore {
     private func performMoveNote(at index: Int, to folder: String) {
         let note = notes[index]
         do {
-            try FileStorage.moveNote(note, toFolder: folder)
+            let movedSavedAt = try FileStorage.moveNote(note, toFolder: folder)
             notes[index].folder = folder
-            notes[index].savedFilename = notes[index].filename
+            notes[index].savedFilename = note.savedFilename ?? note.filename
+            notes[index].savedAt = movedSavedAt
             refreshFolders()
         } catch {
             Log.storage.error("[NoteStore] moveNote failed — \(error)")
@@ -651,8 +679,9 @@ final class NoteStore {
 
         // Move file from .trash/ back to original folder
         do {
-            let newFilename = try FileStorage.restoreNote(trashedNotes[index])
-            trashedNotes[index].savedFilename = newFilename
+            let result = try FileStorage.restoreNote(trashedNotes[index])
+            trashedNotes[index].savedFilename = result.filename
+            trashedNotes[index].savedAt = result.savedAt
         } catch {
             Log.storage.error("[NoteStore] restoreNote failed — \(error)")
         }
@@ -670,8 +699,14 @@ final class NoteStore {
             return
         }
 
-        // Reload notes from the restored folder
-        let restoredNotes = folder.notes
+        // Sync savedAt from the sidecar — restoreFolder wrote the actual post-move
+        // file mtimes there, so in-memory notes match what checkForExternalChanges sees.
+        var restoredNotes = folder.notes
+        for i in restoredNotes.indices {
+            if let entry = SidecarStore.shared.noteEntry(for: restoredNotes[i].id) {
+                restoredNotes[i].savedAt = entry.savedAt
+            }
+        }
         notes.append(contentsOf: restoredNotes)
         trashedFolders.removeAll { $0.id == folder.id }
         refreshFolders()
@@ -786,6 +821,7 @@ final class NoteStore {
                 if path.hasPrefix(oldPrefix) { return newFullPath + path.dropFirst(oldName.count) }
                 return path
             })
+            updateSidecarPaths(for: notes)
             refreshFolders()
         } catch {
             Log.storage.error("[NoteStore] renameFolder failed — \(error)")
@@ -877,6 +913,7 @@ final class NoteStore {
                 if path.hasPrefix(oldPrefix) { return newFullPath + "/" + path.dropFirst(oldPrefix.count) }
                 return path
             })
+            updateSidecarPaths(for: notes)
             refreshFolders()
         } catch {
             Log.storage.error("[NoteStore] moveFolder failed — \(error)")
@@ -900,8 +937,7 @@ final class NoteStore {
             do {
                 let result = try FileStorage.writeNote(notes[index])
                 notes[index].savedFilename = result.filename
-                // If a rename rewrote image paths in the body, sync back to in-memory state
-                // and reload the editor so the JS sees the updated relative paths immediately.
+                notes[index].savedAt = result.savedAt
                 if let updated = result.updatedContent {
                     notes[index].content = updated
                     if selectedNote?.id == noteID {
@@ -911,14 +947,9 @@ final class NoteStore {
                         onNeedEditorReload?(updated)
                     }
                 }
-                // Sync modifiedAt to actual filesystem date so external change detection
-                // doesn't false-positive (disk write happens a few ms after Date() is captured)
-                if let diskDate = FileStorage.modificationDate(for: notes[index]) {
-                    notes[index].modifiedAt = diskDate
-                }
                 if selectedNote?.id == noteID {
                     selectedNote?.savedFilename = result.filename
-                    selectedNote?.modifiedAt = notes[index].modifiedAt
+                    selectedNote?.savedAt = result.savedAt
                 }
                 // Clean up orphaned images (deleted from body but file still on disk)
                 FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
@@ -948,6 +979,22 @@ final class NoteStore {
         }
         // Folder/note membership changed → tag set may have too.
         recomputeAllUsedTags()
+    }
+
+    /// Sync sidecar NoteEntry.path for all notes whose current in-memory path
+    /// differs from what is stored. Called after folder rename/move.
+    private func updateSidecarPaths(for notes: [Note]) {
+        var changed = false
+        for note in notes {
+            let actualFilename = note.savedFilename ?? note.filename
+            let expectedPath = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
+            if var entry = SidecarStore.shared.noteEntry(for: note.id), entry.path != expectedPath {
+                entry.path = expectedPath
+                SidecarStore.shared.upsertNote(entry, for: note.id)
+                changed = true
+            }
+        }
+        if changed { try? SidecarStore.shared.save() }
     }
 
     private static func extractTitle(from content: String) -> String {
