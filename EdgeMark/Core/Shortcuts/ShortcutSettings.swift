@@ -100,7 +100,6 @@ final class ShortcutSettings {
     /// global toggle shortcut. Useful when copy-pasting back and forth with another app.
     var isPanelPinned: Bool {
         didSet {
-            UserDefaults.standard.set(isPanelPinned, forKey: isPanelPinnedKey)
             NotificationCenter.default.post(name: .panelPinStateChanged, object: nil)
         }
     }
@@ -212,7 +211,7 @@ final class ShortcutSettings {
         edgeActivationEnabled = UserDefaults.standard.object(forKey: edgeActivationEnabledKey) as? Bool ?? true
         excludeCorners = UserDefaults.standard.object(forKey: excludeCornersKey) as? Bool ?? true
         hideOnClickOutside = UserDefaults.standard.object(forKey: hideOnClickOutsideKey) as? Bool ?? true
-        isPanelPinned = UserDefaults.standard.object(forKey: isPanelPinnedKey) as? Bool ?? false
+        isPanelPinned = false
         swipeToNavigateEnabled = UserDefaults.standard.object(forKey: swipeToNavigateEnabledKey) as? Bool ?? true
         editorSwipeToNavigateEnabled = UserDefaults.standard.object(forKey: editorSwipeToNavigateEnabledKey) as? Bool ?? true
         swipeGestureSensitivity = UserDefaults.standard.object(forKey: swipeGestureSensitivityKey) as? Double ?? 0.5
