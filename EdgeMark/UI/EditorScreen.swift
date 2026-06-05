@@ -5,9 +5,8 @@ struct EditorScreen: View {
     @Environment(NoteStore.self) var noteStore
     @Environment(AppSettings.self) var appSettings
     @Environment(L10n.self) var l10n
-    @Environment(\.colorScheme) private var colorScheme
     @State private var showDeleteConfirm = false
-    @State private var editorCoordinator: MarkdownEditorView.Coordinator?
+    @State private var pendingEditorReload: String? = nil
 
     private var backLabel: String {
         noteStore.selectedFolder?.name ?? l10n["common.home"]
@@ -29,20 +28,18 @@ struct EditorScreen: View {
                     noteTitle: note.title,
                     noteFolder: note.folder,
                     initialContent: note.content,
-                    colorScheme: colorScheme,
                     onContentChanged: { newContent in
                         noteStore.updateContent(for: note.id, content: newContent)
                     },
-                    onCoordinatorReady: { coordinator in
-                        editorCoordinator = coordinator
-                        // Wire external sync reload directly to coordinator
-                        noteStore.onNeedEditorReload = { [weak coordinator] content in
-                            coordinator?.setContent(content)
-                        }
-                    },
+                    pendingReload: $pendingEditorReload,
                     onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },
                     onNavigatePrevious: { noteStore.navigateToPreviousNote(sortedBy: appSettings) },
                 )
+                .onAppear {
+                    noteStore.onNeedEditorReload = { content in
+                        pendingEditorReload = content
+                    }
+                }
             }
         }
         .alert(l10n["alert.deleteNote.title"], isPresented: $showDeleteConfirm) {
@@ -101,7 +98,7 @@ struct EditorScreen: View {
 
                     PinButton()
 
-                    CopyMenuButton(note: note, coordinator: editorCoordinator)
+                    CopyMenuButton(note: note)
 
                     DeleteIconButton {
                         showDeleteConfirm = true
@@ -136,7 +133,6 @@ struct EditorScreen: View {
 /// If text is selected in the editor, copies the selection; otherwise copies the whole document.
 private struct CopyMenuButton: View {
     let note: Note
-    let coordinator: MarkdownEditorView.Coordinator?
 
     @State private var isHovered = false
 
@@ -144,32 +140,26 @@ private struct CopyMenuButton: View {
         let l10n = L10n.shared
         Menu {
             Button(l10n["common.copyPlainText"]) {
-                Task {
-                    let selected = await coordinator?.getSelectedText() ?? ""
-                    let source = selected.isEmpty ? note.content : selected
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(Note.plainText(from: source), forType: .string)
-                }
+                let selected = Self.getSelectedText()
+                let source = selected.isEmpty ? note.content : selected
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(Note.plainText(from: source), forType: .string)
             }
             Button(l10n["common.copyMarkdown"]) {
-                Task {
-                    let selected = await coordinator?.getSelectedText() ?? ""
-                    let text = selected.isEmpty ? note.content : selected
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
+                let selected = Self.getSelectedText()
+                let text = selected.isEmpty ? note.content : selected
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
             }
             Button(l10n["common.copyRTF"]) {
-                Task {
-                    let selected = await coordinator?.getSelectedText() ?? ""
-                    let source = selected.isEmpty ? note.content : selected
-                    let pb = NSPasteboard.general
-                    pb.clearContents()
-                    if let rtf = Note.rtfData(from: source) {
-                        pb.setData(rtf, forType: .rtf)
-                    } else {
-                        pb.setString(Note.plainText(from: source), forType: .string)
-                    }
+                let selected = Self.getSelectedText()
+                let source = selected.isEmpty ? note.content : selected
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                if let rtf = Note.rtfData(from: source) {
+                    pb.setData(rtf, forType: .rtf)
+                } else {
+                    pb.setString(Note.plainText(from: source), forType: .string)
                 }
             }
         } label: {
@@ -192,6 +182,13 @@ private struct CopyMenuButton: View {
                 isHovered = hovering
             }
         }
+    }
+
+    private static func getSelectedText() -> String {
+        guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView,
+              tv.selectedRange().length > 0
+        else { return "" }
+        return (tv.string as NSString).substring(with: tv.selectedRange())
     }
 }
 

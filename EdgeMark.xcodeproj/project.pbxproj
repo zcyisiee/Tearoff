@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		F8F898672FD1E02E00AD68BF /* MarkdownEngine in Frameworks */ = {isa = PBXBuildFile; productRef = F8F898662FD1E02E00AD68BF /* MarkdownEngine */; };
+		F8F898692FD1E02E00AD68BF /* MarkdownEngineCodeBlocks in Frameworks */ = {isa = PBXBuildFile; productRef = F8F898682FD1E02E00AD68BF /* MarkdownEngineCodeBlocks */; };
+		F8F8986B2FD1E02E00AD68BF /* MarkdownEngineLatex in Frameworks */ = {isa = PBXBuildFile; productRef = F8F8986A2FD1E02E00AD68BF /* MarkdownEngineLatex */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		F83FB9052F4B45D5007775F9 /* EdgeMark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EdgeMark.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +29,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8F898692FD1E02E00AD68BF /* MarkdownEngineCodeBlocks in Frameworks */,
+				F8F898672FD1E02E00AD68BF /* MarkdownEngine in Frameworks */,
+				F8F8986B2FD1E02E00AD68BF /* MarkdownEngineLatex in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -52,7 +61,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F83FB9262F4B45D6007775F9 /* Build configuration list for PBXNativeTarget "EdgeMark" */;
 			buildPhases = (
-				565E03C16F094FB782487234 /* Build JS Editor */,
 				F83FB9F72F4C4FF3007775F9 /* ShellScript */,
 				F83FB9012F4B45D5007775F9 /* Sources */,
 				F83FB9022F4B45D5007775F9 /* Frameworks */,
@@ -67,6 +75,9 @@
 			);
 			name = EdgeMark;
 			packageProductDependencies = (
+				F8F898662FD1E02E00AD68BF /* MarkdownEngine */,
+				F8F898682FD1E02E00AD68BF /* MarkdownEngineCodeBlocks */,
+				F8F8986A2FD1E02E00AD68BF /* MarkdownEngineLatex */,
 			);
 			productName = EdgeMark;
 			productReference = F83FB9052F4B45D5007775F9 /* EdgeMark.app */;
@@ -96,6 +107,9 @@
 			);
 			mainGroup = F83FB8FC2F4B45D5007775F9;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				F8F898652FD1E02E00AD68BF /* XCRemoteSwiftPackageReference "swift-markdown-engine" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F83FB9062F4B45D5007775F9 /* Products */;
 			projectDirPath = "";
@@ -117,28 +131,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		565E03C16F094FB782487234 /* Build JS Editor */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/Resources/Editor/src/editor.js",
-				"$(SRCROOT)/Resources/Editor/src/wysiwyg.js",
-				"$(SRCROOT)/Resources/Editor/src/styles.css",
-			);
-			name = "Build JS Editor";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SRCROOT)/EdgeMark/Resources/Editor/editor-bundle.js",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# Xcode build phases run with a minimal PATH — extend it to find npm\n# from common install locations (Homebrew, /usr/local, nvm).\nNVM_NODE_BIN=\"\"\nif [ -d \"$HOME/.nvm/versions/node\" ]; then\n    NVM_LATEST=$(ls \"$HOME/.nvm/versions/node\" 2>/dev/null | tail -1)\n    [ -n \"$NVM_LATEST\" ] && NVM_NODE_BIN=\"$HOME/.nvm/versions/node/$NVM_LATEST/bin\"\nfi\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$NVM_NODE_BIN:$PATH\"\n\ncd \"$SRCROOT/Resources/Editor\"\nif ! command -v npm >/dev/null 2>&1; then\n    echo \"warning: npm not found, skipping JS editor build\"\n    exit 0\nfi\nif [ ! -d node_modules ]; then\n    npm install --silent\nfi\nnpm run build\n";
-		};
 		F83FB9F72F4C4FF3007775F9 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -380,6 +372,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F8F898652FD1E02E00AD68BF /* XCRemoteSwiftPackageReference "swift-markdown-engine" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nodes-app/swift-markdown-engine";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F8F898662FD1E02E00AD68BF /* MarkdownEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F8F898652FD1E02E00AD68BF /* XCRemoteSwiftPackageReference "swift-markdown-engine" */;
+			productName = MarkdownEngine;
+		};
+		F8F898682FD1E02E00AD68BF /* MarkdownEngineCodeBlocks */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F8F898652FD1E02E00AD68BF /* XCRemoteSwiftPackageReference "swift-markdown-engine" */;
+			productName = MarkdownEngineCodeBlocks;
+		};
+		F8F8986A2FD1E02E00AD68BF /* MarkdownEngineLatex */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F8F898652FD1E02E00AD68BF /* XCRemoteSwiftPackageReference "swift-markdown-engine" */;
+			productName = MarkdownEngineLatex;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F83FB8FD2F4B45D5007775F9 /* Project object */;
 }
