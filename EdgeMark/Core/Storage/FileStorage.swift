@@ -117,8 +117,9 @@ enum FileStorage {
     }
 
     /// Save image data to the note's asset directory.
-    /// Returns a relative markdown reference (portable) and absolute file:// src (for WKWebView).
-    static func saveImage(data: Data, ext: String, forNote note: Note) throws -> (markdown: String, src: String) {
+    /// Returns both the on-disk storage markdown `![](path)` and the embed syntax `![[path]]`
+    /// used by the editor's display layer.
+    static func saveImage(data: Data, ext: String, forNote note: Note) throws -> (markdown: String, embedMarkdown: String, src: String) {
         let stem = sanitizeForFilename(note.title)
         let assetDir = assetDirURL(stem: stem, folder: note.folder)
         try FileManager.default.createDirectory(at: assetDir, withIntermediateDirectories: true)
@@ -126,9 +127,10 @@ enum FileStorage {
         let destURL = assetDir.appendingPathComponent(imageFilename)
         try data.write(to: destURL, options: .atomic)
         Log.storage.info("[Image] saved \(imageFilename, privacy: .public) (\(data.count) bytes) for '\(note.title, privacy: .public)'")
-        let markdown = "![](." + stem + "/" + imageFilename + ")"
+        let path = "." + stem + "/" + imageFilename
         return (
-            markdown: markdown,
+            markdown: "![](\(path))",
+            embedMarkdown: "![[\(path)]]",
             src: destURL.absoluteString,
         )
     }
