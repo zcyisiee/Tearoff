@@ -22,7 +22,8 @@ graph TD
 
     SUI -->|"observe"| NS["NoteStore (@Observable)"]
     NS -->|"read / write"| FS["FileStorage"]
-    FS -->|".md + .NoteTitle/ images"| Disk[("~/Documents/EdgeMark/")]
+    FS -->|".md files"| Disk[("~/Documents/EdgeMark/")]
+    FS -->|"metadata"| SC["SidecarStore<br/>(.edgemark/meta.json)"]
 
     SUI -->|"observe"| AS["AppSettings (@Observable)"]
     AS -->|"persist"| UD["UserDefaults"]
@@ -31,13 +32,9 @@ graph TD
     US -->|"check · download · install"| UC["UpdateChecker / Installer"]
     UC -->|"GitHub API"| GH["GitHub Releases"]
 
-    SUI -->|"embed"| ED["MarkdownEditorView<br/>(WKWebView)"]
-    ED -->|"evaluateJavaScript"| CM["CodeMirror 6<br/>(editor.js · wysiwyg.js)"]
-    CM -->|"postMessage"| ED
-    ED -->|"contentChanged"| NS
-    ED -->|"saveImage"| FS
-    ED -->|"doc text"| SC["NSSpellChecker"]
-    SC -->|"error ranges"| ED
+    SUI -->|"embed"| ED["MarkdownEditorView<br/>(NativeTextViewWrapper)"]
+    ED -->|"@Binding text"| NS
+    ED -->|"onPasteImage / drag"| FS
 
     NS -.->|"log"| Log["OSLog"]
     ED -.->|"log"| Log
@@ -51,25 +48,31 @@ graph TD
 EdgeMark/
 ├── App/                            # Entry point + global state
 │   ├── EdgeMarkApp.swift           #   @main, menu bar utility (LSUIElement)
-│   ├── AppDelegate.swift           #   Lifecycle, storage migration, shortcut setup
+│   ├── AppDelegate.swift           #   Lifecycle, sidecar migration, shortcut setup
 │   └── ContentView.swift           #   Navigation shell (folders → notes → editor)
 │
 ├── Core/                           # Business logic — no SwiftUI imports
 │   ├── Editor/
-│   │   ├── MarkdownEditorView.swift      # WKWebView ↔ CodeMirror 6 bridge
-│   │   ├── ReadOnlyMarkdownView.swift    # Read-only Markdown preview (trash)
-│   │   ├── SlashCommandHandler.swift     # /h1, /todo, /code, /quote routing
-│   │   └── SlashCommandPopup.swift       # Floating autocomplete popup
+│   │   ├── MarkdownEditorView.swift      # SwiftUI wrapper around NativeTextViewWrapper
+│   │   │                                #   (swift-markdown-engine). Heading strip,
+│   │   │                                #   debounced save, image conversion layer,
+│   │   │                                #   slash command integration.
+│   │   ├── ReadOnlyMarkdownView.swift    # Non-editable preview (trash)
+│   │   ├── SlashCommandHandler.swift     # /h1, /todo, /code, /quote — NSTextView insertion
+│   │   ├── SlashCommandPopup.swift       # Floating autocomplete panel
+│   │   └── ImageDropHandler.swift        # Transparent NSView overlay for image drag-and-drop
 │   ├── Settings/
 │   │   └── AppSettings.swift       #   @Observable — sort order, date format, prefs
 │   ├── Shortcuts/
 │   │   ├── ShortcutManager.swift   #   Carbon RegisterEventHotKey global shortcut
-│   │   ├── ShortcutSettings.swift  #   UserDefaults persistence for settings
+│   │   ├── ShortcutSettings.swift  #   6 customizable local shortcuts + persistence
 │   │   └── KeyCodeTranslator.swift #   Virtual key code → display string mapping
 │   ├── Storage/
 │   │   ├── NoteStore.swift         #   @Observable — note CRUD, trash, folders, tag filter
-│   │   ├── FileStorage.swift       #   Plain .md files with YAML front matter
-│   │   ├── Note.swift              #   Note model (id, title, body, timestamps, tags)
+│   │   ├── FileStorage.swift       #   Plain .md file I/O (no YAML); asset dir management
+│   │   ├── SidecarStore.swift      #   In-memory .edgemark/meta.json store + persistence
+│   │   ├── SidecarMigration.swift  #   One-time migration: strips YAML, restores timestamps
+│   │   ├── Note.swift              #   Note model (id, title, body, timestamps, tags, savedAt)
 │   │   ├── Folder.swift            #   Folder model
 │   │   ├── TagColor.swift          #   Finder-style 7-color tag palette
 │   │   └── TrashedFolder.swift     #   Trashed folder with expiry metadata
@@ -105,7 +108,7 @@ EdgeMark/
 │   │   ├── NoteListMenus.swift     #   Note/folder context menu builders (incl. Tags submenu)
 │   │   ├── PageLayout.swift        #   Navigation page chrome (header + content + footer)
 │   │   ├── PinButton.swift         #   Toggle for ShortcutSettings.isPanelPinned
-│   │   ├── ShortcutRecorderView.swift   # Key capture field for global shortcut setting
+│   │   ├── ShortcutRecorderView.swift   # Key capture field for shortcut settings
 │   │   ├── SwipeDetectorView.swift #   NSView wrapper for two-finger swipe gestures
 │   │   ├── TagDotsView.swift       #   Inline colored dots for note rows
 │   │   ├── TagFilterBar.swift      #   Search-context tag filter strip
@@ -115,7 +118,7 @@ EdgeMark/
 │       ├── GeneralSettingsTab.swift #   Appearance (incl. panel tint), editor font, language, storage
 │       ├── BehaviorSettingsTab.swift#   Panel position, edge activation, auto-hide
 │       ├── TagsSettingsTab.swift   #   Rename color tag labels
-│       ├── KeyboardSettingsTab.swift#   Shortcut recorder + local shortcuts
+│       ├── KeyboardSettingsTab.swift#   Global + 6 customizable local shortcut recorders
 │       ├── AboutSettingsTab.swift   #   Version info, links, copyright
 │       └── UpdateView.swift        #   Download progress, verify, install UI
 │
@@ -125,25 +128,11 @@ EdgeMark/
 │   └── Debouncer.swift             #   Generic debounce utility
 │
 └── Resources/
-    ├── Editor/                     # CodeMirror 6 bundle — compiled by Xcode build phase
-    │   ├── editor.html             #   WKWebView host page
-    │   ├── editor-bundle.js        #   Compiled CM6 + WYSIWYG plugin (gitignored, generated)
-    │   └── styles.css              #   Symlink to source (do not edit here)
     └── Locales/                    # i18n strings
         ├── en.json                 #   English
-        └── zh-Hans.json            #   Simplified Chinese
-
-Resources/Editor/                  # JS/CSS source (outside Xcode project)
-├── src/
-│   ├── editor.js                  #   CM6 setup, Swift ↔ JS bridge, keyboard maps
-│   ├── wysiwyg.js                 #   WYSIWYG ViewPlugin: decorations, widgets (images, tables, checkboxes, copy button)
-│   └── styles.css                 #   Editor theme source
-├── dist/                          #   Intermediate build output (gitignored)
-├── package.json                   #   esbuild config
-└── build.sh                       #   Full build: bundle JS + copy to Swift target
+        ├── zh-Hans.json            #   Simplified Chinese
+        └── hi.json                 #   Hindi
 ```
-
-> **Editor development:** Edit files in `Resources/Editor/src/`. The Xcode build phase ("Build JS Editor") runs `npm run build` automatically when any source file changes — no manual step required. CI runs the same build before `xcodebuild`. The compiled bundle is written to `EdgeMark/Resources/Editor/editor-bundle.js` (gitignored).
 
 ## Key Patterns
 
@@ -152,11 +141,11 @@ Resources/Editor/                  # JS/CSS source (outside Xcode project)
 | **@Observable** | `NoteStore`, `AppSettings`, and `UpdateState` use the `@Observable` macro — views read properties directly, no `@Published` needed |
 | **MainActor by default** | `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`. All types are `@MainActor` unless explicitly opted out |
 | **AppKit + SwiftUI hybrid** | `NSHostingView` embeds SwiftUI inside a borderless `NSWindow`. Panel lifecycle managed by `SidePanelController` (AppKit), UI rendered by SwiftUI |
-| **File-based storage** | Notes are plain `.md` files with YAML front matter — no database, readable by any Markdown editor |
-| **Image asset co-location** | Images are stored in a hidden dot-prefix directory next to the note (`.NoteTitle/IMG-uuid.png`). Paths in `.md` files are relative so they resolve in any external editor. `FileStorage` handles create/rename/move/trash/delete of asset dirs alongside their note |
-| **Swift ↔ JS editor bridge** | Swift calls `window.editorAPI.*` via `evaluateJavaScript`. JS posts to Swift via `webkit.messageHandlers.editor.postMessage({action, ...})`. `MarkdownEditorView.Coordinator.handleMessage` dispatches on `action`. `EditorWebView` (WKWebView subclass) overrides `performKeyEquivalent` to intercept Cmd+V for native image paste |
-| **Spell checking** | `NSSpellChecker` runs on Swift side after each debounced edit; error ranges are sent to JS as `setSpellErrors([{from, to}])`; CM6 renders them as `Decoration.mark` with a dotted red underline. Survives CM6's DOM re-renders because decorations live in CM6 state |
+| **Native editor (swift-markdown-engine)** | `MarkdownEditorView` wraps `NativeTextViewWrapper` (NSViewRepresentable from swift-markdown-engine). Text flows via `@Binding<String>`. Heading stripping, image display-layer conversion (`![](path)` ↔ `![[path]]`), and save debouncing are handled in `MarkdownEditorView`. |
+| **Sidecar metadata** | Notes are plain `.md` files with no headers. Metadata (UUID, timestamps, tags, trash state) lives in `.edgemark/meta.json` keyed by UUID. `SidecarMigration` strips YAML on first launch and restores original file timestamps. `savedAt` (last EdgeMark write) is the external-change sentinel; `modifiedAt` only advances on real content edits. |
+| **Image asset co-location** | Images are stored in a hidden dot-prefix directory next to the note (`.NoteTitle/IMG-uuid.png`). Paths in `.md` files are standard `![](path)` — relative, readable in any external editor. The editor display layer converts them to `![[path]]` for rendering via `EmbeddedImageProvider`. `FileStorage` handles create/rename/move/trash/delete of asset dirs alongside their note. |
 | **Carbon hotkeys** | Global shortcut uses `RegisterEventHotKey` (Carbon API) since `NSEvent.addGlobalMonitorForEvents` can't intercept key events |
+| **Local shortcut monitor** | `SidePanelController` installs an `NSEvent.addLocalMonitorForEvents` that checks all six configurable local shortcuts at event time. Settings changes take effect immediately without re-registration. |
 | **JSON i18n** | `L10n` loads locale JSON at runtime. Access: `l10n["key"]` or `l10n.t("key", arg1, arg2)` for interpolation |
 | **OSLog diagnostics** | 5 categorized loggers (app, storage, window, shortcuts, updates). View in Console.app with `subsystem:io.github.ender-wang.EdgeMark` |
 | **DMG auto-update** | `UpdateChecker` queries GitHub Releases API. `UpdateInstaller`: mount DMG → verify bundle ID → copy → replace → restart |
