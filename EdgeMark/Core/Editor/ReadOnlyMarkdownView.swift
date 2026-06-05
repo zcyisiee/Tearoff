@@ -10,6 +10,7 @@ struct ReadOnlyMarkdownView: View {
 
     var body: some View {
         var config = MarkdownEditorConfiguration.default
+        config.textInsets = TextInsets(horizontal: 16, vertical: 12)
         config.services = MarkdownEditorServices(
             syntaxHighlighter: HighlighterSwiftBridge(),
             latex: SwiftMathBridge(),

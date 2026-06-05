@@ -80,6 +80,7 @@ struct MarkdownEditorView: View {
         let fontName = Self.resolvedFontFamily(from: appSettings.editorFontName) ?? "SF Pro"
 
         var config = MarkdownEditorConfiguration.default
+        config.textInsets = TextInsets(horizontal: 16, vertical: 12)
         config.services = MarkdownEditorServices(
             images: EdgeMarkImageProvider(noteFolder: noteFolder),
             syntaxHighlighter: HighlighterSwiftBridge(),
