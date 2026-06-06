@@ -28,8 +28,8 @@ struct EditorScreen: View {
                     noteTitle: note.title,
                     noteFolder: note.folder,
                     initialContent: note.content,
-                    onContentChanged: { newContent in
-                        noteStore.updateContent(for: note.id, content: newContent)
+                    onContentChanged: { id, newContent in
+                        noteStore.updateContent(for: id, content: newContent)
                     },
                     pendingReload: $pendingEditorReload,
                     onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },

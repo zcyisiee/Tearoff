@@ -36,7 +36,7 @@ struct MarkdownEditorView: View {
     let noteTitle: String
     let noteFolder: String
     let initialContent: String
-    let onContentChanged: (String) -> Void
+    let onContentChanged: (UUID, String) -> Void
     /// Set to new full note content to reload the editor (e.g. from file watcher).
     /// Cleared automatically after the view applies it.
     @Binding var pendingReload: String?
@@ -48,13 +48,17 @@ struct MarkdownEditorView: View {
     @State private var saveDebouncer = Debouncer(delay: 1.0)
     @State private var slashHandler = SlashCommandHandler()
     @State private var noteNavMonitor: Any?
+    /// Latched at init — never updated on re-render. Guards against @Observable pushing
+    /// a new selectedNote into the animating-out EditorScreen, which would overwrite
+    /// onContentChanged's captured note ID while @State text still holds the old note's content.
+    @State private var stableNoteID: UUID
 
     init(
         noteID: UUID,
         noteTitle: String,
         noteFolder: String,
         initialContent: String,
-        onContentChanged: @escaping (String) -> Void,
+        onContentChanged: @escaping (UUID, String) -> Void,
         pendingReload: Binding<String?> = .constant(nil),
         onNavigateNext: (() -> Void)? = nil,
         onNavigatePrevious: (() -> Void)? = nil,
@@ -70,6 +74,7 @@ struct MarkdownEditorView: View {
         let (heading, body) = Self.splitHeading(initialContent)
         _text = State(initialValue: Self.imagesToEmbeds(body))
         _hiddenHeadingLine = State(initialValue: heading)
+        _stableNoteID = State(initialValue: noteID)
     }
 
     var body: some View {
@@ -105,11 +110,12 @@ struct MarkdownEditorView: View {
             let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
             slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
             let heading = hiddenHeadingLine
+            let noteIDSnapshot = stableNoteID
             saveDebouncer.call { [onContentChanged] in
                 // Convert display-layer ![[path]] embeds back to on-disk ![]( path) before saving.
                 let storage = Self.embedsToImages(newText)
                 let full = heading.isEmpty ? storage : heading + "\n\n" + storage
-                onContentChanged(full)
+                onContentChanged(noteIDSnapshot, full)
             }
         }
         .onChange(of: pendingReload) { _, newContent in
@@ -145,11 +151,16 @@ struct MarkdownEditorView: View {
             }
         }
         .onDisappear {
-            // Flush debounced save immediately on note switch or panel hide
+            // Flush debounced save immediately on note switch or panel hide.
+            // Use stableNoteID (latched @State) — not noteID (let) — because @Observable
+            // may re-render this view with a new note's data while it's animating out,
+            // which would update onContentChanged to point to the new note. stableNoteID
+            // always holds the note that was active when this view was first inserted.
+            let capturedID = stableNoteID
             saveDebouncer.cancel()
             let storage = Self.embedsToImages(text)
             let full = hiddenHeadingLine.isEmpty ? storage : hiddenHeadingLine + "\n\n" + storage
-            onContentChanged(full)
+            onContentChanged(capturedID, full)
             slashHandler.dismiss()
             if let m = noteNavMonitor { NSEvent.removeMonitor(m); noteNavMonitor = nil }
         }
