@@ -4,14 +4,16 @@ import MarkdownEngineLatex
 import SwiftUI
 
 /// Non-editable Markdown viewer using swift-markdown-engine.
-/// Used for previewing trashed notes.
+/// Used for previewing trashed notes and peek previews.
 struct ReadOnlyMarkdownView: View {
     let content: String
+    var noteFolder: String = ""
 
     var body: some View {
         var config = MarkdownEditorConfiguration.default
         config.textInsets = TextInsets(horizontal: 16, vertical: 12)
         config.services = MarkdownEditorServices(
+            images: EdgeMarkImageProvider(noteFolder: noteFolder),
             syntaxHighlighter: HighlighterSwiftBridge(),
             latex: SwiftMathBridge(),
         )

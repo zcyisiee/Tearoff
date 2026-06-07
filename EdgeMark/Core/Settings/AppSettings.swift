@@ -88,6 +88,18 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(automaticSpellingCorrectionEnabled, forKey: "automaticSpellingCorrectionEnabled") }
     }
 
+    // MARK: - Hover-to-peek
+
+    /// Whether hovering over a note/folder row shows a floating read-only
+    /// preview on the opposite side of the panel. Default on — opt-out via
+    /// the General settings tab.
+    var hoverPeekEnabled: Bool = true {
+        didSet {
+            UserDefaults.standard.set(hoverPeekEnabled, forKey: "hoverPeekEnabled")
+            NotificationCenter.default.post(name: .hoverPeekSettingsChanged, object: nil)
+        }
+    }
+
     /// Custom labels for color tags. Missing entries fall back to `TagColor.defaultLabel`.
     /// Persisted as a single UserDefaults dictionary keyed by raw color name.
     var tagLabels: [TagColor: String] = [:] {
@@ -146,6 +158,9 @@ final class AppSettings {
         if let raw = UserDefaults.standard.object(forKey: "automaticSpellingCorrectionEnabled") as? Bool {
             automaticSpellingCorrectionEnabled = raw
         }
+        if let raw = UserDefaults.standard.object(forKey: "hoverPeekEnabled") as? Bool {
+            hoverPeekEnabled = raw
+        }
         if let raw = UserDefaults.standard.dictionary(forKey: "tagLabels") as? [String: String] {
             tagLabels = raw.reduce(into: [TagColor: String]()) { result, kv in
                 if let color = TagColor(rawValue: kv.key) { result[color] = kv.value }
@@ -175,6 +190,7 @@ extension AppSettings.SortBy {
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
+    static let hoverPeekSettingsChanged = Notification.Name("hoverPeekSettingsChanged")
 }
 
 extension AppSettings.PanelTint {

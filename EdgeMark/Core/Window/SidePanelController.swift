@@ -33,6 +33,7 @@ final class SidePanelController: NSWindowController {
     let edgeDetector: EdgeDetector
     let noteStore = NoteStore()
     let appSettings = AppSettings.shared
+    private let peekCoordinator = PeekCoordinator()
 
     // MARK: - Init
 
@@ -73,6 +74,7 @@ final class SidePanelController: NSWindowController {
             rootView: ContentView()
                 .environment(noteStore)
                 .environment(appSettings)
+                .environment(peekCoordinator)
                 .environment(L10n.shared),
         )
         hostingView.frame = containerView.bounds
@@ -256,6 +258,7 @@ final class SidePanelController: NSWindowController {
         resizeHandleView?.frame = Self.resizeHandleFrame(for: side, containerWidth: panelWidth, height: containerView.bounds.height)
 
         // If panel is visible, hide it — user re-triggers to see it on the new edge
+        peekCoordinator.dismissNow()
         if isShown {
             hidePanel()
         } else {
@@ -419,6 +422,7 @@ final class SidePanelController: NSWindowController {
             // Interrupt hide animation — snap to shown position instantly
             Log.window.debug("[SidePanelController] showPanel interrupted hide animation")
             isAnimating = false
+            peekCoordinator.suppressPeek = false
             window.setFrame(shownFrame, display: true)
             window.alphaValue = 1
             window.ignoresMouseEvents = false
@@ -426,6 +430,7 @@ final class SidePanelController: NSWindowController {
             NSApp.activate(ignoringOtherApps: true)
         } else {
             isAnimating = true
+            peekCoordinator.suppressPeek = true
             window.ignoresMouseEvents = false
             window.makeKeyAndOrderFront(nil)
 
@@ -444,6 +449,7 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
+                    peekCoordinator.suppressPeek = false
                 }
             } else {
                 // Fade: position at the final frame while invisible, then animate alpha 0 → 1.
@@ -458,6 +464,7 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
+                    peekCoordinator.suppressPeek = false
                 }
             }
 
@@ -470,6 +477,7 @@ final class SidePanelController: NSWindowController {
         guard let window, isShown else { return }
         Log.window.info("[SidePanelController] hidePanel")
         noteStore.saveDirtyNotes()
+        peekCoordinator.dismissNow()
         isShown = false
         let gen = animationGeneration &+ 1
         animationGeneration = gen
@@ -644,7 +652,24 @@ final class SidePanelController: NSWindowController {
 
     private func isMouseInPanel() -> Bool {
         guard let window else { return false }
-        return window.frame.contains(NSEvent.mouseLocation)
+        let cursor = NSEvent.mouseLocation
+        // 1. Inside the panel window itself
+        if window.frame.contains(cursor) { return true }
+        // 2. Inside the peek preview window
+        if let peekFrame = peekCoordinator.peekWindowFrame, peekFrame.contains(cursor) { return true }
+        // 3. Inside the 12pt gap strip between the panel and the preview
+        let gap = PeekWindowController.gap
+        let side = ShortcutSettings.shared.edgeSide
+        let gapStrip = switch side {
+        case .right:
+            NSRect(x: window.frame.minX - gap, y: window.frame.minY,
+                   width: gap, height: window.frame.height)
+        case .left:
+            NSRect(x: window.frame.maxX, y: window.frame.minY,
+                   width: gap, height: window.frame.height)
+        }
+        if gapStrip.contains(cursor) { return true }
+        return false
     }
 
     private func startHideTimer(delay: Double) {

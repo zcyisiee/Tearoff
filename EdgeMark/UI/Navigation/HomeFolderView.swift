@@ -329,6 +329,7 @@ struct HomeFolderView: View {
                 onDouble: { noteStore.navigateToFolder(folder) },
             )
             .reportRowFrame(id)
+            .hoverableRow(id: id, content: .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder)))
             .nsContextMenu {
                 // Finder rule: right-clicking an unselected row first selects it.
                 if !noteStore.isSelected(id) {
@@ -376,6 +377,7 @@ struct HomeFolderView: View {
                 onDouble: { noteStore.openNote(note) },
             )
             .reportRowFrame(id)
+            .hoverableRow(id: id, content: .note(note))
             .nsContextMenu {
                 if !noteStore.isSelected(id) {
                     noteStore.replaceSelection(with: id)

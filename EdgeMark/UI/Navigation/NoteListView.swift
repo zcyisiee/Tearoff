@@ -221,6 +221,7 @@ struct NoteListView: View {
                 onDouble: { noteStore.navigateToSubfolder(folder) },
             )
             .reportRowFrame(id)
+            .hoverableRow(id: id, content: .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder)))
             .nsContextMenu {
                 if !noteStore.isSelected(id) {
                     noteStore.replaceSelection(with: id)
@@ -267,6 +268,7 @@ struct NoteListView: View {
                 onDouble: { noteStore.openNote(note) },
             )
             .reportRowFrame(id)
+            .hoverableRow(id: id, content: .note(note))
             .nsContextMenu {
                 if !noteStore.isSelected(id) {
                     noteStore.replaceSelection(with: id)

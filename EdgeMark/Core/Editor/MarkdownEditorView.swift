@@ -9,7 +9,7 @@ import SwiftUI
 /// Loads EdgeMark asset-dir images for the `![[.STEM/IMG-uuid.ext]]` embed syntax
 /// used by the editor's display layer. The on-disk format stays as standard
 /// `![](path)` markdown; MarkdownEditorView converts between the two transparently.
-private struct EdgeMarkImageProvider: EmbeddedImageProvider {
+struct EdgeMarkImageProvider: EmbeddedImageProvider {
     let noteFolder: String
 
     func image(for request: EmbeddedImageRequest) -> NSImage? {

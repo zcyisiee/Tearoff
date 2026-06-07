@@ -94,6 +94,7 @@ struct GeneralSettingsTab: View {
                 Toggle(l10n["settings.editor.spellChecking"], isOn: $settings.spellCheckingEnabled)
                 Toggle(l10n["settings.editor.grammarChecking"], isOn: $settings.grammarCheckingEnabled)
                 Toggle(l10n["settings.editor.autocorrect"], isOn: $settings.automaticSpellingCorrectionEnabled)
+                Toggle(l10n["settings.editor.hoverPeek"], isOn: $settings.hoverPeekEnabled)
             } header: {
                 Label(l10n["settings.editor.section"], systemImage: "textformat")
             }

@@ -1316,6 +1316,23 @@ final class NoteStore {
         folders.filter { $0.parentPath == parent }
     }
 
+    /// All notes in a folder (and its subfolders), sorted by most recently
+    /// modified. Used by the hover-peek preview to show the folder's contents.
+    func recentNotes(in folder: Folder) -> [Note] {
+        let prefix = folder.name + "/"
+        let folderNotes = notes.filter { $0.folder == folder.name || $0.folder.hasPrefix(prefix) }
+        return folderNotes.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    /// Immediate child folders of the given folder. Used by the hover-peek
+    /// preview to show the folder hierarchy.
+    func subfolders(of folder: Folder) -> [Folder] {
+        let prefix = folder.name + "/"
+        return folders.filter { child in
+            child.name.hasPrefix(prefix) && !child.name.dropFirst(prefix.count).contains("/")
+        }
+    }
+
     /// Set or clear the color of a folder. Persisted in the sidecar; UI refresh follows.
     func setFolderColor(_ color: TagColor?, for folderName: String) {
         guard !folderName.isEmpty else { return }
