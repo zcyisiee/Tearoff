@@ -90,6 +90,11 @@ struct MarkdownEditorView: View {
 
         var config = MarkdownEditorConfiguration.default
         config.textInsets = TextInsets(horizontal: 16, vertical: 12)
+        config.spellChecking = SpellCheckingPolicy(
+            continuousSpellChecking: appSettings.spellCheckingEnabled,
+            grammarChecking: appSettings.grammarCheckingEnabled,
+            automaticSpellingCorrection: appSettings.automaticSpellingCorrectionEnabled,
+        )
         config.services = MarkdownEditorServices(
             images: EdgeMarkImageProvider(noteFolder: noteFolder),
             syntaxHighlighter: HighlighterSwiftBridge(),
@@ -113,6 +118,13 @@ struct MarkdownEditorView: View {
                     // Return embed syntax — gets inserted into the display-layer text.
                     // onChange converts it back to standard ![](path) markdown before saving.
                     return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.embedMarkdown
+                },
+                onSpellCheckingPolicyChanged: { policy in
+                    // Persist context-menu spelling/grammar/autocorrect toggles back to settings
+                    // so they survive note switches and app restarts.
+                    AppSettings.shared.spellCheckingEnabled = policy.continuousSpellChecking
+                    AppSettings.shared.grammarCheckingEnabled = policy.grammarChecking
+                    AppSettings.shared.automaticSpellingCorrectionEnabled = policy.automaticSpellingCorrection
                 },
             )
             .onChange(of: text) { _, newText in

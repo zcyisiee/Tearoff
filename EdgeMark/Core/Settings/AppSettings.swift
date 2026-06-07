@@ -68,6 +68,26 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Spell checking
+
+    /// Mirrors `SpellCheckingPolicy.continuousSpellChecking`.
+    /// Default on — matches Notes / TextEdit behavior.
+    var spellCheckingEnabled: Bool = true {
+        didSet { UserDefaults.standard.set(spellCheckingEnabled, forKey: "spellCheckingEnabled") }
+    }
+
+    /// Mirrors `SpellCheckingPolicy.grammarChecking`.
+    /// Default off — opt-in for writing-focused workflows.
+    var grammarCheckingEnabled: Bool = false {
+        didSet { UserDefaults.standard.set(grammarCheckingEnabled, forKey: "grammarCheckingEnabled") }
+    }
+
+    /// Mirrors `SpellCheckingPolicy.automaticSpellingCorrection`.
+    /// Default off — autocorrect is disruptive in code-heavy notes.
+    var automaticSpellingCorrectionEnabled: Bool = false {
+        didSet { UserDefaults.standard.set(automaticSpellingCorrectionEnabled, forKey: "automaticSpellingCorrectionEnabled") }
+    }
+
     /// Custom labels for color tags. Missing entries fall back to `TagColor.defaultLabel`.
     /// Persisted as a single UserDefaults dictionary keyed by raw color name.
     var tagLabels: [TagColor: String] = [:] {
@@ -117,6 +137,15 @@ final class AppSettings {
         }
         let savedSize = UserDefaults.standard.object(forKey: "editorFontSize") as? Double
         editorFontSize = savedSize ?? 16
+        if let raw = UserDefaults.standard.object(forKey: "spellCheckingEnabled") as? Bool {
+            spellCheckingEnabled = raw
+        }
+        if let raw = UserDefaults.standard.object(forKey: "grammarCheckingEnabled") as? Bool {
+            grammarCheckingEnabled = raw
+        }
+        if let raw = UserDefaults.standard.object(forKey: "automaticSpellingCorrectionEnabled") as? Bool {
+            automaticSpellingCorrectionEnabled = raw
+        }
         if let raw = UserDefaults.standard.dictionary(forKey: "tagLabels") as? [String: String] {
             tagLabels = raw.reduce(into: [TagColor: String]()) { result, kv in
                 if let color = TagColor(rawValue: kv.key) { result[color] = kv.value }
