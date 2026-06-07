@@ -87,6 +87,9 @@ final class NoteStore {
     var pendingNewFolder = false
     /// Set by shortcut handler after creating a note to trigger inline rename in the list view.
     var pendingRenameNote: Note?
+    /// Set to true by the ⌘F shortcut handler when a note is open — consumed by EditorScreen
+    /// to show the in-editor find bar.
+    var pendingEditorFind: Bool = false
 
     /// Folder to return to when the user dismisses search (set when search is triggered from a subfolder).
     var searchReturnFolder: Folder?

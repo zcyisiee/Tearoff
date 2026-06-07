@@ -7,6 +7,7 @@ struct EditorScreen: View {
     @Environment(L10n.self) var l10n
     @State private var showDeleteConfirm = false
     @State private var pendingEditorReload: String? = nil
+    @State private var isFindBarShowing = false
 
     private var backLabel: String {
         noteStore.selectedFolder?.name ?? l10n["common.home"]
@@ -32,6 +33,7 @@ struct EditorScreen: View {
                         noteStore.updateContent(for: id, content: newContent)
                     },
                     pendingReload: $pendingEditorReload,
+                    showFindBar: $isFindBarShowing,
                     onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },
                     onNavigatePrevious: { noteStore.navigateToPreviousNote(sortedBy: appSettings) },
                 )
@@ -39,6 +41,11 @@ struct EditorScreen: View {
                     noteStore.onNeedEditorReload = { content in
                         pendingEditorReload = content
                     }
+                }
+                .onChange(of: noteStore.pendingEditorFind) { _, pending in
+                    guard pending else { return }
+                    noteStore.pendingEditorFind = false
+                    isFindBarShowing = true
                 }
             }
         }

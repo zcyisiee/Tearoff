@@ -169,9 +169,14 @@ final class SidePanelController: NSWindowController {
             guard let self, isShown else { return event }
             let s = ShortcutSettings.shared
             if s.searchShortcut?.matches(event) == true {
-                // Let editor handle its native find; also skip when Trash is overlaid
-                // (navigateToHome while Trash is active leaves pendingSearchOnHome stuck).
-                if noteStore.selectedNote != nil || noteStore.showTrash { return event }
+                // Trash overlay: pass through (navigateToHome while Trash is active leaves
+                // pendingSearchOnHome stuck).
+                if noteStore.showTrash { return event }
+                // Note open: show the in-editor find bar instead of navigating to search.
+                if noteStore.selectedNote != nil {
+                    noteStore.pendingEditorFind = true
+                    return nil
+                }
                 noteStore.searchReturnFolder = noteStore.selectedFolder
                 noteStore.pendingSearchOnHome = true
                 noteStore.navigateToHome()

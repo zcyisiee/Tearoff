@@ -40,6 +40,8 @@ struct MarkdownEditorView: View {
     /// Set to new full note content to reload the editor (e.g. from file watcher).
     /// Cleared automatically after the view applies it.
     @Binding var pendingReload: String?
+    /// When true, the find bar overlay is visible. Driven by EditorScreen via ⌘F routing.
+    var showFindBar: Binding<Bool> = .constant(false)
     var onNavigateNext: (() -> Void)?
     var onNavigatePrevious: (() -> Void)?
 
@@ -60,6 +62,7 @@ struct MarkdownEditorView: View {
         initialContent: String,
         onContentChanged: @escaping (UUID, String) -> Void,
         pendingReload: Binding<String?> = .constant(nil),
+        showFindBar: Binding<Bool> = .constant(false),
         onNavigateNext: (() -> Void)? = nil,
         onNavigatePrevious: (() -> Void)? = nil,
     ) {
@@ -69,6 +72,7 @@ struct MarkdownEditorView: View {
         self.initialContent = initialContent
         self.onContentChanged = onContentChanged
         _pendingReload = pendingReload
+        self.showFindBar = showFindBar
         self.onNavigateNext = onNavigateNext
         self.onNavigatePrevious = onNavigatePrevious
         let (heading, body) = Self.splitHeading(initialContent)
@@ -90,58 +94,71 @@ struct MarkdownEditorView: View {
             images: EdgeMarkImageProvider(noteFolder: noteFolder),
             syntaxHighlighter: HighlighterSwiftBridge(),
             latex: SwiftMathBridge(),
+            bus: MarkdownEditorBus(
+                findScrollToRange: .editorFindScrollToRange,
+                findClearHighlights: .editorFindClearHighlights,
+            ),
         )
 
-        return NativeTextViewWrapper(
-            text: $text,
-            configuration: config,
-            fontName: fontName,
-            fontSize: CGFloat(appSettings.editorFontSize),
-            documentId: noteID.uuidString,
-            onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
-                guard let (data, ext) = Self.imageData(from: pasteboard) else { return nil }
-                let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                // Return embed syntax — gets inserted into the display-layer text.
-                // onChange converts it back to standard ![](path) markdown before saving.
-                return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.embedMarkdown
-            },
-        )
-        .onChange(of: text) { _, newText in
-            let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
-            slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
-            let heading = hiddenHeadingLine
-            let noteIDSnapshot = stableNoteID
-            saveDebouncer.call { [onContentChanged] in
-                // Convert display-layer ![[path]] embeds back to on-disk ![]( path) before saving.
-                let storage = Self.embedsToImages(newText)
-                let full = heading.isEmpty ? storage : heading + "\n\n" + storage
-                onContentChanged(noteIDSnapshot, full)
+        return ZStack(alignment: .bottom) {
+            NativeTextViewWrapper(
+                text: $text,
+                configuration: config,
+                fontName: fontName,
+                fontSize: CGFloat(appSettings.editorFontSize),
+                documentId: noteID.uuidString,
+                onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
+                    guard let (data, ext) = Self.imageData(from: pasteboard) else { return nil }
+                    let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
+                    // Return embed syntax — gets inserted into the display-layer text.
+                    // onChange converts it back to standard ![](path) markdown before saving.
+                    return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.embedMarkdown
+                },
+            )
+            .onChange(of: text) { _, newText in
+                let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
+                slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
+                let heading = hiddenHeadingLine
+                let noteIDSnapshot = stableNoteID
+                saveDebouncer.call { [onContentChanged] in
+                    // Convert display-layer ![[path]] embeds back to on-disk ![]( path) before saving.
+                    let storage = Self.embedsToImages(newText)
+                    let full = heading.isEmpty ? storage : heading + "\n\n" + storage
+                    onContentChanged(noteIDSnapshot, full)
+                }
+            }
+            .onChange(of: pendingReload) { _, newContent in
+                guard let newContent else { return }
+                saveDebouncer.cancel()
+                let (heading, body) = Self.splitHeading(newContent)
+                hiddenHeadingLine = heading
+                text = Self.imagesToEmbeds(body)
+                pendingReload = nil
+            }
+            .overlay(
+                ImageDropOverlay { [noteID, noteTitle, noteFolder] url in
+                    guard let data = try? Data(contentsOf: url) else { return }
+                    let ext = url.pathExtension.lowercased()
+                    let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
+                    guard let result = try? FileStorage.saveImage(data: data, ext: ext, forNote: note) else { return }
+                    // After a drag completes the text view may have lost first responder.
+                    // Fall back to walking the window hierarchy to find it.
+                    let window = NSApp.keyWindow
+                    let tv = (window?.firstResponder as? NSTextView)
+                        ?? findEditorTextView(in: window?.contentView)
+                    guard let tv else { return }
+                    window?.makeFirstResponder(tv)
+                    tv.insertText(result.embedMarkdown, replacementRange: tv.selectedRange())
+                },
+            )
+
+            // Find bar overlay — slides in from the bottom when showFindBar is true.
+            if showFindBar.wrappedValue {
+                FindBarView(isPresented: showFindBar, editorText: $text)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .onChange(of: pendingReload) { _, newContent in
-            guard let newContent else { return }
-            saveDebouncer.cancel()
-            let (heading, body) = Self.splitHeading(newContent)
-            hiddenHeadingLine = heading
-            text = Self.imagesToEmbeds(body)
-            pendingReload = nil
-        }
-        .overlay(
-            ImageDropOverlay { [noteID, noteTitle, noteFolder] url in
-                guard let data = try? Data(contentsOf: url) else { return }
-                let ext = url.pathExtension.lowercased()
-                let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                guard let result = try? FileStorage.saveImage(data: data, ext: ext, forNote: note) else { return }
-                // After a drag completes the text view may have lost first responder.
-                // Fall back to walking the window hierarchy to find it.
-                let window = NSApp.keyWindow
-                let tv = (window?.firstResponder as? NSTextView)
-                    ?? findEditorTextView(in: window?.contentView)
-                guard let tv else { return }
-                window?.makeFirstResponder(tv)
-                tv.insertText(result.embedMarkdown, replacementRange: tv.selectedRange())
-            },
-        )
+        .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
             noteNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
                 let s = ShortcutSettings.shared
@@ -227,4 +244,11 @@ struct MarkdownEditorView: View {
         }
         return nil
     }
+}
+
+// MARK: - Notification names for the editor find bus
+
+extension Notification.Name {
+    static let editorFindScrollToRange = Notification.Name("io.github.ender-wang.EdgeMark.editor.findScrollToRange")
+    static let editorFindClearHighlights = Notification.Name("io.github.ender-wang.EdgeMark.editor.findClearHighlights")
 }
