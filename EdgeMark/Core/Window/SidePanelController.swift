@@ -156,11 +156,17 @@ final class SidePanelController: NSWindowController {
             let shift = event.modifierFlags.contains(.shift)
             switch event.keyCode {
             case 125: // ↓
-                return noteStore.moveSelection(direction: 1, extending: shift) ? nil : event
+                guard noteStore.moveSelection(direction: 1, extending: shift) else { return event }
+                refreshPeekForSelection()
+                return nil
             case 126: // ↑
-                return noteStore.moveSelection(direction: -1, extending: shift) ? nil : event
+                guard noteStore.moveSelection(direction: -1, extending: shift) else { return event }
+                refreshPeekForSelection()
+                return nil
             case 36, 76: // Return / numpad Enter
                 return noteStore.openSelectedItem() ? nil : event
+            case 49: // Space — Quick Look preview
+                return handleSpacePeek() ? nil : event
             default:
                 return event
             }
@@ -688,6 +694,46 @@ final class SidePanelController: NSWindowController {
     /// Whether an NSTextView in the panel is the first responder (user is editing).
     private var isEditorFocused: Bool {
         window?.firstResponder is NSTextView
+    }
+
+    /// Handle Space-to-preview (Quick Look). Returns true if the event was consumed.
+    private func handleSpacePeek() -> Bool {
+        guard AppSettings.shared.hoverPeekEnabled, !peekCoordinator.suppressPeek else { return false }
+        guard noteStore.pendingEditorFind == false else { return false }
+        guard noteStore.selection.count == 1 else { return false }
+        guard let win = window else { return false }
+        let panelFrame = win.convertToScreen(win.contentView?.bounds ?? win.frame)
+
+        let item = noteStore.selection.first!
+        let content: PeekContent
+        switch item {
+        case let .folder(name):
+            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return false }
+            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
+        case let .note(id):
+            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return false }
+            content = .note(note)
+        }
+        peekCoordinator.triggerPeek(content: content, panelFrame: panelFrame)
+        return true
+    }
+
+    /// If the peek preview was keyboard-triggered and showing, update its
+    /// content to match the new selection after arrow-key navigation.
+    private func refreshPeekForSelection() {
+        guard peekCoordinator.isKeyboardTriggered else { return }
+        guard noteStore.selection.count == 1 else { return }
+        let item = noteStore.selection.first!
+        let content: PeekContent
+        switch item {
+        case let .folder(name):
+            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return }
+            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
+        case let .note(id):
+            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return }
+            content = .note(note)
+        }
+        peekCoordinator.updateForSelectionChange(content: content)
     }
 }
 

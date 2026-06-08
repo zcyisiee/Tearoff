@@ -31,6 +31,10 @@ final class PeekCoordinator {
     /// When true, all scheduling is a no-op (used while a context menu is
     /// open, during a marquee drag, or when the editor is focused).
     var suppressPeek: Bool = false
+    /// True when the current preview was triggered by the Space key
+    /// (keyboard Quick Look). Used by `updateForSelectionChange` to
+    /// keep the preview in sync with arrow-key navigation.
+    private(set) var isKeyboardTriggered: Bool = false
 
     init() {
         controller.onMouseEntered = { [weak self] in
@@ -111,6 +115,7 @@ final class PeekCoordinator {
                 return
             }
             scheduledID = id
+            isKeyboardTriggered = false // hover now drives the preview
             let tint = AppSettings.shared.panelTint.color
             controller.show(
                 content: content,
@@ -198,7 +203,69 @@ final class PeekCoordinator {
         dismissWorkItem?.cancel()
         dismissWorkItem = nil
         scheduledID = nil
+        isKeyboardTriggered = false
         controller.hideImmediately()
+    }
+
+    // MARK: - Keyboard-triggered peek (Space to preview)
+
+    /// Toggle the preview for the given content. If already showing this
+    /// content, dismiss. Otherwise, show immediately (no hover delay).
+    /// Used by the Space-to-preview keyboard shortcut.
+    func triggerPeek(content: PeekContent, panelFrame: NSRect) {
+        // Respect the hover-peek kill switch.
+        guard AppSettings.shared.hoverPeekEnabled else { return }
+        guard !suppressPeek else { return }
+
+        // Toggle off: already showing this exact content.
+        if controller.isShowing, scheduledID == content.id {
+            Log.peek.debug("[PeekCoordinator] triggerPeek — TOGGLE OFF id=\(String(describing: content.id))")
+            dismissNow()
+            return
+        }
+
+        Log.peek.debug("[PeekCoordinator] triggerPeek — SHOW id=\(String(describing: content.id))")
+        cancelDismiss()
+        pendingShowWorkItem?.cancel()
+        pendingShowWorkItem = nil
+        self.panelFrame = panelFrame
+        scheduledID = content.id
+        isKeyboardTriggered = true
+
+        let side = ShortcutSettings.shared.edgeSide
+        let screen = NSScreen.main ?? NSScreen.screens.first!
+        let tint = AppSettings.shared.panelTint.color
+        // anchorRow is unused by computeFrame; pass panelFrame as a placeholder.
+        controller.show(
+            content: content,
+            anchorRow: panelFrame,
+            panelFrame: panelFrame,
+            side: side,
+            screen: screen,
+            tint: tint,
+        )
+    }
+
+    /// Update the preview content when the selection changes via keyboard
+    /// (arrow keys). Only acts if the current preview was keyboard-triggered;
+    /// hover-driven previews update via `mouseEntered` on the new row.
+    func updateForSelectionChange(content: PeekContent) {
+        guard isKeyboardTriggered, controller.isShowing else { return }
+        guard scheduledID != content.id else { return }
+        Log.peek.debug("[PeekCoordinator] updateForSelectionChange — id=\(String(describing: content.id))")
+        cancelDismiss()
+        scheduledID = content.id
+        let tint = AppSettings.shared.panelTint.color
+        let side = ShortcutSettings.shared.edgeSide
+        let screen = NSScreen.main ?? NSScreen.screens.first!
+        controller.show(
+            content: content,
+            anchorRow: panelFrame,
+            panelFrame: panelFrame,
+            side: side,
+            screen: screen,
+            tint: tint,
+        )
     }
 
     // MARK: - Geometry

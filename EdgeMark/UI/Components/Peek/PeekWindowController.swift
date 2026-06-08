@@ -117,7 +117,7 @@ final class PeekWindowController: NSWindowController {
             // Build the content, position the window, and fade in.
             installOrUpdateContent(content: content, tint: tint)
             window.setFrame(targetFrame, display: true)
-            window.makeKeyAndOrderFront(nil)
+            window.orderFront(nil)
             isAnimating = true
             let gen = animationGeneration &+ 1
             animationGeneration = gen
