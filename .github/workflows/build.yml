@@ -162,7 +162,7 @@ jobs:
             desc "Native macOS side-panel Markdown notes app"
             homepage "https://github.com/Ender-Wang/EdgeMark"
 
-            depends_on macos: ">= :sequoia"
+            depends_on macos: :sequoia
 
             app "EdgeMark.app"
 
