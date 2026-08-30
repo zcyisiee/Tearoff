@@ -140,6 +140,13 @@ struct GeneralSettingsTab: View {
                 }
 
                 Toggle(l10n["settings.editor.spellChecking"], isOn: $settings.spellCheckingEnabled)
+                Toggle(l10n["settings.editor.outline"], isOn: $settings.outlineVisible)
+                Picker(l10n["settings.editor.outlinePosition"], selection: $settings.outlinePosition) {
+                    ForEach(AppSettings.OutlinePosition.allCases, id: \.self) { position in
+                        Text(position.displayName(l10n)).tag(position)
+                    }
+                }
+                .disabled(!settings.outlineVisible)
                 Toggle(l10n["settings.editor.grammarChecking"], isOn: $settings.grammarCheckingEnabled)
                 Toggle(l10n["settings.editor.autocorrect"], isOn: $settings.automaticSpellingCorrectionEnabled)
                 Toggle(l10n["settings.editor.hoverPeek"], isOn: $settings.hoverPeekEnabled)

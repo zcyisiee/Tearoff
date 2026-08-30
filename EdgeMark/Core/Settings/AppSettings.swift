@@ -70,6 +70,30 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Outline navigation
+
+    /// Where the markdown outline lives: a right-hand tree panel or a top
+    /// breadcrumb strip under the note header.
+    enum OutlinePosition: String, CaseIterable {
+        case top
+        case right
+    }
+
+    /// Whether the outline (panel or breadcrumb) is shown in the editor.
+    var outlineVisible: Bool = true {
+        didSet { UserDefaults.standard.set(outlineVisible, forKey: "outlineVisible") }
+    }
+
+    /// Outline placement — right panel or top breadcrumb.
+    var outlinePosition: OutlinePosition = .right {
+        didSet { UserDefaults.standard.set(outlinePosition.rawValue, forKey: "outlinePosition") }
+    }
+
+    /// Right outline panel width in points; user-draggable.
+    var outlinePanelWidth: CGFloat = 230 {
+        didSet { UserDefaults.standard.set(Double(outlinePanelWidth), forKey: "outlinePanelWidth") }
+    }
+
     // MARK: - Task checkbox symbols
 
     /// SF Symbol presets drawn for `- [ ]` / `- [x]` task-list items. Display-only —
@@ -319,6 +343,16 @@ final class AppSettings {
         {
             taskCheckboxPreset = value
         }
+        outlineVisible = UserDefaults.standard.object(forKey: "outlineVisible") as? Bool ?? true
+        if let raw = UserDefaults.standard.string(forKey: "outlinePosition"),
+           let value = OutlinePosition(rawValue: raw)
+        {
+            outlinePosition = value
+        }
+        if let savedWidth = UserDefaults.standard.object(forKey: "outlinePanelWidth") as? Double {
+            outlinePanelWidth = max(180, min(420, CGFloat(savedWidth)))
+        }
+
         // Appearance, updates, launch (moved from ShortcutSettings)
         if let raw = UserDefaults.standard.string(forKey: "appearanceMode"),
            let mode = AppearanceMode(rawValue: raw)
@@ -401,6 +435,15 @@ extension AppSettings.PanelTint {
         case .sand: l10n["settings.panelTint.sand"]
         case .sage: l10n["settings.panelTint.sage"]
         case .rose: l10n["settings.panelTint.rose"]
+        }
+    }
+}
+
+extension AppSettings.OutlinePosition {
+    func displayName(_ l10n: L10n) -> String {
+        switch self {
+        case .top: l10n["settings.editor.outlinePosition.top"]
+        case .right: l10n["settings.editor.outlinePosition.right"]
         }
     }
 }

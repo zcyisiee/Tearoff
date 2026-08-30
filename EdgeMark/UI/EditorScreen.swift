@@ -8,9 +8,18 @@ struct EditorScreen: View {
     @State private var showDeleteConfirm = false
     @State private var pendingEditorReload: String? = nil
     @State private var isFindBarShowing = false
+    @State private var outline = OutlineState()
 
     private var backLabel: String {
         noteStore.selectedFolder?.name ?? l10n["common.home"]
+    }
+
+    private var showsOutlinePanel: Bool {
+        appSettings.outlineVisible && appSettings.outlinePosition == .right
+    }
+
+    private var showsOutlineBreadcrumb: Bool {
+        appSettings.outlineVisible && appSettings.outlinePosition == .top
     }
 
     var body: some View {
@@ -24,28 +33,15 @@ struct EditorScreen: View {
             headerContent
         } content: {
             if let note = noteStore.selectedNote {
-                MarkdownEditorView(
-                    noteID: note.id,
-                    noteTitle: note.title,
-                    noteFolder: note.folder,
-                    initialContent: note.content,
-                    onContentChanged: { id, newContent in
-                        noteStore.updateContent(for: id, content: newContent)
-                    },
-                    pendingReload: $pendingEditorReload,
-                    showFindBar: $isFindBarShowing,
-                    onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },
-                    onNavigatePrevious: { noteStore.navigateToPreviousNote(sortedBy: appSettings) },
-                )
-                .onAppear {
-                    noteStore.onNeedEditorReload = { content in
-                        pendingEditorReload = content
+                if showsOutlinePanel {
+                    HStack(spacing: 0) {
+                        editor(for: note)
+                        Divider()
+                        OutlinePanelView(outline: outline)
+                            .frame(width: appSettings.outlinePanelWidth)
                     }
-                }
-                .onChange(of: noteStore.pendingEditorFind) { _, pending in
-                    guard pending else { return }
-                    noteStore.pendingEditorFind = false
-                    isFindBarShowing = true
+                } else {
+                    editor(for: note)
                 }
             }
         }
@@ -107,6 +103,8 @@ struct EditorScreen: View {
 
                     Spacer()
 
+                    OutlineToggleButton()
+
                     PinButton()
 
                     CopyMenuButton(note: note)
@@ -129,12 +127,80 @@ struct EditorScreen: View {
                         tooltip: L10n.shared.t("editor.createdAt", note.createdAt.homeDisplayFormat),
                     )
                 }
+
+                if showsOutlineBreadcrumb {
+                    Divider()
+                    OutlineBreadcrumbView(outline: outline)
+                }
             }
         }
     }
 
     private func goBack() {
         noteStore.closeNote()
+    }
+
+    private func editor(for note: Note) -> some View {
+        MarkdownEditorView(
+            noteID: note.id,
+            noteTitle: note.title,
+            noteFolder: note.folder,
+            initialContent: note.content,
+            onContentChanged: { id, newContent in
+                noteStore.updateContent(for: id, content: newContent)
+            },
+            pendingReload: $pendingEditorReload,
+            showFindBar: $isFindBarShowing,
+            onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },
+            onNavigatePrevious: { noteStore.navigateToPreviousNote(sortedBy: appSettings) },
+            outline: outline,
+        )
+        .onAppear {
+            noteStore.onNeedEditorReload = { content in
+                pendingEditorReload = content
+            }
+        }
+        .onChange(of: noteStore.pendingEditorFind) { _, pending in
+            guard pending else { return }
+            noteStore.pendingEditorFind = false
+            isFindBarShowing = true
+        }
+    }
+}
+
+// MARK: - Outline Toggle Button
+
+/// Outline icon in the editor header; accent-tinted while the outline is shown.
+private struct OutlineToggleButton: View {
+    @State private var isHovered = false
+
+    private var isVisible: Bool {
+        AppSettings.shared.outlineVisible
+    }
+
+    var body: some View {
+        Button {
+            AppSettings.shared.outlineVisible.toggle()
+        } label: {
+            Image(systemName: "list.bullet.indent")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(
+                    isVisible ? Color.accentColor : (isHovered ? Color.primary : Color.secondary),
+                )
+                .frame(width: 28, height: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.primary.opacity(isHovered && !isVisible ? 0.1 : 0))
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.shared["editor.toggleOutline"])
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
