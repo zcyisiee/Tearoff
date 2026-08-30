@@ -36,7 +36,7 @@ struct EditorScreen: View {
                 if showsOutlinePanel {
                     HStack(spacing: 0) {
                         editor(for: note)
-                        Divider()
+                        DesignToken.hairlineSoft.frame(width: 1)
                         OutlinePanelView(outline: outline)
                             .frame(width: appSettings.outlinePanelWidth)
                     }
@@ -90,14 +90,15 @@ struct EditorScreen: View {
 
                     Spacer()
 
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Text(note.title.isEmpty ? l10n["common.untitled"] : note.title)
-                            .font(.headline)
+                            .font(DesignToken.Typography.heading)
+                            .foregroundStyle(DesignToken.bodyStrong)
                             .lineLimit(1)
 
                         Text(note.displayDirectory)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(DesignToken.Typography.caption)
+                            .foregroundStyle(DesignToken.mutedSoft)
                             .lineLimit(1)
                     }
 
@@ -114,7 +115,7 @@ struct EditorScreen: View {
                     }
                 }
 
-                HStack(spacing: 12) {
+                HStack(spacing: DesignToken.Space.md) {
                     DateLabelView(
                         systemName: "clock",
                         date: note.modifiedAt.homeDisplayFormat,
@@ -183,16 +184,7 @@ private struct OutlineToggleButton: View {
             AppSettings.shared.outlineVisible.toggle()
         } label: {
             Image(systemName: "list.bullet.indent")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(
-                    isVisible ? Color.accentColor : (isHovered ? Color.primary : Color.secondary),
-                )
-                .frame(width: 28, height: 28)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.primary.opacity(isHovered && !isVisible ? 0.1 : 0))
-                }
-                .contentShape(Rectangle())
+                .iconHoverChrome(isHovered: isHovered, isActive: isVisible)
         }
         .buttonStyle(.plain)
         .help(L10n.shared["editor.toggleOutline"])
@@ -241,14 +233,7 @@ private struct CopyMenuButton: View {
             }
         } label: {
             Image(systemName: "doc.on.doc")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(isHovered ? .primary : .secondary)
-                .frame(width: 28, height: 28)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.primary.opacity(isHovered ? 0.1 : 0))
-                }
-                .contentShape(Rectangle())
+                .iconHoverChrome(isHovered: isHovered)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -281,11 +266,11 @@ private struct DeleteIconButton: View {
         Button(action: action) {
             Image(systemName: "trash")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(isHovered ? .red : .secondary)
+                .foregroundStyle(isHovered ? DesignToken.error : DesignToken.muted)
                 .frame(width: 28, height: 28)
                 .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.primary.opacity(isHovered ? 0.1 : 0))
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
+                        .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.hover : 0))
                 }
                 .contentShape(Rectangle())
         }

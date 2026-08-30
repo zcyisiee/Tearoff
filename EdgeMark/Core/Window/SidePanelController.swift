@@ -655,17 +655,15 @@ final class SidePanelController: NSWindowController {
     }
 
     /// Frame of the resize handle within the container view.
-    /// Centered on the visible card boundary (PageLayout uses 12pt horizontal padding).
+    /// Single-surface layout: the visible edge is the window edge itself, so the
+    /// handle sits fully inside, hugging the inner edge.
     private static func resizeHandleFrame(for side: EdgeSide, containerWidth: CGFloat, height: CGFloat) -> NSRect {
-        // The visible card edge is 12pt from the window edge (PageLayout.padding(.horizontal, 12)).
-        // Center the handle on that boundary so the cursor appears on the visible border.
-        let cardInset: CGFloat = 12
         let w = ResizeHandleView.handleWidth
         switch side {
         case .right:
-            return NSRect(x: cardInset - w / 2, y: 0, width: w, height: height)
+            return NSRect(x: 0, y: 0, width: w, height: height)
         case .left:
-            return NSRect(x: containerWidth - cardInset - w / 2, y: 0, width: w, height: height)
+            return NSRect(x: containerWidth - w, y: 0, width: w, height: height)
         }
     }
 

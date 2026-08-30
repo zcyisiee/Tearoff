@@ -11,12 +11,12 @@ struct HeaderIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isHovered ? .primary : .secondary)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isHovered ? DesignToken.bodyStrong : DesignToken.muted)
                 .frame(width: 28, height: 28)
                 .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.primary.opacity(isHovered ? 0.1 : 0))
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
+                        .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.hover : 0))
                 }
                 .contentShape(Rectangle())
         }

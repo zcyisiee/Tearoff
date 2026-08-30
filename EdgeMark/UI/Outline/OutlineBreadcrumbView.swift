@@ -14,18 +14,18 @@ struct OutlineBreadcrumbView: View {
     var body: some View {
         let path = outline.visiblePath()
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
+            HStack(spacing: DesignToken.Space.xs) {
                 ForEach(path, id: \.self) { index in
                     if index != path.first {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(DesignToken.hairline)
                     }
                     segment(index)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, DesignToken.Space.md)
+            .padding(.vertical, DesignToken.Space.xs)
         }
     }
 
@@ -37,14 +37,19 @@ struct OutlineBreadcrumbView: View {
             openPopoverFor = BreadcrumbSegment(index: index)
         } label: {
             Text(entry.title)
-                .font(.caption)
+                .font(DesignToken.Typography.caption)
                 .lineLimit(1)
-                .foregroundStyle(isCurrent ? .primary : .secondary)
+                .foregroundStyle(isCurrent ? DesignToken.bodyStrong : DesignToken.muted)
+                .fontWeight(isCurrent ? .medium : .regular)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(.primary.opacity(isCurrent ? 0.07 : 0)),
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .fill(
+                            isCurrent
+                                ? DesignToken.accent.opacity(DesignToken.Alpha.selected)
+                                : DesignToken.ink.opacity(0),
+                        ),
                 )
         }
         .buttonStyle(.plain)
@@ -64,18 +69,18 @@ struct OutlineBreadcrumbView: View {
                         outline.scrollCoordinator.scrollToEntry(at: index)
                     } label: {
                         Text(outline.entries[index].title)
-                            .font(.callout)
-                            .foregroundStyle(.primary)
+                            .font(DesignToken.Typography.callout)
+                            .foregroundStyle(DesignToken.bodyText)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, DesignToken.Space.md)
                             .padding(.vertical, 6)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, DesignToken.Space.xs)
         }
         .frame(width: 240, height: min(CGFloat(children.count) * 30 + 8, 320))
     }

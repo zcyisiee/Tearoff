@@ -17,14 +17,7 @@ struct PinButton: View {
             PanelSettings.shared.isPanelPinned = isPinned
         } label: {
             Image(systemName: isPinned ? "pin.fill" : "pin")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(isPinned ? Color.accentColor : (isHovered ? .primary : .secondary))
-                .frame(width: 28, height: 28)
-                .background {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(.primary.opacity(isHovered ? 0.1 : 0))
-                }
-                .contentShape(Rectangle())
+                .iconHoverChrome(isHovered: isHovered, isActive: isPinned)
         }
         .buttonStyle(.plain)
         .opacity(isVisible ? 1 : 0)
