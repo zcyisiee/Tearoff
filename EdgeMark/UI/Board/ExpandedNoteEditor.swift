@@ -102,6 +102,8 @@ struct ExpandedNoteEditor: View {
 
                 Spacer()
 
+                NoteColorMenuButton(note: note)
+
                 OutlineToggleButton()
 
                 CopyMenuButton(note: note)
@@ -158,6 +160,67 @@ struct ExpandedNoteEditor: View {
             guard pending else { return }
             noteStore.pendingEditorFind = false
             isFindBarShowing = true
+        }
+    }
+}
+
+// MARK: - Note Color Menu Button
+
+/// Editor-header identity color picker. Shows the current color as a filled
+/// dot (or a palette glyph when uncolored); menu lists the palette + none.
+struct NoteColorMenuButton: View {
+    @Environment(NoteStore.self) private var noteStore
+    let note: Note
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Menu {
+            Section {
+                ForEach(NoteColor.allCases, id: \.self) { color in
+                    Button {
+                        noteStore.setNoteColor(color, on: note)
+                    } label: {
+                        if note.color == color {
+                            Label(color.label, systemImage: "checkmark")
+                        } else {
+                            Text(color.label)
+                        }
+                    }
+                }
+            }
+            Section {
+                Button(L10n.shared["noteColor.none"]) {
+                    noteStore.setNoteColor(nil, on: note)
+                }
+            }
+        } label: {
+            ZStack {
+                if let color = note.color {
+                    Circle()
+                        .fill(color.strip)
+                        .frame(width: 11, height: 11)
+                } else {
+                    Image(systemName: "paintpalette")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DesignToken.muted)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .background {
+                RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
+                    .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.hover : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L10n.shared["noteColor.menu"])
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
         }
     }
 }

@@ -593,6 +593,17 @@ final class NoteStore {
         recomputeAllUsedTags()
     }
 
+    /// Set (or clear) the note's identity color. Updates in-memory state and marks dirty.
+    func setNoteColor(_ color: NoteColor?, on note: Note) {
+        guard let index = notes.firstIndex(where: { $0.id == note.id }) else { return }
+        notes[index].color = color
+        notes[index].modifiedAt = Date()
+        dirtyNoteIDs.insert(note.id)
+        if selectedNote?.id == note.id {
+            selectedNote = notes[index]
+        }
+    }
+
     /// Toggle a tag in the active sidebar filter. Multi-select acts as OR.
     func toggleTagFilter(_ tag: TagColor) {
         // Filter change → visible row set may shrink; selection would point at hidden rows.

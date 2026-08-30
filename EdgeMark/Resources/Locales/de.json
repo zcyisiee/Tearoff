@@ -273,5 +273,18 @@
   "board.all": "Alle",
   "settings.boardLayout": "Board-Layout",
   "settings.boardLayout.tabs": "Ordner-Registerkarten",
-  "settings.boardLayout.sections": "Einklappbare Abschnitte"
+  "settings.boardLayout.sections": "Einklappbare Abschnitte",
+  "noteColor.menu": "Notizfarbe",
+  "noteColor.none": "Keine Farbe",
+  "noteColor.amber": "Bernstein",
+  "noteColor.teal": "Blaugrün",
+  "noteColor.olive": "Oliv",
+  "noteColor.ochre": "Ocker",
+  "noteColor.brick": "Ziegelrot",
+  "noteColor.plum": "Pflaume",
+  "noteColor.ink": "Tinte",
+  "noteColor.sand": "Sand",
+  "settings.noteColorDisplay": "Notizfarbanzeige",
+  "settings.noteColorDisplay.strip": "Linker Streifen",
+  "settings.noteColorDisplay.tint": "Ganzflächige Tönung"
 }

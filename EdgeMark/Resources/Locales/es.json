@@ -273,5 +273,18 @@
   "board.all": "Todo",
   "settings.boardLayout": "Diseño del tablero",
   "settings.boardLayout.tabs": "Pestañas de carpetas",
-  "settings.boardLayout.sections": "Secciones plegables"
+  "settings.boardLayout.sections": "Secciones plegables",
+  "noteColor.menu": "Color de nota",
+  "noteColor.none": "Sin color",
+  "noteColor.amber": "Ámbar",
+  "noteColor.teal": "Cerceta",
+  "noteColor.olive": "Oliva",
+  "noteColor.ochre": "Ocre",
+  "noteColor.brick": "Ladrillo",
+  "noteColor.plum": "Ciruela",
+  "noteColor.ink": "Tinta",
+  "noteColor.sand": "Arena",
+  "settings.noteColorDisplay": "Muestra de color de nota",
+  "settings.noteColorDisplay.strip": "Franja izquierda",
+  "settings.noteColorDisplay.tint": "Tinte completo"
 }

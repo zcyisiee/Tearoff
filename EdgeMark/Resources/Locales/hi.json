@@ -273,5 +273,18 @@
   "board.all": "सभी",
   "settings.boardLayout": "बोर्ड लेआउट",
   "settings.boardLayout.tabs": "फ़ोल्डर टैब",
-  "settings.boardLayout.sections": "संकुचित अनुभाग"
+  "settings.boardLayout.sections": "संकुचित अनुभाग",
+  "noteColor.menu": "नोट रंग",
+  "noteColor.none": "कोई रंग नहीं",
+  "noteColor.amber": "ऐम्बर",
+  "noteColor.teal": "टील",
+  "noteColor.olive": "ओलिव",
+  "noteColor.ochre": "ओकर",
+  "noteColor.brick": "ईंट",
+  "noteColor.plum": "प्लम",
+  "noteColor.ink": "स्याही",
+  "noteColor.sand": "बालू",
+  "settings.noteColorDisplay": "नोट रंग प्रदर्शन",
+  "settings.noteColorDisplay.strip": "बाईं पट्टी",
+  "settings.noteColorDisplay.tint": "पूर्ण टिंट"
 }

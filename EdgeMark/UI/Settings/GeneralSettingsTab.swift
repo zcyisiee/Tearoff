@@ -154,6 +154,11 @@ struct GeneralSettingsTab: View {
                         Text(layout.displayName(l10n)).tag(layout)
                     }
                 }
+                Picker(l10n["settings.noteColorDisplay"], selection: $settings.noteColorDisplay) {
+                    ForEach(AppSettings.NoteColorDisplay.allCases, id: \.self) { display in
+                        Text(display.displayName(l10n)).tag(display)
+                    }
+                }
             } header: {
                 Label(l10n["settings.editor.section"], systemImage: "textformat")
             }

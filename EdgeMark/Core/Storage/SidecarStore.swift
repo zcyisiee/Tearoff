@@ -14,6 +14,7 @@ final class SidecarStore {
         var modifiedAt: Date
         var savedAt: Date // last EdgeMark write — external-change sentinel
         var tags: [String] // TagColor rawValues
+        var color: String? // NoteColor rawValue
     }
 
     struct TrashEntry: Codable {
@@ -23,6 +24,7 @@ final class SidecarStore {
         var createdAt: Date
         var modifiedAt: Date
         var tags: [String]
+        var color: String? // NoteColor rawValue
     }
 
     struct FolderEntry: Codable {

@@ -249,6 +249,17 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(boardLayout.rawValue, forKey: "boardLayout") }
     }
 
+    /// How note colors appear on board cards: a narrow leading strip (default)
+    /// or a full-card tinted background.
+    enum NoteColorDisplay: String, CaseIterable {
+        case strip
+        case tint
+    }
+
+    var noteColorDisplay: NoteColorDisplay = .strip {
+        didSet { UserDefaults.standard.set(noteColorDisplay.rawValue, forKey: "noteColorDisplay") }
+    }
+
     /// Custom labels for color tags. Missing entries fall back to `TagColor.defaultLabel`.
     /// Persisted as a single UserDefaults dictionary keyed by raw color name.
     var tagLabels: [TagColor: String] = [:] {
@@ -340,6 +351,11 @@ final class AppSettings {
         {
             boardLayout = value
         }
+        if let raw = UserDefaults.standard.string(forKey: "noteColorDisplay"),
+           let value = NoteColorDisplay(rawValue: raw)
+        {
+            noteColorDisplay = value
+        }
         if let raw = UserDefaults.standard.dictionary(forKey: "tagLabels") as? [String: String] {
             tagLabels = raw.reduce(into: [TagColor: String]()) { result, kv in
                 if let color = TagColor(rawValue: kv.key) {
@@ -371,6 +387,15 @@ extension AppSettings.SortBy {
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
+}
+
+extension AppSettings.NoteColorDisplay {
+    func displayName(_ l10n: L10n) -> String {
+        switch self {
+        case .strip: l10n["settings.noteColorDisplay.strip"]
+        case .tint: l10n["settings.noteColorDisplay.tint"]
+        }
+    }
 }
 
 extension AppSettings.BoardLayout {

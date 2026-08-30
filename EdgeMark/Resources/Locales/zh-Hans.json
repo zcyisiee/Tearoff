@@ -273,5 +273,18 @@
   "board.all": "全部",
   "settings.boardLayout": "笔记板布局",
   "settings.boardLayout.tabs": "文件夹页签",
-  "settings.boardLayout.sections": "折叠分区"
+  "settings.boardLayout.sections": "折叠分区",
+  "noteColor.menu": "笔记颜色",
+  "noteColor.none": "无颜色",
+  "noteColor.amber": "琥珀",
+  "noteColor.teal": "蓟青",
+  "noteColor.olive": "橄榄",
+  "noteColor.ochre": "赭石",
+  "noteColor.brick": "砖红",
+  "noteColor.plum": "紫李",
+  "noteColor.ink": "墨色",
+  "noteColor.sand": "沙色",
+  "settings.noteColorDisplay": "笔记颜色展示",
+  "settings.noteColorDisplay.strip": "左侧色条",
+  "settings.noteColorDisplay.tint": "整卡色底"
 }

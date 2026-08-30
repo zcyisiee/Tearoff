@@ -273,5 +273,18 @@
   "board.all": "All",
   "settings.boardLayout": "Board Layout",
   "settings.boardLayout.tabs": "Folder Tabs",
-  "settings.boardLayout.sections": "Collapsible Sections"
+  "settings.boardLayout.sections": "Collapsible Sections",
+  "noteColor.menu": "Note Color",
+  "noteColor.none": "No Color",
+  "noteColor.amber": "Amber",
+  "noteColor.teal": "Teal",
+  "noteColor.olive": "Olive",
+  "noteColor.ochre": "Ochre",
+  "noteColor.brick": "Brick",
+  "noteColor.plum": "Plum",
+  "noteColor.ink": "Ink",
+  "noteColor.sand": "Sand",
+  "settings.noteColorDisplay": "Note Color Display",
+  "settings.noteColorDisplay.strip": "Left Strip",
+  "settings.noteColorDisplay.tint": "Full Tint"
 }

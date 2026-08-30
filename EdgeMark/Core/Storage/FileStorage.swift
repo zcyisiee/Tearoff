@@ -323,6 +323,7 @@ enum FileStorage {
                 modifiedAt: note.modifiedAt,
                 savedAt: savedAt,
                 tags: note.tags.map(\.rawValue),
+                color: note.color?.rawValue,
             ),
             for: note.id,
         )
@@ -477,6 +478,7 @@ enum FileStorage {
                 modifiedAt: note.modifiedAt,
                 savedAt: savedAt,
                 tags: note.tags.map(\.rawValue),
+                color: note.color?.rawValue,
             ),
             for: note.id,
         )
@@ -786,6 +788,7 @@ enum FileStorage {
                     savedAt: entry.modifiedAt,
                     folder: resolvedFolder,
                     tags: tags,
+                    color: entry.color.flatMap(NoteColor.init),
                     trashedAt: entry.trashedAt,
                     savedFilename: filename,
                 )
@@ -804,6 +807,7 @@ enum FileStorage {
                     savedAt: entry.savedAt,
                     folder: folder,
                     tags: tags,
+                    color: entry.color.flatMap(NoteColor.init),
                     savedFilename: filename,
                 )
             }
@@ -838,6 +842,7 @@ enum FileStorage {
                     modifiedAt: modified,
                     savedAt: modified,
                     tags: tags.map(\.rawValue),
+                    color: nil,
                 ), for: id)
             }
             try? SidecarStore.shared.save()

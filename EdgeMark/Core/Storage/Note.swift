@@ -15,8 +15,11 @@ struct Note: Identifiable {
     var folder: String
 
     /// Color tags assigned to this note (Finder-style multi-tag).
-    /// Persisted as a YAML list: `tags: [red, blue]`.
+    /// Persisted in the sidecar.
     var tags: [TagColor]
+
+    /// Identity color (SideNotes-style card color). Persisted in the sidecar.
+    var color: NoteColor?
 
     /// When the note was moved to Trash (nil = active). Persisted in YAML front matter.
     var trashedAt: Date?
@@ -54,6 +57,7 @@ struct Note: Identifiable {
         savedAt: Date = Date(),
         folder: String = "",
         tags: [TagColor] = [],
+        color: NoteColor? = nil,
         trashedAt: Date? = nil,
         savedFilename: String? = nil,
     ) {
@@ -65,6 +69,7 @@ struct Note: Identifiable {
         self.savedAt = savedAt
         self.folder = folder
         self.tags = tags
+        self.color = color
         self.trashedAt = trashedAt
         self.savedFilename = savedFilename
     }
@@ -78,6 +83,7 @@ struct Note: Identifiable {
             && lhs.modifiedAt == rhs.modifiedAt
             && lhs.folder == rhs.folder
             && lhs.tags == rhs.tags
+            && lhs.color == rhs.color
             && lhs.trashedAt == rhs.trashedAt
     }
 }

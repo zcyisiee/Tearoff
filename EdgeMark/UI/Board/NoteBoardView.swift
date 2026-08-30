@@ -447,6 +447,9 @@ struct NoteBoardView: View {
                             noteStore: noteStore,
                             l10n: l10n,
                             onRename: { startRenamingNote(note) },
+                            onSetColor: { color in
+                                noteStore.setNoteColor(color, on: note)
+                            },
                         )
                     }
                 }

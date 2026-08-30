@@ -81,12 +81,15 @@ enum NoteThumbnailRenderer {
                 continue
             }
             if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
-                let body = line[line.index(line.startIndex, offsetBy: 2)...]
-                // Editors can nest tasks ("- - [x] …") — still render as a task.
-                if body.hasPrefix("[ ] ") || body.hasPrefix("[x] ") {
-                    lines.append(taskLine("- " + body))
+                var bulletBody = line[line.index(line.startIndex, offsetBy: 2)...]
+                // Editors can nest tasks ("- - [x] …") — strip extra markers, still render as a task.
+                while bulletBody.hasPrefix("- ") || bulletBody.hasPrefix("* ") || bulletBody.hasPrefix("+ ") {
+                    bulletBody = bulletBody.dropFirst(2)
+                }
+                if bulletBody.hasPrefix("[ ] ") || bulletBody.hasPrefix("[x] ") {
+                    lines.append(taskLine("- " + bulletBody))
                 } else {
-                    lines.append(bulletLine(String(body)))
+                    lines.append(bulletLine(String(bulletBody)))
                 }
                 continue
             }

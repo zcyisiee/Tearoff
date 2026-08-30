@@ -7,6 +7,7 @@ import SwiftUI
 /// editing); context menu reuses the shared note menu.
 struct BoardNoteCard: View {
     @Environment(L10n.self) private var l10n
+    @Environment(AppSettings.self) private var appSettings
     let note: Note
     var isHighlighted: Bool = false
     var onOpen: () -> Void
@@ -15,6 +16,10 @@ struct BoardNoteCard: View {
 
     private var title: String {
         note.title.isEmpty ? L10n.shared["common.untitled"] : note.title
+    }
+
+    private var usesTint: Bool {
+        appSettings.noteColorDisplay == .tint && note.color != nil
     }
 
     var body: some View {
@@ -46,16 +51,35 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.mutedSoft)
             }
         }
-        .padding(DesignToken.Space.sm + 2)
+        .padding(.leading, usesTint ? DesignToken.Space.sm + 2 : DesignToken.Space.sm + 5)
+        .padding(.trailing, DesignToken.Space.sm + 2)
+        .padding(.vertical, DesignToken.Space.sm + 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: DesignToken.Radius.md)
-                .fill(DesignToken.surfaceCard),
-        )
+                .fill(cardFill)
+        }
+        .overlay {
+            if usesTint {
+                // Tint mode: saturated leading edge keeps the color readable.
+                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                    .fill(note.color?.strip ?? .clear)
+                    .frame(width: 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
+            } else if let color = note.color {
+                // Strip mode: narrow color bar on the card's left edge.
+                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                    .fill(color.strip)
+                    .frame(width: 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.md)
                 .strokeBorder(
-                    isHighlighted ? DesignToken.accent : (isHovered ? DesignToken.hairline : DesignToken.hairlineSoft),
+                    isHighlighted ? (note.color?.strip ?? DesignToken.accent) : (isHovered ? DesignToken.hairline : DesignToken.hairlineSoft),
                     lineWidth: isHighlighted ? 1.5 : 1,
                 )
         }
@@ -72,6 +96,13 @@ struct BoardNoteCard: View {
             }
         }
         .help(title)
+    }
+
+    private var cardFill: Color {
+        if usesTint, let color = note.color {
+            return color.cardTint
+        }
+        return DesignToken.surfaceCard
     }
 }
 
