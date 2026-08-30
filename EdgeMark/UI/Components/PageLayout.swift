@@ -5,7 +5,6 @@ import SwiftUI
 /// content by a hairline, not by card boundaries. Pass `onSwipeBack` to enable
 /// two-finger trackpad right-swipe to go back on the header.
 struct PageLayout<Header: View, Content: View>: View {
-    @Environment(AppSettings.self) private var appSettings
     var onSwipeBack: (() -> Void)?
     var onContentSwipeRight: (() -> Void)?
     var onContentSwipeLeft: (() -> Void)?
@@ -26,16 +25,16 @@ struct PageLayout<Header: View, Content: View>: View {
         self.content = content()
     }
 
-    /// Warm canvas wash over the vibrancy material. Opaque style paints nearly
-    /// solid; translucent keeps the backdrop visible through the wash.
+    /// Theme canvas wash over the vibrancy material. Opaque themes paint
+    /// nearly solid; translucent ones keep the backdrop visible through the wash.
     private var canvasWash: some View {
         DesignToken.canvas
-            .opacity(appSettings.panelStyle == .opaque ? 0.94 : 0.8)
+            .opacity(ThemeEngine.shared.activeTheme.material.washOpacity)
     }
 
     var body: some View {
         ZStack {
-            VisualEffectView(tint: appSettings.panelTint.color, material: appSettings.panelStyle.material)
+            VisualEffectView(tint: nil, material: ThemeEngine.shared.activeTheme.material.nsMaterial)
             canvasWash.ignoresSafeArea()
 
             VStack(spacing: 0) {

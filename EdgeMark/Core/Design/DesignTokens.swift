@@ -16,8 +16,10 @@ import SwiftUI
 enum DesignToken {
     // MARK: Color — surfaces
 
-    /// Panel backdrop: warm ivory (light) / warm charcoal (dark).
-    static let canvas = dynamic(light: 0xF5F3E9, dark: 0x2D2E2D)
+    /// Panel backdrop: the active theme's canvas (warm ivory by default,
+    /// warm charcoal in dark). Theme-reactive — reading it in a view body
+    /// registers a dependency on `ThemeEngine.shared`.
+    static var canvas: Color { ThemeEngine.shared.activeTheme.canvas }
     /// Soft raised surface — secondary strips, insets, hover fills.
     static let surfaceSoft = dynamic(light: 0xF8F7F2, dark: 0x313230)
     /// Card surface — the brightest layer.
@@ -38,9 +40,9 @@ enum DesignToken {
     static let muted = dynamic(light: 0x6D675B, dark: 0xA8A294)
     static let mutedSoft = dynamic(light: 0x8D8575, dark: 0x87816F)
 
-    // MARK: Color — accent (amber)
+    // MARK: Color — accent (theme-driven, amber in the default Cream theme)
 
-    static let accent = dynamic(light: 0xB7791F, dark: 0xE6BF7A)
+    static var accent: Color { ThemeEngine.shared.activeTheme.accent }
     static let accentActive = dynamic(light: 0x9F6819, dark: 0xF0CF92)
     /// Text/icon color on top of accent fills.
     static let onAccent = dynamic(light: 0xFFF8F3, dark: 0x3D2C0F)

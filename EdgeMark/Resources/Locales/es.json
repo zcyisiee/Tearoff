@@ -286,5 +286,19 @@
   "noteColor.sand": "Arena",
   "settings.noteColorDisplay": "Muestra de color de nota",
   "settings.noteColorDisplay.strip": "Franja izquierda",
-  "settings.noteColorDisplay.tint": "Tinte completo"
+  "settings.noteColorDisplay.tint": "Tinte completo",
+  "settings.tab.themes": "Temas",
+  "themes.new": "Nuevo tema",
+  "themes.edit": "Editar tema",
+  "themes.duplicate": "Duplicar para personalizar",
+  "themes.copyPrefix": "Copia de",
+  "themes.name": "Nombre",
+  "themes.canvas": "Lienzo",
+  "themes.accent": "Acento",
+  "themes.light": "Claro",
+  "themes.dark": "Oscuro",
+  "themes.material": "Material",
+  "themes.material.translucent": "Translúcido",
+  "themes.material.opaque": "Opaco",
+  "common.save": "Guardar"
 }

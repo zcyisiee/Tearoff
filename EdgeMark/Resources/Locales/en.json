@@ -286,5 +286,19 @@
   "noteColor.sand": "Sand",
   "settings.noteColorDisplay": "Note Color Display",
   "settings.noteColorDisplay.strip": "Left Strip",
-  "settings.noteColorDisplay.tint": "Full Tint"
+  "settings.noteColorDisplay.tint": "Full Tint",
+  "settings.tab.themes": "Themes",
+  "themes.new": "New Theme",
+  "themes.edit": "Edit Theme",
+  "themes.duplicate": "Duplicate to Customize",
+  "themes.copyPrefix": "Copy of",
+  "themes.name": "Name",
+  "themes.canvas": "Canvas",
+  "themes.accent": "Accent",
+  "themes.light": "Light",
+  "themes.dark": "Dark",
+  "themes.material": "Material",
+  "themes.material.translucent": "Translucent",
+  "themes.material.opaque": "Opaque",
+  "common.save": "Save"
 }

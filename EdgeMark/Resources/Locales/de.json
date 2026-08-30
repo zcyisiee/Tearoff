@@ -286,5 +286,19 @@
   "noteColor.sand": "Sand",
   "settings.noteColorDisplay": "Notizfarbanzeige",
   "settings.noteColorDisplay.strip": "Linker Streifen",
-  "settings.noteColorDisplay.tint": "Ganzflächige Tönung"
+  "settings.noteColorDisplay.tint": "Ganzflächige Tönung",
+  "settings.tab.themes": "Designs",
+  "themes.new": "Neues Design",
+  "themes.edit": "Design bearbeiten",
+  "themes.duplicate": "Duplizieren zum Anpassen",
+  "themes.copyPrefix": "Kopie von",
+  "themes.name": "Name",
+  "themes.canvas": "Leinwand",
+  "themes.accent": "Akzentfarbe",
+  "themes.light": "Hell",
+  "themes.dark": "Dunkel",
+  "themes.material": "Material",
+  "themes.material.translucent": "Translucent",
+  "themes.material.opaque": "Opak",
+  "common.save": "Sichern"
 }

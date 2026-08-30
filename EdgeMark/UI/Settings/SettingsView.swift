@@ -10,6 +10,11 @@ struct SettingsView: View {
                     Label(l10n["settings.tab.general"], systemImage: "gearshape")
                 }
 
+            ThemesSettingsTab()
+                .tabItem {
+                    Label(l10n["settings.tab.themes"], systemImage: "paintpalette")
+                }
+
             BehaviorSettingsTab()
                 .tabItem {
                     Label(l10n["settings.tab.behavior"], systemImage: "macwindow.on.rectangle")
@@ -31,7 +36,7 @@ struct SettingsView: View {
                 }
         }
         .background(FixedWindowTitle(title: l10n["settings.windowTitle"]))
-        .frame(width: 520, height: 420)
+        .frame(minWidth: 520, idealWidth: 560, minHeight: 420, idealHeight: 520)
     }
 }
 

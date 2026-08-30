@@ -15,39 +15,12 @@ final class AppSettings {
         case dateCreated = "Date Created"
     }
 
-    // MARK: - Panel Tint
-
-    enum PanelTint: String, CaseIterable {
-        case system
-        case graphite
-        case slate
-        case sand
-        case sage
-        case rose
-
-        /// Translucent tint applied as a sublayer behind content. nil = no tint (system material only).
-        var color: NSColor? {
-            switch self {
-            case .system: nil
-            case .graphite: NSColor(white: 0.4, alpha: 0.18)
-            case .slate: NSColor(red: 0.40, green: 0.50, blue: 0.62, alpha: 0.18)
-            case .sand: NSColor(red: 0.80, green: 0.68, blue: 0.48, alpha: 0.18)
-            case .sage: NSColor(red: 0.52, green: 0.68, blue: 0.55, alpha: 0.18)
-            case .rose: NSColor(red: 0.82, green: 0.58, blue: 0.62, alpha: 0.18)
-            }
-        }
-    }
-
     var sortBy: SortBy = .dateModified {
         didSet { UserDefaults.standard.set(sortBy.rawValue, forKey: "sortBy") }
     }
 
     var sortAscending: Bool = false {
         didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
-    }
-
-    var panelTint: PanelTint = .system {
-        didSet { UserDefaults.standard.set(panelTint.rawValue, forKey: "panelTint") }
     }
 
     /// PostScript font name (e.g. "HelveticaNeue", "SFMono-Regular"). nil = system font.
@@ -198,24 +171,6 @@ final class AppSettings {
         }
     }
 
-    // MARK: - Panel opacity
-
-    enum PanelStyle: String, CaseIterable {
-        case translucent
-        case opaque
-
-        var material: NSVisualEffectView.Material {
-            switch self {
-            case .translucent: .sidebar
-            case .opaque: .contentBackground
-            }
-        }
-    }
-
-    var panelStyle: PanelStyle = .translucent {
-        didSet { UserDefaults.standard.set(panelStyle.rawValue, forKey: "panelStyle") }
-    }
-
     // MARK: - Spell checking
 
     /// Mirrors `SpellCheckingPolicy.continuousSpellChecking`.
@@ -293,16 +248,6 @@ final class AppSettings {
             sortBy = value
         }
         sortAscending = UserDefaults.standard.bool(forKey: "sortAscending")
-        if let raw = UserDefaults.standard.string(forKey: "panelTint"),
-           let value = PanelTint(rawValue: raw)
-        {
-            panelTint = value
-        }
-        if let raw = UserDefaults.standard.string(forKey: "panelStyle"),
-           let value = PanelStyle(rawValue: raw)
-        {
-            panelStyle = value
-        }
         // If the saved font is no longer installed (e.g. user uninstalled it),
         // drop it silently so the editor falls back to the system font.
         if let saved = UserDefaults.standard.string(forKey: "editorFontName"),
@@ -407,19 +352,6 @@ extension AppSettings.BoardLayout {
     }
 }
 
-extension AppSettings.PanelTint {
-    func displayName(_ l10n: L10n) -> String {
-        switch self {
-        case .system: l10n["settings.panelTint.system"]
-        case .graphite: l10n["settings.panelTint.graphite"]
-        case .slate: l10n["settings.panelTint.slate"]
-        case .sand: l10n["settings.panelTint.sand"]
-        case .sage: l10n["settings.panelTint.sage"]
-        case .rose: l10n["settings.panelTint.rose"]
-        }
-    }
-}
-
 extension AppSettings.OutlinePosition {
     func displayName(_ l10n: L10n) -> String {
         switch self {
@@ -429,11 +361,3 @@ extension AppSettings.OutlinePosition {
     }
 }
 
-extension AppSettings.PanelStyle {
-    func displayName(_ l10n: L10n) -> String {
-        switch self {
-        case .translucent: l10n["settings.panelStyle.translucent"]
-        case .opaque: l10n["settings.panelStyle.opaque"]
-        }
-    }
-}

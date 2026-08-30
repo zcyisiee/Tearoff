@@ -286,5 +286,19 @@
   "noteColor.sand": "बालू",
   "settings.noteColorDisplay": "नोट रंग प्रदर्शन",
   "settings.noteColorDisplay.strip": "बाईं पट्टी",
-  "settings.noteColorDisplay.tint": "पूर्ण टिंट"
+  "settings.noteColorDisplay.tint": "पूर्ण टिंट",
+  "settings.tab.themes": "थीम",
+  "themes.new": "नई थीम",
+  "themes.edit": "थीम संपादित करें",
+  "themes.duplicate": "अनुकूलित करने के लिए डुप्लिकेट",
+  "themes.copyPrefix": "कॉपी",
+  "themes.name": "नाम",
+  "themes.canvas": "कैनवास",
+  "themes.accent": "एक्सेंट",
+  "themes.light": "लाइट",
+  "themes.dark": "डार्क",
+  "themes.material": "सामग्री",
+  "themes.material.translucent": "पारभासी",
+  "themes.material.opaque": "अपारदर्शी",
+  "common.save": "सहेजें"
 }

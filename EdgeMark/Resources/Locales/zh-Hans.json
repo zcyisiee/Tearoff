@@ -286,5 +286,19 @@
   "noteColor.sand": "沙色",
   "settings.noteColorDisplay": "笔记颜色展示",
   "settings.noteColorDisplay.strip": "左侧色条",
-  "settings.noteColorDisplay.tint": "整卡色底"
+  "settings.noteColorDisplay.tint": "整卡色底",
+  "settings.tab.themes": "主题",
+  "themes.new": "新建主题",
+  "themes.edit": "编辑主题",
+  "themes.duplicate": "复制来自定义",
+  "themes.copyPrefix": "副本",
+  "themes.name": "名称",
+  "themes.canvas": "画布",
+  "themes.accent": "强调色",
+  "themes.light": "浅色",
+  "themes.dark": "深色",
+  "themes.material": "材质",
+  "themes.material.translucent": "半透明",
+  "themes.material.opaque": "不透明",
+  "common.save": "保存"
 }
