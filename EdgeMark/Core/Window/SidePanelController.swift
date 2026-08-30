@@ -33,7 +33,6 @@ final class SidePanelController: NSWindowController {
     let edgeDetector: EdgeDetector
     let noteStore = NoteStore()
     let appSettings = AppSettings.shared
-    private let peekCoordinator = PeekCoordinator()
 
     // MARK: - Init
 
@@ -74,7 +73,6 @@ final class SidePanelController: NSWindowController {
             rootView: ContentView()
                 .environment(noteStore)
                 .environment(appSettings)
-                .environment(peekCoordinator)
                 .environment(L10n.shared),
         )
         hostingView.frame = containerView.bounds
@@ -185,18 +183,8 @@ final class SidePanelController: NSWindowController {
             }
             let shift = event.modifierFlags.contains(.shift)
             switch event.keyCode {
-            case 125: // ↓
-                guard noteStore.moveSelection(direction: 1, extending: shift) else { return event }
-                refreshPeekForSelection()
-                return nil
-            case 126: // ↑
-                guard noteStore.moveSelection(direction: -1, extending: shift) else { return event }
-                refreshPeekForSelection()
-                return nil
-            case 36, 76: // Return / numpad Enter
-                return noteStore.openSelectedItem() ? nil : event
-            case 49: // Space — Quick Look preview
-                return handleSpacePeek() ? nil : event
+            case 125, 126, 36, 76: // ↓ ↑ Return / numpad Enter — board has no row list
+                return event
             default:
                 return event
             }
@@ -296,7 +284,6 @@ final class SidePanelController: NSWindowController {
         resizeHandleView?.frame = Self.resizeHandleFrame(for: side, containerWidth: panelWidth, height: containerView.bounds.height)
 
         // If panel is visible, hide it — user re-triggers to see it on the new edge
-        peekCoordinator.dismissNow()
         if isShown {
             hidePanel()
         } else {
@@ -462,7 +449,6 @@ final class SidePanelController: NSWindowController {
             // Interrupt hide animation — snap to shown position instantly
             Log.window.debug("[SidePanelController] showPanel interrupted hide animation")
             isAnimating = false
-            peekCoordinator.suppressPeek = false
             window.setFrame(shownFrame, display: true)
             window.alphaValue = 1
             window.ignoresMouseEvents = false
@@ -470,7 +456,6 @@ final class SidePanelController: NSWindowController {
             NSApp.activate(ignoringOtherApps: true)
         } else {
             isAnimating = true
-            peekCoordinator.suppressPeek = true
             window.ignoresMouseEvents = false
             window.makeKeyAndOrderFront(nil)
 
@@ -489,7 +474,6 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
-                    peekCoordinator.suppressPeek = false
                 }
             } else {
                 // Fade: position at the final frame while invisible, then animate alpha 0 → 1.
@@ -504,7 +488,6 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
-                    peekCoordinator.suppressPeek = false
                 }
             }
 
@@ -517,7 +500,6 @@ final class SidePanelController: NSWindowController {
         guard let window, isShown else { return }
         Log.window.info("[SidePanelController] hidePanel")
         noteStore.saveDirtyNotes()
-        peekCoordinator.dismissNow()
         isShown = false
         let gen = animationGeneration &+ 1
         animationGeneration = gen
@@ -701,24 +683,6 @@ final class SidePanelController: NSWindowController {
         if window.frame.contains(cursor) {
             return true
         }
-        // 2. Inside the peek preview window
-        if let peekFrame = peekCoordinator.peekWindowFrame, peekFrame.contains(cursor) {
-            return true
-        }
-        // 3. Inside the 12pt gap strip between the panel and the preview
-        let gap = PeekWindowController.gap
-        let side = PanelSettings.shared.edgeSide
-        let gapStrip = switch side {
-        case .right:
-            NSRect(x: window.frame.minX - gap, y: window.frame.minY,
-                   width: gap, height: window.frame.height)
-        case .left:
-            NSRect(x: window.frame.maxX, y: window.frame.minY,
-                   width: gap, height: window.frame.height)
-        }
-        if gapStrip.contains(cursor) {
-            return true
-        }
         return false
     }
 
@@ -738,46 +702,6 @@ final class SidePanelController: NSWindowController {
     /// Whether an NSTextView in the panel is the first responder (user is editing).
     private var isEditorFocused: Bool {
         window?.firstResponder is NSTextView
-    }
-
-    /// Handle Space-to-preview (Quick Look). Returns true if the event was consumed.
-    private func handleSpacePeek() -> Bool {
-        guard AppSettings.shared.spaceToPreviewEnabled, !peekCoordinator.suppressPeek else { return false }
-        guard noteStore.pendingEditorFind == false else { return false }
-        guard noteStore.selection.count == 1 else { return false }
-        guard let win = window else { return false }
-        let panelFrame = win.convertToScreen(win.contentView?.bounds ?? win.frame)
-
-        let item = noteStore.selection.first!
-        let content: PeekContent
-        switch item {
-        case let .folder(name):
-            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return false }
-            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
-        case let .note(id):
-            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return false }
-            content = .note(note)
-        }
-        peekCoordinator.triggerPeek(content: content, panelFrame: panelFrame)
-        return true
-    }
-
-    /// If the peek preview was keyboard-triggered and showing, update its
-    /// content to match the new selection after arrow-key navigation.
-    private func refreshPeekForSelection() {
-        guard peekCoordinator.isKeyboardTriggered else { return }
-        guard noteStore.selection.count == 1 else { return }
-        let item = noteStore.selection.first!
-        let content: PeekContent
-        switch item {
-        case let .folder(name):
-            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return }
-            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
-        case let .note(id):
-            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return }
-            content = .note(note)
-        }
-        peekCoordinator.updateForSelectionChange(content: content)
     }
 }
 

@@ -236,52 +236,17 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(automaticSpellingCorrectionEnabled, forKey: "automaticSpellingCorrectionEnabled") }
     }
 
-    // MARK: - Hover-to-peek
+    // MARK: - Board layout
 
-    /// Discrete dwell options for hover-to-preview. Space-to-preview is
-    /// always instant (no delay) regardless of this setting.
-    enum HoverPeekDelay: String, CaseIterable {
-        case fast
-        case normal
-        case slow
-        case verySlow
-
-        var seconds: TimeInterval {
-            switch self {
-            case .fast: 0.15
-            case .normal: 0.35
-            case .slow: 0.7
-            case .verySlow: 1.2
-            }
-        }
+    /// Note board organization: folder tabs over a card grid, or every folder
+    /// as a collapsible section in one scrolling view.
+    enum BoardLayout: String, CaseIterable {
+        case tabs
+        case sections
     }
 
-    /// Whether hovering over a note/folder row shows a floating read-only
-    /// preview on the opposite side of the panel. Default on — opt-out via
-    /// the General settings tab.
-    var hoverPeekEnabled: Bool = true {
-        didSet {
-            UserDefaults.standard.set(hoverPeekEnabled, forKey: "hoverPeekEnabled")
-            NotificationCenter.default.post(name: .previewSettingsChanged, object: nil)
-        }
-    }
-
-    /// Whether pressing Space on a single selected row shows the preview
-    /// instantly (Quick Look behavior). Independent from hover-to-peek.
-    /// Default on.
-    var spaceToPreviewEnabled: Bool = true {
-        didSet {
-            UserDefaults.standard.set(spaceToPreviewEnabled, forKey: "spaceToPreviewEnabled")
-            NotificationCenter.default.post(name: .previewSettingsChanged, object: nil)
-        }
-    }
-
-    /// Hover dwell tier before the preview appears. Does not affect
-    /// Space-to-preview, which is always instant.
-    var hoverPeekDelay: HoverPeekDelay = .normal {
-        didSet {
-            UserDefaults.standard.set(hoverPeekDelay.rawValue, forKey: "hoverPeekDelay")
-        }
+    var boardLayout: BoardLayout = .tabs {
+        didSet { UserDefaults.standard.set(boardLayout.rawValue, forKey: "boardLayout") }
     }
 
     /// Custom labels for color tags. Missing entries fall back to `TagColor.defaultLabel`.
@@ -370,16 +335,10 @@ final class AppSettings {
         if let raw = UserDefaults.standard.object(forKey: "automaticSpellingCorrectionEnabled") as? Bool {
             automaticSpellingCorrectionEnabled = raw
         }
-        if let raw = UserDefaults.standard.object(forKey: "hoverPeekEnabled") as? Bool {
-            hoverPeekEnabled = raw
-        }
-        if let raw = UserDefaults.standard.object(forKey: "spaceToPreviewEnabled") as? Bool {
-            spaceToPreviewEnabled = raw
-        }
-        if let raw = UserDefaults.standard.string(forKey: "hoverPeekDelay"),
-           let value = HoverPeekDelay(rawValue: raw)
+        if let raw = UserDefaults.standard.string(forKey: "boardLayout"),
+           let value = BoardLayout(rawValue: raw)
         {
-            hoverPeekDelay = value
+            boardLayout = value
         }
         if let raw = UserDefaults.standard.dictionary(forKey: "tagLabels") as? [String: String] {
             tagLabels = raw.reduce(into: [TagColor: String]()) { result, kv in
@@ -412,16 +371,13 @@ extension AppSettings.SortBy {
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
-    static let previewSettingsChanged = Notification.Name("previewSettingsChanged")
 }
 
-extension AppSettings.HoverPeekDelay {
+extension AppSettings.BoardLayout {
     func displayName(_ l10n: L10n) -> String {
         switch self {
-        case .fast: l10n["settings.hoverDelay.fast"]
-        case .normal: l10n["settings.hoverDelay.normal"]
-        case .slow: l10n["settings.hoverDelay.slow"]
-        case .verySlow: l10n["settings.hoverDelay.verySlow"]
+        case .tabs: l10n["settings.boardLayout.tabs"]
+        case .sections: l10n["settings.boardLayout.sections"]
         }
     }
 }

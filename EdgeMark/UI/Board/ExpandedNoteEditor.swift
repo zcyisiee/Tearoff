@@ -1,18 +1,23 @@
 import Cocoa
 import SwiftUI
 
-struct EditorScreen: View {
+// MARK: - ExpandedNoteEditor
+
+/// The note in its expanded, editing state — fills the board content area.
+/// Carries the full editor experience (find bar, outline panel/breadcrumb,
+/// slash commands, external-change alerts) that used to live in
+/// `EditorScreen`; the header's back button becomes a collapse button.
+struct ExpandedNoteEditor: View {
     @Environment(NoteStore.self) var noteStore
     @Environment(AppSettings.self) var appSettings
     @Environment(L10n.self) var l10n
+
+    let note: Note
+
     @State private var showDeleteConfirm = false
     @State private var pendingEditorReload: String? = nil
     @State private var isFindBarShowing = false
     @State private var outline = OutlineState()
-
-    private var backLabel: String {
-        noteStore.selectedFolder?.name ?? l10n["common.home"]
-    }
 
     private var showsOutlinePanel: Bool {
         appSettings.outlineVisible && appSettings.outlinePosition == .right
@@ -23,34 +28,30 @@ struct EditorScreen: View {
     }
 
     var body: some View {
-        PageLayout(
-            onSwipeBack: { goBack() },
-            onContentSwipeRight: PanelSettings.shared.editorSwipeToNavigateEnabled
-                ? { noteStore.navigateToPreviousNote(sortedBy: appSettings) } : nil,
-            onContentSwipeLeft: PanelSettings.shared.editorSwipeToNavigateEnabled
-                ? { noteStore.navigateToNextNote(sortedBy: appSettings) } : nil,
-        ) {
-            headerContent
-        } content: {
-            if let note = noteStore.selectedNote {
+        VStack(spacing: 0) {
+            header
+
+            if showsOutlineBreadcrumb {
+                OutlineBreadcrumbView(outline: outline)
+                    .padding(.bottom, DesignToken.Space.xs)
+            }
+
+            DesignToken.hairlineSoft.frame(height: 1)
+
+            HStack(spacing: 0) {
+                editor(for: note)
                 if showsOutlinePanel {
-                    HStack(spacing: 0) {
-                        editor(for: note)
-                        DesignToken.hairlineSoft.frame(width: 1)
-                        OutlinePanelView(outline: outline)
-                            .frame(width: appSettings.outlinePanelWidth)
-                    }
-                } else {
-                    editor(for: note)
+                    DesignToken.hairlineSoft.frame(width: 1)
+                    OutlinePanelView(outline: outline)
+                        .frame(width: appSettings.outlinePanelWidth)
                 }
             }
+            .frame(maxHeight: .infinity)
         }
         .alert(l10n["alert.deleteNote.title"], isPresented: $showDeleteConfirm) {
             Button(l10n["common.delete"], role: .destructive) {
-                if let note = noteStore.selectedNote {
-                    noteStore.closeNote()
-                    noteStore.deleteNote(note)
-                }
+                noteStore.closeNote()
+                noteStore.deleteNote(note)
             }
             Button(l10n["common.cancel"], role: .cancel) {}
         }
@@ -76,70 +77,62 @@ struct EditorScreen: View {
         }
     }
 
-    @ViewBuilder
-    private var headerContent: some View {
-        if let note = noteStore.selectedNote {
-            VStack(spacing: 4) {
-                HStack {
-                    HeaderIconButton(
-                        systemName: "chevron.left",
-                        help: backLabel,
-                    ) {
-                        goBack()
-                    }
+    // MARK: - Header
 
-                    Spacer()
-
-                    HStack(spacing: 6) {
-                        Text(note.title.isEmpty ? l10n["common.untitled"] : note.title)
-                            .font(DesignToken.Typography.heading)
-                            .foregroundStyle(DesignToken.bodyStrong)
-                            .lineLimit(1)
-
-                        Text(note.displayDirectory)
-                            .font(DesignToken.Typography.caption)
-                            .foregroundStyle(DesignToken.mutedSoft)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    OutlineToggleButton()
-
-                    PinButton()
-
-                    CopyMenuButton(note: note)
-
-                    DeleteIconButton {
-                        showDeleteConfirm = true
-                    }
+    private var header: some View {
+        VStack(spacing: DesignToken.Space.xs) {
+            HStack(spacing: DesignToken.Space.xs) {
+                HeaderIconButton(
+                    systemName: "chevron.down",
+                    help: l10n["common.back"],
+                ) {
+                    noteStore.closeNote()
                 }
 
-                HStack(spacing: DesignToken.Space.md) {
-                    DateLabelView(
-                        systemName: "clock",
-                        date: note.modifiedAt.homeDisplayFormat,
-                        tooltip: L10n.shared.t("editor.modifiedAt", note.modifiedAt.homeDisplayFormat),
-                    )
+                Text(note.title.isEmpty ? l10n["common.untitled"] : note.title)
+                    .font(DesignToken.Typography.heading)
+                    .foregroundStyle(DesignToken.bodyStrong)
+                    .lineLimit(1)
 
-                    DateLabelView(
-                        systemName: "calendar",
-                        date: note.createdAt.homeDisplayFormat,
-                        tooltip: L10n.shared.t("editor.createdAt", note.createdAt.homeDisplayFormat),
-                    )
-                }
+                Text(note.displayDirectory)
+                    .font(DesignToken.Typography.caption)
+                    .foregroundStyle(DesignToken.mutedSoft)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
-                if showsOutlineBreadcrumb {
-                    Divider()
-                    OutlineBreadcrumbView(outline: outline)
+                Spacer()
+
+                OutlineToggleButton()
+
+                CopyMenuButton(note: note)
+
+                DeleteIconButton {
+                    showDeleteConfirm = true
                 }
             }
+
+            HStack(spacing: DesignToken.Space.md) {
+                DateLabelView(
+                    systemName: "clock",
+                    date: note.modifiedAt.homeDisplayFormat,
+                    tooltip: L10n.shared.t("editor.modifiedAt", note.modifiedAt.homeDisplayFormat),
+                )
+
+                DateLabelView(
+                    systemName: "calendar",
+                    date: note.createdAt.homeDisplayFormat,
+                    tooltip: L10n.shared.t("editor.createdAt", note.createdAt.homeDisplayFormat),
+                )
+
+                Spacer()
+            }
         }
+        .padding(.horizontal, DesignToken.Space.lg)
+        .padding(.top, DesignToken.Space.sm + 2)
+        .padding(.bottom, DesignToken.Space.xs)
     }
 
-    private func goBack() {
-        noteStore.closeNote()
-    }
+    // MARK: - Editor
 
     private func editor(for note: Note) -> some View {
         MarkdownEditorView(
@@ -172,7 +165,7 @@ struct EditorScreen: View {
 // MARK: - Outline Toggle Button
 
 /// Outline icon in the editor header; accent-tinted while the outline is shown.
-private struct OutlineToggleButton: View {
+struct OutlineToggleButton: View {
     @State private var isHovered = false
 
     private var isVisible: Bool {
@@ -200,7 +193,7 @@ private struct OutlineToggleButton: View {
 
 /// Copy icon that opens a menu with plain text and Markdown copy options.
 /// If text is selected in the editor, copies the selection; otherwise copies the whole document.
-private struct CopyMenuButton: View {
+struct CopyMenuButton: View {
     let note: Note
 
     @State private var isHovered = false
@@ -257,7 +250,7 @@ private struct CopyMenuButton: View {
 // MARK: - Delete Icon Button
 
 /// Trash icon that turns red on hover.
-private struct DeleteIconButton: View {
+struct DeleteIconButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
@@ -287,7 +280,7 @@ private struct DeleteIconButton: View {
 // MARK: - Date Label View
 
 /// Icon + date text in a compact row with hover tooltip.
-private struct DateLabelView: View {
+struct DateLabelView: View {
     let systemName: String
     let date: String
     let tooltip: String
@@ -297,8 +290,8 @@ private struct DateLabelView: View {
             Image(systemName: systemName)
             Text(date)
         }
-        .font(.caption)
-        .foregroundStyle(.tertiary)
+        .font(DesignToken.Typography.caption)
+        .foregroundStyle(DesignToken.mutedSoft)
         .contentShape(Rectangle())
         .help(tooltip)
     }
