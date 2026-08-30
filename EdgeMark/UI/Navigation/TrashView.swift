@@ -579,8 +579,8 @@ private struct TrashedNoteRowView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 10)
             .background {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.primary.opacity(isHovered ? 0.06 : 0))
+                RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
+                    .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.ghost : 0))
             }
             .padding(.horizontal, 8)
             .contentShape(Rectangle())
@@ -631,7 +631,7 @@ private struct TrashedFolderRowView: View {
                             .foregroundStyle(.background)
                             .padding(.horizontal, 3)
                             .padding(.vertical, 0.5)
-                            .background(.primary.opacity(0.8), in: Capsule())
+                            .background(DesignToken.ink.opacity(0.8), in: Capsule())
                             .offset(x: 4, y: -3)
                     }
                 }
@@ -661,8 +661,8 @@ private struct TrashedFolderRowView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 10)
             .background {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.primary.opacity(isHovered ? 0.06 : 0))
+                RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
+                    .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.ghost : 0))
             }
             .padding(.horizontal, 8)
             .contentShape(Rectangle())
