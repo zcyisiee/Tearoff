@@ -98,11 +98,13 @@ final class PanelSettings {
     }
 
     /// When true, the panel ignores all auto-hide triggers (mouse exit, click-outside,
-    /// Space change) and stays visible until explicitly dismissed via Escape or the
-    /// global toggle shortcut. Useful when copy-pasting back and forth with another app.
-    /// Session-only (resets each launch).
+    /// Space change) and stays visible until explicitly dismissed via Escape, the
+    /// header pin button, or the global toggle shortcut. Useful when copy-pasting
+    /// back and forth with another app. Persisted — the lit header pin shows the
+    /// state after a relaunch.
     var isPanelPinned: Bool {
         didSet {
+            UserDefaults.standard.set(isPanelPinned, forKey: isPanelPinnedKey)
             NotificationCenter.default.post(name: .panelPinStateChanged, object: nil)
         }
     }
@@ -143,6 +145,7 @@ final class PanelSettings {
     private let edgeActivationEnabledKey = "edgeActivationEnabled"
     private let excludeCornersKey = "excludeCorners"
     private let hideOnClickOutsideKey = "hideOnClickOutside"
+    private let isPanelPinnedKey = "isPanelPinned"
     private let swipeToNavigateEnabledKey = "swipeToNavigateEnabled"
     private let editorSwipeToNavigateEnabledKey = "editorSwipeToNavigateEnabled"
     private let swipeGestureSensitivityKey = "swipeGestureSensitivity"
@@ -174,7 +177,7 @@ final class PanelSettings {
         edgeActivationEnabled = UserDefaults.standard.object(forKey: edgeActivationEnabledKey) as? Bool ?? true
         excludeCorners = UserDefaults.standard.object(forKey: excludeCornersKey) as? Bool ?? true
         hideOnClickOutside = UserDefaults.standard.object(forKey: hideOnClickOutsideKey) as? Bool ?? true
-        isPanelPinned = false
+        isPanelPinned = UserDefaults.standard.object(forKey: isPanelPinnedKey) as? Bool ?? false
         swipeToNavigateEnabled = UserDefaults.standard.object(forKey: swipeToNavigateEnabledKey) as? Bool ?? true
         editorSwipeToNavigateEnabled = UserDefaults.standard.object(forKey: editorSwipeToNavigateEnabledKey) as? Bool ?? true
         swipeGestureSensitivity = UserDefaults.standard.object(forKey: swipeGestureSensitivityKey) as? Double ?? 0.5

@@ -1,11 +1,10 @@
 import SwiftUI
 
 /// Shared single-surface layout used across all screens.
-/// The backdrop is a near-transparent vibrancy material — cards and the header
-/// pill float on it as frosted glass (SideNotes-style); nothing else paints a
-/// surface. The header renders as its own rounded-rect glass pill. Pass
-/// `onSwipeBack` to enable two-finger trackpad right-swipe to go back on the
-/// header.
+/// No window backdrop — the desktop shows through the gaps, and every surface
+/// (header pill, cards) paints its own near-opaque fill (SideNotes-style).
+/// The header renders as its own rounded-rect pill. Pass `onSwipeBack` to
+/// enable two-finger trackpad right-swipe to go back on the header.
 struct PageLayout<Header: View, Content: View>: View {
     var onSwipeBack: (() -> Void)?
     var onContentSwipeRight: (() -> Void)?
@@ -33,48 +32,39 @@ struct PageLayout<Header: View, Content: View>: View {
     }
 
     var body: some View {
-        ZStack {
-            // Single-path vibrancy: underWindowBackground keeps the backdrop
-            // nearly invisible (desktop reads through with a light blur, like
-            // SideNotes) and honors Reduce Transparency by going opaque.
-            VisualEffectView(tint: nil, material: .underWindowBackground)
-
-            VStack(spacing: DesignToken.Space.sm) {
-                if !headerHidden {
-                    header
-                        .padding(.horizontal, DesignToken.Space.md)
-                        .padding(.vertical, DesignToken.Space.sm + 2)
-                        .frame(maxWidth: .infinity)
-                        .background { headerPill }
-                        .overlay { headerPillBorder }
-                        .padding(.horizontal, DesignToken.Space.lg)
-                        .padding(.top, DesignToken.Space.sm)
-                        .overlay {
-                            if let onSwipeBack {
-                                SwipeDetectorView(onSwipeBack: onSwipeBack)
-                            }
-                        }
-                }
-
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: DesignToken.Space.sm) {
+            if !headerHidden {
+                header
+                    .padding(.horizontal, DesignToken.Space.md)
+                    .padding(.vertical, DesignToken.Space.sm + 2)
+                    .frame(maxWidth: .infinity)
+                    .background { headerPill }
+                    .overlay { headerPillBorder }
+                    .padding(.horizontal, DesignToken.Space.lg)
+                    .padding(.top, DesignToken.Space.sm)
                     .overlay {
-                        if onContentSwipeRight != nil || onContentSwipeLeft != nil {
-                            SwipeDetectorView(
-                                onSwipeBack: onContentSwipeRight,
-                                onSwipeForward: onContentSwipeLeft,
-                            )
+                        if let onSwipeBack {
+                            SwipeDetectorView(onSwipeBack: onSwipeBack)
                         }
                     }
             }
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    if onContentSwipeRight != nil || onContentSwipeLeft != nil {
+                        SwipeDetectorView(
+                            onSwipeBack: onContentSwipeRight,
+                            onSwipeForward: onContentSwipeLeft,
+                        )
+                    }
+                }
         }
     }
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     private var headerPill: some View {
         RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-            .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
+            .fill(DesignToken.solidCard)
     }
 
     private var headerPillBorder: some View {

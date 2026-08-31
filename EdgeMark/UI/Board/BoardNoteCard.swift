@@ -1,69 +1,172 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
+
+// MARK: - BoardCardSpace
+
+/// Named coordinate space spanning the board's scroll content. Cards report
+/// their frames in this space so the drag-reorder can hit-test which card the
+/// pointer is over.
+enum BoardCardSpace {
+    static let name = "boardCards"
+}
+
+/// Named coordinate space anchored at the board's content container — OUTSIDE
+/// the scroll view. Card frames measured here are viewport-relative (scroll
+/// offset included), which is what the card→editor morph needs to know where
+/// the tapped card sits on screen.
+enum BoardViewportSpace {
+    static let name = "boardViewport"
+}
+
+// MARK: - BoardCardLayout
+
+/// Live card frames in `BoardCardSpace`, written by each card as it lays out.
+/// Deliberately a plain class rather than `@Observable`: frame writes happen
+/// on every layout pass (reorders, edits, window resizes) and must never
+/// invalidate the board body. Only the drag logic reads this — from gesture
+/// callbacks, which run outside observation tracking.
+final class BoardCardLayout {
+    var frames: [UUID: CGRect] = [:]
+    /// The same cards measured in `BoardViewportSpace` (scroll-adjusted,
+    /// viewport-relative) — the start/target frame for the editor morph.
+    var viewportFrames: [UUID: CGRect] = [:]
+}
+
+// MARK: - BoardDragSession
+
+/// State of an in-flight card drag. Observed by the floating replica leaf
+/// only, so per-tick `pointer` writes re-render that one small view — never
+/// the whole board.
+@Observable
+final class BoardDragSession {
+    /// The note being dragged (`nil` = no active drag).
+    private(set) var note: Note?
+    /// Where inside the card the pointer grabbed, in `BoardCardSpace`.
+    private(set) var grabOffset: CGSize = .zero
+    /// Captured card width — keeps the replica at the source card's footprint.
+    private(set) var size: CGSize = .zero
+    /// Current pointer position in `BoardCardSpace`.
+    private(set) var pointer: CGPoint?
+
+    var noteID: UUID? { note?.id }
+
+    func begin(note: Note, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
+        self.note = note
+        self.grabOffset = grabOffset
+        self.size = size
+        self.pointer = pointer
+    }
+
+    func move(to point: CGPoint) {
+        pointer = point
+    }
+
+    func end() {
+        note = nil
+        pointer = nil
+    }
+}
 
 // MARK: - BoardNoteCard
 
-/// Card in the note board: light-rendered markdown thumbnail, title, and
-/// meta row on a frosted glass pane floating over the vibrancy backdrop.
-/// A note's identity color fills the whole card (SideNotes-style); uncolored
-/// cards stay glass. Single click expands the note in place; ⌘/⇧-click
-/// multi-selects; context menu reuses the shared note menu.
+/// Card in the note board: identity-colored title, structured markdown preview
+/// (accent headings, tappable task circles), and meta row on a near-solid card
+/// floating on the desktop (SideNotes-style; a note's identity color tints the
+/// whole card). Single click on the blank area trailing the title toggles the
+/// in-place rich editor (open when collapsed, collapse when open); body clicks
+/// stay reserved for task toggles; a quick second click on the card is
+/// classified as a double click by the board and opens the full editor;
+/// ⌘/⇧-click multi-selects; press-drag live-reorders the card stream; context
+/// menu reuses the shared note menu.
+///
+/// Dragging never moves this view directly. The board hides the source card in
+/// its slot and floats a replica (`BoardDragReplica`) that follows the pointer
+/// with pure gesture math, so live reorders can shuffle the list freely
+/// without ever making the dragged card flash, jump, or trail the cursor.
 struct BoardNoteCard: View {
     @Environment(L10n.self) private var l10n
     @Environment(AppSettings.self) private var appSettings
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let note: Note
     var isSelected: Bool = false
-    var onOpen: (NSEvent.ModifierFlags) -> Void
+    /// True while this card is expanded into its in-place editor.
+    var isEditing: Bool = false
+    /// True while this card is the source of an active drag: the card hides in
+    /// its slot (keeping the height) while the floating replica carries the
+    /// visuals.
+    var isDragging: Bool = false
+    /// True for the pointer-following drag replica: same face, no gestures,
+    /// no hit testing.
+    var isReplica: Bool = false
+    /// False while any drag is in flight — the pointer sweeps neighbors that
+    /// shouldn't light up with hover effects mid-drag.
+    var hoverEnabled: Bool = true
+    /// Board-wide frame registry the drag hit-test reads.
+    var layout: BoardCardLayout?
+    /// Plain single click (modifiers included for ⌘/⇧ multi-select routing).
+    var onTap: (NSEvent.ModifierFlags) -> Void
+    /// Single click on the blank area trailing the title row — the dedicated
+    /// toggle for the in-place editor, so body clicks can stay reserved for
+    /// task toggles (modifiers included for ⌘/⇧ multi-select routing).
+    var onTitleAreaTap: ((NSEvent.ModifierFlags) -> Void)?
     var onPinToggle: (() -> Void)?
-    var onDragStart: (() -> Void)?
-    /// Vertical drag-reorder: called with the drop target's id and whether the
-    /// pointer landed on the card's upper half (insert above) or lower half.
-    var onDrop: ((_ targetID: UUID, _ above: Bool) -> Void)?
+    /// Direct checkbox tap on a preview task row (source line index).
+    var onToggleTask: ((Int) -> Void)?
+    /// Rich-editor content changes while editing in place.
+    var onContentChanged: ((UUID, String) -> Void)?
+    /// Press-drag tick (≥8pt movement): (pointer, press start) in
+    /// `BoardCardSpace`. The card itself stays stateless; the board owns the
+    /// drag session.
+    var onDragTick: ((CGPoint, CGPoint) -> Void)?
+    /// Drag released.
+    var onDragEnded: (() -> Void)?
 
     @State private var isHovered = false
-    @State private var isDropTarget = false
-    @State private var cardHeight: CGFloat = 0
 
     private var title: String {
         note.title.isEmpty ? L10n.shared["common.untitled"] : note.title
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: DesignToken.Space.xs) {
-            Text(title)
-                .font(DesignToken.Typography.callout.weight(.semibold))
-                .foregroundStyle(DesignToken.bodyStrong)
-                .lineLimit(1)
+    /// Identity color drives the accent tiers; uncolored notes fall back to
+    /// the theme accent.
+    private var accentColor: Color {
+        note.color?.strip ?? DesignToken.accent
+    }
 
-            Text(NoteThumbnailRenderer.attributedPreview(for: note, maxLines: 6))
-                .font(DesignTokenFont.thumbnail)
-                .foregroundStyle(DesignToken.bodyText)
-                .lineLimit(6)
-                .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 76, alignment: .topLeading)
-                .overlay(alignment: .bottom) {
-                    // Fade the last visible line into the card so truncation
-                    // reads as a preview, not a hard cut.
-                    if isSummaryClipped {
-                        LinearGradient(
-                            stops: [
-                                .init(color: cardFill.opacity(0), location: 0),
-                                .init(color: cardFill, location: 1),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom,
-                        )
-                        .frame(height: 14)
-                        .allowsHitTesting(false)
-                    }
-                }
+    var body: some View {
+        if isReplica {
+            replicaBody
+        } else {
+            interactiveBody
+        }
+    }
+
+    /// Shared visuals: title / preview / meta row on the tinted card, pin
+    /// chrome, border, shadow. Used verbatim by the list card and the drag
+    /// replica.
+    private var cardFace: some View {
+        VStack(alignment: .leading, spacing: DesignToken.Space.xs + 2) {
+            HStack(spacing: 0) {
+                Text(title)
+                    .font(appSettings.boardTitleFont)
+                    .foregroundStyle(accentColor)
+                    .lineLimit(1)
+
+                titleEditToggleArea
+            }
+
+            if isEditing {
+                inlineEditor
+                    .transition(.opacity)
+            } else {
+                preview
+                    .transition(.opacity)
+            }
 
             HStack(spacing: DesignToken.Space.xs) {
                 TagDotsView(tags: note.tags)
 
                 Text(note.folder.isEmpty ? L10n.shared["common.root"] : (note.folder as NSString).lastPathComponent)
-                    .font(DesignToken.Typography.caption)
+                    .font(appSettings.boardMetaFont)
                     .foregroundStyle(DesignToken.mutedSoft)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -71,62 +174,241 @@ struct BoardNoteCard: View {
                 Spacer(minLength: 0)
 
                 Text(note.modifiedAt.homeDisplayFormat)
-                    .font(DesignToken.Typography.caption)
+                    .font(appSettings.boardMetaFont)
                     .foregroundStyle(DesignToken.mutedSoft)
             }
         }
-        .padding(.leading, DesignToken.Space.sm + 5)
-        .padding(.trailing, DesignToken.Space.sm + 2)
-        .padding(.vertical, DesignToken.Space.sm + 2)
+        .padding(.horizontal, DesignToken.Space.lg)
+        .padding(.vertical, DesignToken.Space.md + 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .fill(cardFill)
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { cardHeight = geo.size.height }
-                    .onChange(of: geo.size.height) { _, new in cardHeight = new }
-            },
-        )
         .overlay(alignment: .topTrailing) {
             pinChrome
         }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                .strokeBorder(borderColor, lineWidth: isSelected || isDropTarget ? 1.5 : 1)
+                .strokeBorder(borderColor, lineWidth: isSelected || isDragging ? 1.5 : 1)
         }
         .shadow(
-            color: DesignToken.ink.opacity(isHovered ? 0.10 : 0.05),
-            radius: isHovered ? 6 : 3,
-            y: 1,
+            color: DesignToken.ink.opacity(isDragging ? 0.20 : isHovered ? 0.14 : 0.08),
+            radius: isDragging ? 14 : isHovered ? 10 : 6,
+            y: isDragging ? 6 : isHovered ? 3 : 2,
         )
-        .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
-        .onTapGesture {
-            // Modifier flags come from the live click event — ⌘/⇧ route into
-            // Finder-style multi-select instead of opening the note.
-            onOpen(NSApp.currentEvent?.modifierFlags ?? [])
-        }
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.12)) {
-                isHovered = hovering
+        .scaleEffect(isDragging ? 1.015 : 1)
+    }
+
+    private var interactiveBody: some View {
+        cardFace
+            .background {
+                // Frame feedback into the board-wide registry. Plain class
+                // writes — no SwiftUI invalidation, no re-render storms.
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { reportFrame(geo) }
+                        .onChange(of: geo.frame(in: .named(BoardCardSpace.name))) { _, new in
+                            layout?.frames[note.id] = new
+                        }
+                }
+            }
+            // Hidden in-slot while the replica carries the visuals; the
+            // reserved frame keeps the layout stable for live reorders.
+            .opacity(isDragging ? 0 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+            // Instant single tap — double clicks are classified by the board
+            // from tap timing (see NoteBoardView), so unlike a declared
+            // count-2 gesture there is no multi-tap window to wait out and
+            // the card responds on the click itself. Buttons inside (task
+            // circles, pin) keep precedence over these gestures.
+            .onTapGesture {
+                onTap(NSApp.currentEvent?.modifierFlags ?? [])
+            }
+            // Press-drag (≥8pt) reorders the card stream. The 8pt threshold keeps
+            // plain clicks editing; mouse click-drags never scroll on macOS, so
+            // there is no contention with the enclosing ScrollView. Reading the
+            // gesture in the board's coordinate space keeps `value.location` the
+            // absolute board pointer — correct across this card's own slot
+            // changes mid-drag.
+            .gesture(
+                DragGesture(minimumDistance: 8, coordinateSpace: .named(BoardCardSpace.name))
+                    .onChanged { value in
+                        onDragTick?(value.location, value.startLocation)
+                    }
+                    .onEnded { _ in
+                        onDragEnded?()
+                    },
+            )
+            .onHover { hovering in
+                guard hoverEnabled, !isDragging else {
+                    if isHovered { isHovered = false }
+                    return
+                }
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isHovered = hovering
+                }
+            }
+            .help(title)
+    }
+
+    private var replicaBody: some View {
+        cardFace
+            .allowsHitTesting(false)
+    }
+
+    private func reportFrame(_ geo: GeometryProxy) {
+        layout?.frames[note.id] = geo.frame(in: .named(BoardCardSpace.name))
+        layout?.viewportFrames[note.id] = geo.frame(in: .named(BoardViewportSpace.name))
+    }
+
+    // MARK: Preview
+
+    private static let previewBlockLimit = 6
+
+    private var previewBlocks: [CardPreviewBlock] {
+        NoteThumbnailRenderer.structuredPreview(
+            for: note,
+            maxLines: Self.previewBlockLimit,
+            fontSize: appSettings.boardFontSize,
+        )
+    }
+
+    /// SideNotes-style preview: identity-colored headings tiered by size,
+    /// tappable task circles, body text at the board font size.
+    private var preview: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(previewBlocks) { block in
+                blockView(block)
             }
         }
-        .onDrag {
-            onDragStart?()
-            return NSItemProvider(object: note.id.uuidString as NSString)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            // Fade the last visible block into the card so truncation
+            // reads as a preview, not a hard cut.
+            if previewBlocks.count >= Self.previewBlockLimit {
+                LinearGradient(
+                    stops: [
+                        .init(color: cardFill.opacity(0), location: 0),
+                        .init(color: cardFill, location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom,
+                )
+                .frame(height: 16)
+                .allowsHitTesting(false)
+            }
         }
-        .onDrop(
-            of: [UTType.text],
-            delegate: CardDropDelegate(
-                targetID: note.id,
-                cardHeight: cardHeight,
-                isTargeted: $isDropTarget,
-                onDrop: { onDrop?($0, $1) },
-            ),
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: CardPreviewBlock) -> some View {
+        switch block.kind {
+        case .heading(let level, let text):
+            Text(text)
+                .font(level == 2 ? appSettings.boardHeadingFont : appSettings.boardSubheadingFont)
+                .foregroundStyle(level == 2 ? accentColor : accentColor.opacity(0.72))
+                .lineLimit(1)
+                .padding(.top, 2)
+
+        case .task(let lineIndex, let isChecked, let text):
+            taskRow(lineIndex: lineIndex, isChecked: isChecked, text: text)
+
+        case .bullet(let text):
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                    .font(appSettings.boardBodyFont)
+                    .foregroundStyle(DesignToken.mutedSoft)
+                Text(text)
+                    .font(appSettings.boardBodyFont)
+                    .foregroundStyle(DesignToken.bodyText)
+            }
+
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 6) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(DesignToken.hairline)
+                    .frame(width: 2)
+                Text(text)
+                    .font(appSettings.boardBodyFont.italic())
+                    .foregroundStyle(DesignToken.muted)
+            }
+
+        case .code(let text):
+            Text(text)
+                .font(.system(size: appSettings.boardFontSize - 1, design: .monospaced))
+                .foregroundStyle(DesignToken.muted)
+
+        case .text(let text):
+            Text(text)
+                .font(appSettings.boardBodyFont)
+                .foregroundStyle(DesignToken.bodyText)
+        }
+    }
+
+    /// Outlined circle + same-color check when done (SideNotes Daily-Tasks
+    /// look). Tapping toggles the markdown marker without entering edit mode.
+    private func taskRow(lineIndex: Int, isChecked: Bool, text: AttributedString) -> some View {
+        Button {
+            onToggleTask?(lineIndex)
+        } label: {
+            HStack(alignment: .top, spacing: 7) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(isChecked ? accentColor : DesignToken.mutedSoft.opacity(0.55), lineWidth: 1.4)
+                    if isChecked {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(accentColor)
+                    }
+                }
+                .frame(width: 15, height: 15)
+                .padding(.top, 2)
+
+                Text(text)
+                    .font(appSettings.boardBodyFont)
+                    .foregroundStyle(isChecked ? DesignToken.mutedSoft : DesignToken.bodyText)
+                    .strikethrough(isChecked)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: In-place editor
+
+    /// The note's rich editor embedded in the card. `MarkdownEditorView`
+    /// flushes its debounced save on disappearance, so collapsing the card
+    /// can't lose keystrokes.
+    private var inlineEditor: some View {
+        MarkdownEditorView(
+            noteID: note.id,
+            noteTitle: note.title,
+            noteFolder: note.folder,
+            initialContent: note.content,
+            onContentChanged: { id, newContent in
+                onContentChanged?(id, newContent)
+            },
         )
-        .help(title)
+        .frame(height: 280)
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Title edit toggle
+
+    /// Blank area filling the title row's trailing space — the explicit
+    /// temporary-edit switch. Single click expands the card into its in-place
+    /// editor (or collapses it when already editing), which keeps plain body
+    /// clicks readable as task toggles. A quick second click is classified by
+    /// the board as a double click and opens the full editor directly. The pin
+    /// chrome overlays this corner and keeps its own button precedence.
+    private var titleEditToggleArea: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onTitleAreaTap?(NSApp.currentEvent?.modifierFlags ?? [])
+            }
     }
 
     // MARK: Pin chrome
@@ -136,7 +418,7 @@ struct BoardNoteCard: View {
         if note.pinned {
             Image(systemName: "pin.fill")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(note.color?.strip ?? DesignToken.accent)
+                .foregroundStyle(accentColor)
                 .padding(.top, DesignToken.Space.xs)
                 .padding(.trailing, DesignToken.Space.xs)
                 .padding(2)
@@ -157,15 +439,9 @@ struct BoardNoteCard: View {
 
     // MARK: Fill / border
 
-    /// The summary rarely reaches exactly 6 lines; only draw the fade when the
-    /// preview plausibly overflows the visible budget (~6 lines at this width).
-    private var isSummaryClipped: Bool {
-        NoteThumbnailRenderer.attributedPreview(for: note, maxLines: 6).description.count > 160
-    }
-
     private var borderColor: Color {
-        if isSelected || isDropTarget {
-            return note.color?.strip ?? DesignToken.accent
+        if isSelected || isDragging {
+            return accentColor
         }
         if isHovered {
             return note.color?.strip ?? DesignToken.hairline
@@ -173,13 +449,54 @@ struct BoardNoteCard: View {
         return note.color != nil ? DesignToken.clearBorder : DesignToken.hairlineSoft
     }
 
-    /// Identity color fills the entire card (SideNotes-style); uncolored cards
-    /// are frosted glass. Reduce Transparency swaps glass for a solid surface.
+    /// Identity color fills the entire card; uncolored cards are near-solid
+    /// white/dark so they float on the desktop with only the wallpaper
+    /// showing through the gaps.
     private var cardFill: Color {
         if let color = note.color {
             return color.cardTint
         }
-        return reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard
+        return DesignToken.solidCard
+    }
+}
+
+// MARK: - BoardDragReplica
+
+/// Floating replica of the dragged card, mounted in the board overlay so it
+/// renders above every list card. Its position is pure pointer math
+/// (`pointer − grabOffset`) with zero layout feedback, so live reorders can
+/// shuffle the list freely without ever making the dragged card flash, jump,
+/// or trail behind the pointer.
+struct BoardDragReplica: View {
+    let session: BoardDragSession
+
+    var body: some View {
+        if let note = session.note, let pointer = session.pointer {
+            BoardNoteCard(
+                note: note,
+                isSelected: false,
+                isEditing: false,
+                isDragging: true,
+                isReplica: true,
+                onTap: { _ in },
+            )
+            .frame(width: session.size.width, alignment: .topLeading)
+            .offset(
+                x: pointer.x - session.grabOffset.width,
+                y: pointer.y - session.grabOffset.height,
+            )
+            .allowsHitTesting(false)
+            .transition(.opacity)
+            .onDisappear {
+                // Board content unmounted mid-drag (e.g. keyboard navigation):
+                // release the session so the card can't stay hidden and the
+                // in-memory reorder reaches disk.
+                if session.noteID != nil {
+                    session.end()
+                    try? SidecarStore.shared.save()
+                }
+            }
+        }
     }
 }
 
@@ -188,38 +505,5 @@ private extension DesignToken {
     /// prominence via the card's own color family.
     static var clearBorder: Color {
         Color.primary.opacity(0.12)
-    }
-}
-
-private enum DesignTokenFont {
-    static let thumbnail = SwiftUI.Font.system(size: 11)
-}
-
-// MARK: - CardDropDelegate
-
-/// Per-card drop target for the vertical drag-reorder. Upper half inserts the
-/// dragged note above this card, lower half below.
-private struct CardDropDelegate: DropDelegate {
-    let targetID: UUID
-    let cardHeight: CGFloat
-    @Binding var isTargeted: Bool
-    let onDrop: (UUID, Bool) -> Void
-
-    func dropEntered(info _: DropInfo) {
-        isTargeted = true
-    }
-
-    func dropExited(info _: DropInfo) {
-        isTargeted = false
-    }
-
-    func dropUpdated(info _: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        isTargeted = false
-        onDrop(targetID, info.location.y <= cardHeight / 2)
-        return true
     }
 }

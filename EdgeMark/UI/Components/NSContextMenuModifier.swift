@@ -52,6 +52,21 @@ struct NSContextMenuModifier: ViewModifier {
     /// and auto-hide dismissal while the user is picking a menu item.
     static var isShowingMenu = false
 
+    /// When the last menu finished dismissing. AppKit re-evaluates the cursor
+    /// after the tracking loop ends and synthesizes `mouseExited` / re-dispatches
+    /// the menu click, at which point the menu window is already gone — so the
+    /// dismissal guards that consult `isMenuWindowOpen` would pass and hide the
+    /// panel right after the user picked an item. Consumers treat everything
+    /// within `menuDismissGracePeriod` of this timestamp as still mid-menu.
+    static var lastMenuDismissAt = Date.distantPast
+
+    /// How long after a menu closes dismissal stays suppressed.
+    static let menuDismissGracePeriod: TimeInterval = 0.6
+
+    /// Incremented each time a menu starts tracking, so a delayed reset from a
+    /// previous popup can't clear the flag while a newer menu is still open.
+    static var menuGeneration = 0
+
     func body(content: Content) -> some View {
         content.overlay {
             NSContextMenuOverlay(menuBuilder: menuBuilder)
@@ -97,9 +112,19 @@ private struct NSContextMenuOverlay: NSViewRepresentable {
 
         override func rightMouseDown(with event: NSEvent) {
             if let menu = menuBuilder?() {
+                NSContextMenuModifier.menuGeneration += 1
+                let generation = NSContextMenuModifier.menuGeneration
                 NSContextMenuModifier.isShowingMenu = true
                 NSMenu.popUpContextMenu(menu, with: event, for: self)
-                NSContextMenuModifier.isShowingMenu = false
+                // Reset the flag on the next turn, not synchronously: AppKit
+                // delivers the synthesized exit / re-dispatched click events
+                // right after this method returns, and they must still read
+                // as "menu open" (see lastMenuDismissAt).
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    guard generation == NSContextMenuModifier.menuGeneration else { return }
+                    NSContextMenuModifier.isShowingMenu = false
+                    NSContextMenuModifier.lastMenuDismissAt = Date()
+                }
                 MenuDispatch.shared.clear()
             }
         }

@@ -310,5 +310,8 @@
   "selection.count": "{0} selected",
   "selection.clear": "Clear Selection",
   "selection.moveToTrash.button": "Move to Trash",
-  "editor.toggleRawSource": "Toggle Raw Markdown Source"
+  "editor.toggleRawSource": "Toggle Raw Markdown Source",
+  "settings.board.fontSize": "Board font size",
+  "panel.lock": "Lock panel (no auto-hide)",
+  "panel.unlock": "Unlock and hide"
 }

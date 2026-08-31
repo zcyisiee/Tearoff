@@ -310,5 +310,8 @@
   "selection.count": "{0} seleccionadas",
   "selection.clear": "Borrar selección",
   "selection.moveToTrash.button": "Mover a la papelera",
-  "editor.toggleRawSource": "Alternar fuente Markdown"
+  "editor.toggleRawSource": "Alternar fuente Markdown",
+  "settings.board.fontSize": "Tamaño de letra del tablero",
+  "panel.lock": "Fijar panel (sin ocultar automáticamente)",
+  "panel.unlock": "Quitar fijado y ocultar"
 }

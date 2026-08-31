@@ -1,46 +1,71 @@
 import Foundation
 import SwiftUI
 
+// MARK: - CardPreviewBlock
+
+/// One block of the structured card preview. Content carries inline styling
+/// only (bold/italic/code) — fonts and colors are applied by the view so the
+/// whole preview scales from `boardFontSize` and headings can take the card's
+/// identity color.
+struct CardPreviewBlock: Identifiable {
+    enum Kind {
+        /// `#`–`######` heading; the view styles level 2 vs 3+ distinctly.
+        case heading(level: Int, text: AttributedString)
+        /// `- [ ]` / `- [x]` task item. `lineIndex` points at the source line
+        /// in `note.content` so the view can toggle the checkbox in place.
+        case task(lineIndex: Int, isChecked: Bool, text: AttributedString)
+        case bullet(text: AttributedString)
+        case quote(text: AttributedString)
+        case code(text: AttributedString)
+        case text(AttributedString)
+    }
+
+    let id: Int
+    let kind: Kind
+}
+
 // MARK: - NoteThumbnailRenderer
 
-/// Lightweight markdown renderer for note card thumbnails. Renders the visual
-/// subset that reads at card size — heading levels, bullets, task items,
-/// quotes, inline bold/italic/code/links — and strips everything else
-/// (fences, images, raw HTML) to plain text. Output is a single multiline
-/// `AttributedString` so one `Text` renders the whole preview.
+/// Lightweight markdown block parser for note card previews. Renders the
+/// visual subset that reads at card size — heading levels, bullets, task
+/// items, quotes, fences (collapsed), inline bold/italic/code/links — and
+/// strips everything else (images, raw HTML, tables) to plain text.
 ///
-/// Results are cached per note (id + modifiedAt), so scrolling the board does
-/// not re-parse content.
+/// Results are cached per note (id + modifiedAt + size), so scrolling the
+/// board does not re-parse content.
 enum NoteThumbnailRenderer {
-    private static let cache = NSCache<NSString, CachableString>()
+    private static let cache = NSCache<NSString, CachableBlocks>()
 
-    /// Render up to `maxLines` lines of the note body into attributed text.
-    /// A leading H1 that duplicates the note title is skipped — the card
-    /// already shows the title separately.
-    static func attributedPreview(for note: Note, maxLines: Int = 6) -> AttributedString {
-        let key = "\(note.id.uuidString)|\(note.modifiedAt.timeIntervalSince1970)|\(maxLines)" as NSString
+    /// Parse up to `maxLines` blocks of the note body. A leading H1 that
+    /// duplicates the note title is skipped — the card shows the title itself.
+    static func structuredPreview(
+        for note: Note,
+        maxLines: Int = 6,
+        fontSize: Double,
+    ) -> [CardPreviewBlock] {
+        let key = "\(note.id.uuidString)|\(note.modifiedAt.timeIntervalSince1970)|\(maxLines)|\(fontSize)" as NSString
         if let cached = cache.object(forKey: key) {
             return cached.value
         }
-        let result = render(note.content, maxLines: maxLines, skipTitle: note.title)
-        cache.setObject(CachableString(result), forKey: key)
+        let result = parse(note.content, maxLines: maxLines, skipTitle: note.title)
+        cache.setObject(CachableBlocks(result), forKey: key)
         return result
     }
 
-    final class CachableString {
-        let value: AttributedString
-        init(_ value: AttributedString) { self.value = value }
+    final class CachableBlocks {
+        let value: [CardPreviewBlock]
+        init(_ value: [CardPreviewBlock]) { self.value = value }
     }
 
-    // MARK: - Rendering
+    // MARK: - Parsing
 
-    private static func render(_ content: String, maxLines: Int, skipTitle: String) -> AttributedString {
-        var lines: [AttributedString] = []
+    private static func parse(_ content: String, maxLines: Int, skipTitle: String) -> [CardPreviewBlock] {
+        var blocks: [CardPreviewBlock] = []
         var inFence = false
         var didSkipTitle = false
 
-        for rawLine in content.split(separator: "\n", omittingEmptySubsequences: false) {
-            if lines.count >= maxLines { break }
+        for (lineIndex, rawLine) in content.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            if blocks.count >= maxLines { break }
             let line = String(rawLine)
 
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
@@ -49,23 +74,23 @@ enum NoteThumbnailRenderer {
             }
             if inFence {
                 // Collapsed fence contents: one dim line per block.
-                if let last = lines.last, last.runs.first?.inlinePresentationIntent == .code {
-                    continue
-                }
-                lines.append(codeLine("…"))
+                if case .code = blocks.last?.kind { continue }
+                blocks.append(CardPreviewBlock(id: blocks.count, kind: .code(text: AttributedString("…"))))
                 continue
             }
 
             if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
             if line.hasPrefix("#") {
-                if let heading = headingLine(line) {
-                    // Drop the leading "# Title" line when it duplicates the card title.
-                    if !didSkipTitle, headingMatches(heading, title: skipTitle) {
-                        didSkipTitle = true
-                        continue
-                    }
-                    lines.append(heading)
+                guard let level = headingLevel(line) else { continue }
+                let text = inline(String(line.dropFirst(level + 1))) ?? AttributedString("")
+                // Drop the leading "# Title" line when it duplicates the card title.
+                if !didSkipTitle, level == 1, !skipTitle.isEmpty,
+                   String(text.characters).trimmed() == skipTitle
+                {
+                    didSkipTitle = true
+                    continue
                 }
+                blocks.append(CardPreviewBlock(id: blocks.count, kind: .heading(level: level, text: text)))
                 continue
             }
             if line.hasPrefix(">") {
@@ -73,11 +98,11 @@ enum NoteThumbnailRenderer {
                 while quoteBody.hasPrefix(">") || quoteBody.hasPrefix(" ") {
                     quoteBody = quoteBody.dropFirst()
                 }
-                lines.append(quoteLine(String(quoteBody)))
+                blocks.append(CardPreviewBlock(id: blocks.count, kind: .quote(text: inline(String(quoteBody)) ?? AttributedString(""))))
                 continue
             }
             if isTaskLine(line) {
-                lines.append(taskLine(line))
+                blocks.append(taskBlock(line, lineIndex: lineIndex, blockIndex: blocks.count))
                 continue
             }
             if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
@@ -86,116 +111,47 @@ enum NoteThumbnailRenderer {
                 while bulletBody.hasPrefix("- ") || bulletBody.hasPrefix("* ") || bulletBody.hasPrefix("+ ") {
                     bulletBody = bulletBody.dropFirst(2)
                 }
-                if bulletBody.hasPrefix("[ ] ") || bulletBody.hasPrefix("[x] ") {
-                    lines.append(taskLine("- " + bulletBody))
+                if isTaskLine("- " + bulletBody) {
+                    blocks.append(taskBlock("- " + bulletBody, lineIndex: lineIndex, blockIndex: blocks.count))
                 } else {
-                    lines.append(bulletLine(String(bulletBody)))
+                    blocks.append(CardPreviewBlock(id: blocks.count, kind: .bullet(text: inline(String(bulletBody)) ?? AttributedString(""))))
                 }
                 continue
             }
             if let match = line.range(of: #"^\d+[.)] "#, options: .regularExpression) {
                 let orderedBody = line.replacingCharacters(in: match, with: "")
-                lines.append(bodyLine(orderedBody))
+                blocks.append(CardPreviewBlock(id: blocks.count, kind: .text(inline(orderedBody) ?? AttributedString(""))))
                 continue
             }
             if line.hasPrefix("---") || line.hasPrefix("!") || line.hasPrefix("|") {
                 continue
             }
 
-            lines.append(bodyLine(line))
+            blocks.append(CardPreviewBlock(id: blocks.count, kind: .text(inline(line) ?? AttributedString(""))))
         }
 
-        return joinLines(lines)
+        return blocks
+    }
+
+    private static func headingLevel(_ line: String) -> Int? {
+        let hashes = line.prefix(while: { $0 == "#" })
+        let level = hashes.count
+        guard level >= 1, level <= 6, line.count > hashes.count else { return nil }
+        return level
     }
 
     private static func isTaskLine(_ line: String) -> Bool {
-        line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ")
-            || line.hasPrefix("* [ ] ") || line.hasPrefix("* [x] ")
+        line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") || line.hasPrefix("- [X] ")
+            || line.hasPrefix("* [ ] ") || line.hasPrefix("* [x] ") || line.hasPrefix("* [X] ")
     }
 
-    private static func joinLines(_ lines: [AttributedString]) -> AttributedString {
-        var result = AttributedString()
-        for (index, line) in lines.enumerated() {
-            if index > 0 {
-                result += AttributedString("\n")
-            }
-            result += line
-        }
-        return result
-    }
-
-    private static func headingLine(_ line: String) -> AttributedString? {
-        let hashes = line.prefix(while: { $0 == "#" })
-        let level = hashes.count
-        guard level <= 6, line.count > hashes.count,
-              let text = inline(String(line.dropFirst(level + 1)))
-        else { return nil }
-        var a = text
-        let size: CGFloat = switch level {
-        case 1: 14
-        case 2: 13
-        default: 12
-        }
-        a.font = .system(size: size, weight: .semibold)
-        a.foregroundColor = level == 1 ? DesignTokenColor.bodyStrong : DesignTokenColor.body
-        return a
-    }
-
-    /// Whether a rendered heading line's plain text equals the note title.
-    private static func headingMatches(_ heading: AttributedString, title: String) -> Bool {
-        guard !title.isEmpty else { return false }
-        return String(heading.characters).trimmed() == title
-    }
-
-    private static func bulletLine(_ text: String) -> AttributedString {
-        var a = AttributedString("•  ")
-        a.foregroundColor = DesignTokenColor.mutedSoft
-        if let body = inline(text) {
-            a += body
-            a.font = DesignTokenFont.thumbnailBody
-            a.foregroundColor = DesignTokenColor.body
-        }
-        return a
-    }
-
-    private static func taskLine(_ line: String) -> AttributedString {
-        let isChecked = line.contains("[x]")
-        var a = AttributedString(isChecked ? "☑  " : "☐  ")
-        a.foregroundColor = isChecked ? DesignTokenColor.accent : DesignTokenColor.mutedSoft
+    private static func taskBlock(_ line: String, lineIndex: Int, blockIndex: Int) -> CardPreviewBlock {
+        let isChecked = line.contains("[x]") || line.contains("[X]")
         let bodyText = line.dropFirst(6)
-        if let body = inline(String(bodyText)) {
-            a += body
-            a.font = DesignTokenFont.thumbnailBody
-            a.foregroundColor = isChecked ? DesignTokenColor.muted : DesignTokenColor.body
-            if isChecked { a.strikethroughStyle = .single }
-        }
-        return a
-    }
-
-    private static func quoteLine(_ text: String) -> AttributedString {
-        var a = AttributedString("│ ")
-        a.foregroundColor = DesignTokenColor.hairline
-        if let body = inline(text) {
-            a += body
-            a.font = DesignTokenFont.thumbnailBody.italic()
-            a.foregroundColor = DesignTokenColor.muted
-        }
-        return a
-    }
-
-    private static func codeLine(_ text: String) -> AttributedString {
-        var a = AttributedString(text)
-        a.font = DesignTokenFont.thumbnailMono
-        a.foregroundColor = DesignTokenColor.muted
-        a.inlinePresentationIntent = .code
-        return a
-    }
-
-    private static func bodyLine(_ text: String) -> AttributedString {
-        var a = inline(text) ?? AttributedString(text)
-        a.font = DesignTokenFont.thumbnailBody
-        a.foregroundColor = DesignTokenColor.body
-        return a
+        return CardPreviewBlock(
+            id: blockIndex,
+            kind: .task(lineIndex: lineIndex, isChecked: isChecked, text: inline(String(bodyText)) ?? AttributedString("")),
+        )
     }
 
     /// Inline markdown subset: **bold**, *italic*, `code`, [text](url) → text.
@@ -282,23 +238,6 @@ enum NoteThumbnailRenderer {
         }
         return nil
     }
-}
-
-// MARK: - Token shims (avoid public exposure of DesignToken internals)
-
-/// File-private color/ font aliases so the renderer stays readable.
-private enum DesignTokenColor {
-    static let bodyStrong = DesignToken.bodyStrong
-    static let body = DesignToken.bodyText
-    static let muted = DesignToken.muted
-    static let mutedSoft = DesignToken.mutedSoft
-    static let accent = DesignToken.accent
-    static let hairline = DesignToken.hairline
-}
-
-private enum DesignTokenFont {
-    static let thumbnailBody = SwiftUI.Font.system(size: 11)
-    static let thumbnailMono = SwiftUI.Font.system(size: 10, design: .monospaced)
 }
 
 private extension String {

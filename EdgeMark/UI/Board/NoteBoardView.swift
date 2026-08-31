@@ -17,7 +17,37 @@ struct NoteBoardView: View {
     @State private var isSearching = false
     @State private var searchQuery = ""
     @State private var collapsedSections: Set<String> = []
-    @State private var draggingNoteID: UUID?
+    /// Active press-drag: the dragged card hides in its slot while the
+    /// floating replica (`BoardDragReplica`) follows the pointer. Observed by
+    /// the replica leaf only, so per-tick pointer updates never re-render the
+    /// board.
+    @State private var dragSession = BoardDragSession()
+    /// Live card frames in `BoardCardSpace`, reported by each card — lets the
+    /// drag-reorder hit-test which card the pointer is over. Plain class on
+    /// purpose: frame writes must not invalidate the board body.
+    @State private var cardLayout = BoardCardLayout()
+    /// Last committed drag insertion (target + side), so pointer ticks inside
+    /// an already-satisfied region don't re-fire the reorder.
+    @State private var lastReorder: (target: UUID, above: Bool)?
+    /// Mirror of `PanelSettings.isPanelPinned` (plain class — observe via notification).
+    @State private var isPanelPinned = PanelSettings.shared.isPanelPinned
+    /// Visible-note order captured when a card enters in-place editing. The
+    /// debounced save bumps `modifiedAt` every pause, which would otherwise
+    /// jump the editing card around under dateModified sorting.
+    @State private var editOrderSnapshot: [UUID]?
+    /// Card→editor morph: which note's card the editor grows out of (nil →
+    /// no card origin; the editor still grows, from a subtle inset).
+    @State private var editorMorphOrigin: UUID?
+    /// 0 = editor box at its card, 1 = natural full frame. Animated with the
+    /// shared morph spring on open and close. Starts at 0 so the very first
+    /// editor session (any open path) also grows in.
+    @State private var editorMorphProgress: CGFloat = 0
+    /// Bumped on every editor open/close so a pending close-completion can
+    /// detect that a new session started and abort.
+    @State private var editorMorphGeneration = 0
+    /// Last plain tap (note + time) for manual double-click classification —
+    /// keeps single taps instant instead of waiting out a multi-tap window.
+    @State private var lastCardTap: (id: UUID, at: Date)?
 
     // Folder delete confirmation
     @State private var deletingFolderName: String?
@@ -34,7 +64,21 @@ struct NoteBoardView: View {
 
     /// Notes for the active tab (All → every note; folder tab → that folder only).
     private var boardNotes: [Note] {
-        noteStore.sortedNotes(noteStore.filteredNotes, by: appSettings.sortBy, ascending: appSettings.sortAscending)
+        frozenOrder(
+            noteStore.sortedNotes(noteStore.filteredNotes, by: appSettings.sortBy, ascending: appSettings.sortAscending),
+        )
+    }
+
+    /// While a card is being edited in place, keep the visible order frozen at
+    /// the pre-edit arrangement so save-triggered date bumps can't reshuffle
+    /// the list under the user's cursor.
+    private func frozenOrder(_ sorted: [Note]) -> [Note] {
+        guard let snapshot = editOrderSnapshot else { return sorted }
+        let byID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
+        var result = snapshot.compactMap { byID[$0] }
+        let snapshotted = Set(snapshot)
+        result.append(contentsOf: sorted.filter { !snapshotted.contains($0.id) })
+        return result
     }
 
     private var childFolders: [Folder] {
@@ -59,12 +103,16 @@ struct NoteBoardView: View {
         for name in names {
             let notes = noteStore.notes.filter { $0.folder == name }
             if !notes.isEmpty {
-                result.append((name, noteStore.sortedNotes(notes, by: appSettings.sortBy, ascending: appSettings.sortAscending)))
+                result.append(
+                    (name, frozenOrder(noteStore.sortedNotes(notes, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
+                )
             }
         }
         let root = noteStore.notes.filter(\.folder.isEmpty)
         if !root.isEmpty {
-            result.append((nil, noteStore.sortedNotes(root, by: appSettings.sortBy, ascending: appSettings.sortAscending)))
+            result.append(
+                (nil, frozenOrder(noteStore.sortedNotes(root, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
+            )
         }
         return result
     }
@@ -122,21 +170,57 @@ struct NoteBoardView: View {
         PageLayout(headerHidden: noteStore.selectedNote != nil) {
             header
         } content: {
-            VStack(spacing: 0) {
-                if let note = noteStore.selectedNote {
-                    ExpandedNoteEditor(note: note)
-                } else if noteStore.awaitingRootChoice {
-                    pickerRows
-                } else if noteStore.showSettings {
-                    BoardSettingsView()
-                } else if isSearching {
-                    searchResultsList
-                } else {
-                    boardContent
+            // Root pages stay mounted while the full editor is open: the
+            // board's scroll position and live card frames survive, so the
+            // editor can grow out of (and shrink back into) the tapped card.
+            GeometryReader { geo in
+                ZStack(alignment: .top) {
+                    if noteStore.awaitingRootChoice {
+                        pickerRows
+                    } else if noteStore.showSettings {
+                        BoardSettingsView()
+                    } else if isSearching {
+                        searchResultsList
+                    } else {
+                        boardContent
+                    }
+
+                    if let note = noteStore.selectedNote {
+                        ExpandedNoteEditor(note: note, onRequestClose: closeEditor)
+                            .modifier(EditorCardMorph(
+                                progress: editorMorphProgress,
+                                originNoteID: editorMorphOrigin,
+                                cardLayout: cardLayout,
+                                containerSize: geo.size,
+                            ))
+                            .transition(.identity)
+                            .onAppear {
+                                withAnimation(DesignToken.Motion.morph) {
+                                    editorMorphProgress = 1
+                                }
+                            }
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .coordinateSpace(name: BoardViewportSpace.name)
             }
         }
         .moveConflictAlerts(noteStore: noteStore, l10n: l10n)
+        .onReceive(NotificationCenter.default.publisher(for: .panelPinStateChanged)) { _ in
+            isPanelPinned = PanelSettings.shared.isPanelPinned
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .editorCloseRequested)) { _ in
+            closeEditor()
+        }
+        .onChange(of: noteStore.inlineEditingNoteID) { _, editingID in
+            if editingID != nil {
+                if editOrderSnapshot == nil {
+                    editOrderSnapshot = boardNotes.map(\.id)
+                }
+            } else {
+                editOrderSnapshot = nil
+            }
+        }
         .alert(
             l10n["alert.deleteFolder.title"],
             isPresented: $showDeleteFolderConfirm,
@@ -165,7 +249,7 @@ struct NoteBoardView: View {
             guard let note else { return }
             // A brand-new note opens expanded and ready to type — SideNotes-style.
             noteStore.pendingRenameNote = nil
-            noteStore.openNote(note)
+            openEditorWithoutCard { noteStore.openNote(note) }
         }
         .onChange(of: noteStore.pendingSearchOnHome) { _, pending in
             guard pending else { return }
@@ -240,6 +324,19 @@ struct NoteBoardView: View {
                 HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
                     noteStore.showSettings = true
                 }
+                HeaderIconButton(
+                    systemName: isPanelPinned ? "pin.fill" : "pin",
+                    help: isPanelPinned ? l10n["panel.unlock"] : l10n["panel.lock"],
+                    tint: isPanelPinned ? DesignToken.accent : nil,
+                ) {
+                    let settings = PanelSettings.shared
+                    settings.isPanelPinned.toggle()
+                    if !settings.isPanelPinned {
+                        // Unlock + collapse in one gesture: the lit button is
+                        // the "leave locked mode" affordance.
+                        AppDelegate.shared?.panelController?.hidePanel()
+                    }
+                }
             }
         }
     }
@@ -312,18 +409,26 @@ struct NoteBoardView: View {
     private var boardContent: some View {
         GeometryReader { geo in
             ScrollView {
-                VStack(spacing: 0) {
-                    if appSettings.boardLayout == .tabs {
-                        tabsBoard
-                    } else {
-                        sectionsBoard
-                    }
+            VStack(spacing: 0) {
+                if appSettings.boardLayout == .tabs {
+                    tabsBoard
+                } else {
+                    sectionsBoard
                 }
-                .padding(.horizontal, DesignToken.Space.lg)
-                .padding(.vertical, DesignToken.Space.md)
-                .padding(.bottom, 44) // clearance for the floating selection toolbar
-                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-                .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
+            }
+            .padding(.horizontal, DesignToken.Space.lg)
+            .padding(.vertical, DesignToken.Space.md)
+            .padding(.bottom, 44) // clearance for the floating selection toolbar
+            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+            // Clicking any blank area (card gaps, margins) dismisses the
+            // in-place card editor and an active selection — Finder-style.
+            .contentShape(Rectangle())
+            .onTapGesture { handleBackgroundTap() }
+            .coordinateSpace(name: BoardCardSpace.name)
+            .overlay(alignment: .topLeading) {
+                BoardDragReplica(session: dragSession)
+            }
+            .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
             }
             .overlay(alignment: .bottom) {
                 SelectionToolbar()
@@ -449,7 +554,7 @@ struct NoteBoardView: View {
     /// Vertical card stream — SideNotes-style single column, card width fills
     /// the panel minus the shared horizontal padding.
     private func noteGrid(_ notes: [Note]) -> some View {
-        LazyVStack(spacing: DesignToken.Space.sm) {
+        LazyVStack(spacing: DesignToken.Space.lg) {
             ForEach(notes) { note in
                 if noteRename.renamingNoteID == note.id {
                     boardRenameCard(for: note)
@@ -464,14 +569,23 @@ struct NoteBoardView: View {
         BoardNoteCard(
             note: note,
             isSelected: noteStore.selection.contains(.note(note.id)),
-            onOpen: { flags in handleCardClick(note, flags: flags, visible: visible) },
+            isEditing: noteStore.inlineEditingNoteID == note.id,
+            isDragging: dragSession.noteID == note.id,
+            hoverEnabled: dragSession.noteID == nil,
+            layout: cardLayout,
+            onTap: { flags in handleCardTap(note, flags: flags, visible: visible) },
+            onTitleAreaTap: { flags in handleTitleAreaTap(note, flags: flags, visible: visible) },
             onPinToggle: { noteStore.togglePin(on: note) },
-            onDragStart: { draggingNoteID = note.id },
-            onDrop: { targetID, above in
-                guard let dragging = draggingNoteID else { return }
-                draggingNoteID = nil
-                noteStore.reorderNote(dragging, dropTargetID: targetID, above: above, in: visible)
+            onToggleTask: { lineIndex in
+                noteStore.toggleTask(at: lineIndex, on: note)
             },
+            onContentChanged: { id, newContent in
+                noteStore.updateContent(for: id, content: newContent)
+            },
+            onDragTick: { location, start in
+                handleDragTick(note, location: location, start: start, visible: visible)
+            },
+            onDragEnded: { handleDragEnd() },
         )
         .nsContextMenu {
             if noteStore.selection.contains(.note(note.id)), noteStore.selection.count > 1 {
@@ -490,10 +604,19 @@ struct NoteBoardView: View {
         }
     }
 
-    /// Finder-style click semantics: plain click opens, ⌘-click toggles the
-    /// card's selection, ⇧-click selects the range to the anchor.
-    private func handleCardClick(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
+    /// Finder-style click semantics for the card body: plain clicks never open
+    /// the in-place editor — the body is reserved for task toggles (task rows
+    /// carry their own buttons) and plain clicks only clear an active
+    /// selection. A quick second plain click is classified as a double click
+    /// and opens the full editor; ⌘-click toggles the card's selection,
+    /// ⇧-click selects the range to the anchor. The in-place editor opens from
+    /// the title row's trailing area (`handleTitleAreaTap`).
+    private func handleCardTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
         let mods = flags.intersection([.command, .shift])
+        if mods.isEmpty, consumeDoubleClick(on: note.id) {
+            openEditorFromCard(note)
+            return
+        }
         let order = visible.map { NoteStore.SelectableID.note($0.id) }
         if mods.contains(.command) {
             noteStore.handleSelectionClick(
@@ -509,10 +632,214 @@ struct NoteBoardView: View {
                 isCommand: false,
                 visibleOrder: order,
             )
+        } else if !noteStore.selection.isEmpty {
+            noteStore.clearSelection()
+        }
+        // Plain body clicks stop here on purpose: edit intent is expressed by
+        // clicking the blank area trailing the title.
+    }
+
+    /// Single click on the blank area trailing a card's title — the dedicated
+    /// temporary-edit toggle: collapse the editor if this card is editing,
+    /// otherwise expand into it. A quick second click counts as a double click
+    /// and morphs straight from the editing card into the full editor.
+    /// Modifier clicks fall through to the Finder-style selection semantics
+    /// (⌘ toggles, ⇧ ranges), and an active selection is cleared first,
+    /// matching a plain body click.
+    private func handleTitleAreaTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
+        if !flags.intersection([.command, .shift]).isEmpty {
+            handleCardTap(note, flags: flags, visible: visible)
+        } else if consumeDoubleClick(on: note.id) {
+            openEditorFromCard(note)
+        } else if !noteStore.selection.isEmpty {
+            noteStore.clearSelection()
+        } else if noteStore.inlineEditingNoteID == note.id {
+            noteStore.endInlineEdit()
         } else {
-            noteStore.openNote(note)
+            noteStore.beginInlineEdit(note)
         }
     }
+
+    /// Manual double-click classification: a second plain tap on the same card
+    /// inside the window counts as a double click. Capped below the system
+    /// double-click interval so quick toggle-clicks on the title area don't
+    /// turn into editor opens. Keeps single taps instant — no count-2 gesture
+    /// waiting out a multi-tap window.
+    private var doubleClickWindow: TimeInterval {
+        min(NSEvent.doubleClickInterval, 0.3)
+    }
+
+    /// Records a plain tap; returns true when it completes a double click.
+    private func consumeDoubleClick(on noteID: UUID) -> Bool {
+        let now = Date()
+        if let last = lastCardTap, last.id == noteID, now.timeIntervalSince(last.at) < doubleClickWindow {
+            lastCardTap = nil
+            return true
+        }
+        lastCardTap = (noteID, now)
+        return false
+    }
+
+    // MARK: Editor morph
+
+    /// Open the full editor, growing its box out of `note`'s card. Works from
+    /// both the collapsed card and the in-place editing card — the frame is
+    /// read live from the board, so a card still mid-growth hands its current
+    /// frame to the editor and the two animations chain seamlessly.
+    private func openEditorFromCard(_ note: Note) {
+        // nil (→ inset fallback) when the card somehow never reported a frame.
+        editorMorphOrigin = cardLayout.viewportFrames[note.id] != nil ? note.id : nil
+        editorMorphProgress = 0
+        noteStore.openNote(note)
+    }
+
+    /// Open the full editor without a card origin (search result, brand-new
+    /// note) — it grows in from a subtle inset of its full frame so every
+    /// entry into the editor speaks the same expansion language.
+    private func openEditorWithoutCard(_ open: () -> Void) {
+        editorMorphOrigin = nil
+        editorMorphProgress = 0
+        open()
+    }
+
+    /// Close the full editor by shrinking its box back into the card it came
+    /// from; the editor is dropped once the morph has settled. The board never
+    /// unmounted, so the card is exactly where the user left it.
+    private func closeEditor() {
+        guard noteStore.selectedNote != nil else { return }
+        editorMorphGeneration += 1
+        let generation = editorMorphGeneration
+        withAnimation(DesignToken.Motion.morph) {
+            editorMorphProgress = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + DesignToken.Motion.morphDuration) {
+            guard editorMorphGeneration == generation else { return }
+            editorMorphOrigin = nil
+            noteStore.closeNote()
+        }
+    }
+
+    /// Click on any blank board area (card gaps, margins): exit the in-place
+    /// editor, then clear a multi-selection. Cards and buttons consume their
+    /// own taps, so this only fires for genuinely empty space.
+    private func handleBackgroundTap() {
+        lastCardTap = nil
+        if noteStore.inlineEditingNoteID != nil {
+            noteStore.endInlineEdit()
+        }
+        if !noteStore.selection.isEmpty {
+            noteStore.clearSelection()
+        }
+    }
+
+    // MARK: Drag Reorder
+
+    /// Live reorder while press-dragging: whichever visible card the pointer
+    /// is over becomes the insertion point (upper half = above, lower half =
+    /// below). `reorderNote` commits immediately, so cards shuffle under the
+    /// cursor as it crosses neighbors — SideNotes-style. The dragged card
+    /// itself hides in its slot while the floating replica follows the
+    /// pointer, so these commits can never disturb the card in hand.
+    private func handleDragTick(_ note: Note, location: CGPoint, start: CGPoint, visible: [Note]) {
+        if dragSession.noteID != note.id {
+            // First tick of the gesture: capture where inside the card the
+            // pointer grabbed and lift a replica under it.
+            guard let frame = cardLayout.frames[note.id] else { return }
+            installDragMouseUpMonitor()
+            withAnimation(.easeOut(duration: 0.12)) {
+                dragSession.begin(
+                    note: note,
+                    grabOffset: CGSize(width: start.x - frame.minX, height: start.y - frame.minY),
+                    size: frame.size,
+                    pointer: location,
+                )
+            }
+            lastReorder = nil
+        }
+        dragSession.move(to: location)
+
+        for target in visible where target.id != note.id {
+            guard let frame = cardLayout.frames[target.id], frame.contains(location) else { continue }
+            let above = location.y < frame.midY
+            if lastReorder?.target != target.id || lastReorder?.above != above {
+                withAnimation(.snappy(duration: 0.22)) {
+                    noteStore.reorderNote(
+                        note.id,
+                        dropTargetID: target.id,
+                        above: above,
+                        in: visible,
+                        persist: false, // saved once when the drag ends
+                    )
+                }
+                lastReorder = (target.id, above)
+            }
+            return
+        }
+    }
+
+    private func handleDragEnd() {
+        removeDragMouseUpMonitor()
+        lastReorder = nil
+        guard let noteID = dragSession.noteID else { return }
+        // The whole drag persisted nothing to disk — commit once here.
+        try? SidecarStore.shared.save()
+        // Drop frames of notes that left the visible set while dragging.
+        let known = Set(noteStore.notes.map(\.id))
+        cardLayout.frames = cardLayout.frames.filter { known.contains($0.key) }
+        cardLayout.viewportFrames = cardLayout.viewportFrames.filter { known.contains($0.key) }
+
+        // Settle: the replica glides from under the pointer into the
+        // committed slot, then crossfades back into the real card.
+        if let slot = cardLayout.frames[noteID] {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                dragSession.move(
+                    to: CGPoint(
+                        x: slot.minX + dragSession.grabOffset.width,
+                        y: slot.minY + dragSession.grabOffset.height,
+                    )
+                )
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                guard dragSession.noteID == noteID else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    dragSession.end()
+                }
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.12)) {
+                dragSession.end()
+            }
+        }
+    }
+
+    // MARK: Drag mouse-up backstop
+
+    /// If the lazy list reclaims the source card mid-drag, the gesture's
+    /// `.onEnded` never fires and the drag session would leak (card stays
+    /// hidden). This local monitor watches the physical mouse-up instead; if
+    /// the session is still alive shortly after release — past the settle
+    /// animation — it closes the drag.
+    @State private var dragMouseUpMonitor: Any?
+
+    private func installDragMouseUpMonitor() {
+        guard dragMouseUpMonitor == nil else { return }
+        dragMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { event in
+            removeDragMouseUpMonitor()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                if dragSession.noteID != nil {
+                    handleDragEnd()
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeDragMouseUpMonitor() {
+        guard let monitor = dragMouseUpMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        dragMouseUpMonitor = nil
+    }
+
 
     /// Rename-in-place card: a small editor shaped like a board card.
     private func boardRenameCard(for note: Note) -> some View {
@@ -530,7 +857,7 @@ struct NoteBoardView: View {
         .padding(DesignToken.Space.xs)
         .background(
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                .fill(DesignToken.glassCard),
+                .fill(DesignToken.solidCard),
         )
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
@@ -580,48 +907,57 @@ struct NoteBoardView: View {
             TagFilterBar()
 
             ScrollView {
-                if trimmedQuery.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        let header = noteStore.activeTagFilter.isEmpty
-                            ? l10n["search.recentNotes"]
-                            : l10n["search.tagged"]
-                        sectionHeader(header)
-                        if allNotesSorted.isEmpty {
-                            emptySearchPlaceholder(
-                                icon: "tag",
-                                message: l10n["search.noTagged"],
-                            )
-                        } else {
-                            noteGrid(allNotesSorted)
+                VStack(spacing: 0) {
+                    if trimmedQuery.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            let header = noteStore.activeTagFilter.isEmpty
+                                ? l10n["search.recentNotes"]
+                                : l10n["search.tagged"]
+                            sectionHeader(header)
+                            if allNotesSorted.isEmpty {
+                                emptySearchPlaceholder(
+                                    icon: "tag",
+                                    message: l10n["search.noTagged"],
+                                )
+                            } else {
+                                noteGrid(allNotesSorted)
+                                    .padding(.horizontal, DesignToken.Space.lg)
+                                    .padding(.bottom, DesignToken.Space.md)
+                            }
+                        }
+                    } else if !hasAnyResults {
+                        emptySearchPlaceholder(
+                            icon: "doc.questionmark",
+                            message: l10n["search.noResults"],
+                        )
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if !titleMatches.isEmpty {
+                                sectionHeader(l10n["search.titles"])
+                                noteGrid(titleMatches)
+                                    .padding(.horizontal, DesignToken.Space.lg)
+                                    .padding(.bottom, DesignToken.Space.sm)
+                            }
+
+                            if !contentMatches.isEmpty {
+                                sectionHeader(l10n["search.content"])
+                                VStack(spacing: 0) {
+                                    ForEach(contentMatches) { match in
+                                        contentResultRow(note: match.note, snippet: match.snippet)
+                                    }
+                                }
                                 .padding(.horizontal, DesignToken.Space.lg)
                                 .padding(.bottom, DesignToken.Space.md)
-                        }
-                    }
-                } else if !hasAnyResults {
-                    emptySearchPlaceholder(
-                        icon: "doc.questionmark",
-                        message: l10n["search.noResults"],
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if !titleMatches.isEmpty {
-                            sectionHeader(l10n["search.titles"])
-                            noteGrid(titleMatches)
-                                .padding(.horizontal, DesignToken.Space.lg)
-                                .padding(.bottom, DesignToken.Space.sm)
-                        }
-
-                        if !contentMatches.isEmpty {
-                            sectionHeader(l10n["search.content"])
-                            VStack(spacing: 0) {
-                                ForEach(contentMatches) { match in
-                                    contentResultRow(note: match.note, snippet: match.snippet)
-                                }
                             }
-                            .padding(.horizontal, DesignToken.Space.lg)
-                            .padding(.bottom, DesignToken.Space.md)
                         }
                     }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .contentShape(Rectangle())
+                .onTapGesture { handleBackgroundTap() }
+                .coordinateSpace(name: BoardCardSpace.name)
+                .overlay(alignment: .topLeading) {
+                    BoardDragReplica(session: dragSession)
                 }
             }
         }
@@ -692,7 +1028,7 @@ struct NoteBoardView: View {
     private func contentResultRow(note: Note, snippet: AttributedString) -> some View {
         Button {
             dismissSearch()
-            noteStore.openNoteFromSearch(note)
+            openEditorWithoutCard { noteStore.openNoteFromSearch(note) }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "doc.text")
@@ -762,7 +1098,7 @@ struct NoteBoardView: View {
     private func createNote() {
         let folder = noteStore.selectedFolder?.name ?? ""
         let note = noteStore.createNote(in: folder)
-        noteStore.openNote(note)
+        openEditorWithoutCard { noteStore.openNote(note) }
     }
 
     private func startCreatingFolder() {
@@ -789,5 +1125,57 @@ struct NoteBoardView: View {
             noteStore.searchReturnFolder = nil
             noteStore.navigateToFolder(returnFolder)
         }
+    }
+}
+
+// MARK: - Editor card morph
+
+/// Grows the full editor's rounded box out of a note card (and shrinks it
+/// back on close): `progress` 0 = the card's live frame in the content
+/// coordinate space, 1 = the editor's natural full frame. Real frame
+/// interpolation — layout, not a scale transform — so text keeps its natural
+/// size while the growing box reveals it, the same "small rounded box becomes
+/// a big rounded box" language as the in-place card editor, on the same
+/// spring. Without a card origin the editor grows from a subtle inset of its
+/// full frame so every entry into the editor looks alike.
+private struct EditorCardMorph: ViewModifier {
+    /// 0 = at the card, 1 = natural. Animated via `DesignToken.Motion.morph`.
+    var progress: CGFloat
+    /// The note whose card the editor morphs from (nil → inset fallback).
+    let originNoteID: UUID?
+    /// Live board card frames — read per animation tick, so the shrink target
+    /// tracks the card even if the board reordered while editing.
+    let cardLayout: BoardCardLayout
+    let containerSize: CGSize
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        // Clamp the spring's slight overshoot so the box never pokes outside
+        // the panel or dips below full transparency.
+        let t = min(max(progress, 0), 1)
+        let full = CGRect(origin: .zero, size: containerSize)
+        let card = originNoteID.flatMap { cardLayout.viewportFrames[$0] }
+            ?? full.insetBy(dx: containerSize.width * 0.05, dy: containerSize.height * 0.06)
+        let frame = CGRect.interpolate(from: card, to: full, t: t)
+        return content
+            .frame(width: frame.width, height: frame.height)
+            .offset(x: frame.midX - containerSize.width / 2, y: frame.minY)
+            .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+            .opacity(Double(t))
+    }
+}
+
+private extension CGRect {
+    static func interpolate(from start: CGRect, to end: CGRect, t: CGFloat) -> CGRect {
+        CGRect(
+            x: start.minX + (end.minX - start.minX) * t,
+            y: start.minY + (end.minY - start.minY) * t,
+            width: start.width + (end.width - start.width) * t,
+            height: start.height + (end.height - start.height) * t,
+        )
     }
 }

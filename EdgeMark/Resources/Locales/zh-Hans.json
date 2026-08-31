@@ -310,5 +310,8 @@
   "selection.count": "已选 {0} 项",
   "selection.clear": "取消选择",
   "selection.moveToTrash.button": "移到废纸篓",
-  "editor.toggleRawSource": "切换 Markdown 源码视图"
+  "editor.toggleRawSource": "切换 Markdown 源码视图",
+  "settings.board.fontSize": "主界面字号",
+  "panel.lock": "锁定面板（不自动隐藏）",
+  "panel.unlock": "解锁并收起"
 }

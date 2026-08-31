@@ -24,11 +24,13 @@ enum DesignToken {
     /// Inset surface — wells, code blocks, inputs.
     static let surfaceInset = dynamic(light: 0xF0EEE6, dark: 0x292A29)
 
-    /// Frosted card fill — a translucent wash that lets the vibrancy backdrop
-    /// read through, floating each card as its own pane (SideNotes-style).
-    /// Swap for `surfaceCard` under Reduce Transparency.
-    static let glassCard = dynamicAlpha(light: 0xFFFFFF, dark: 0xFFFFFF, lightAlpha: 0.55, darkAlpha: 0.055)
-    /// Frosted inset fill — inputs and wells on glass surfaces.
+    /// Near-opaque card fill — the SideNotes-style solid card floating on the
+    /// desktop. There is no shared window backdrop: the wallpaper shows through
+    /// only in the gaps between cards, so each card carries ~96% of its own
+    /// surface color. Used by board cards, the header pill, editor, and
+    /// settings sections alike.
+    static let solidCard = dynamicAlpha(light: 0xFFFFFF, dark: 0x2E2E2C, lightAlpha: 0.96, darkAlpha: 0.97)
+    /// Frosted inset fill — inputs and wells on solid surfaces.
     static let glassInset = dynamicAlpha(light: 0x8A7A55, dark: 0x000000, lightAlpha: 0.08, darkAlpha: 0.22)
 
     // MARK: Color — lines
@@ -111,6 +113,19 @@ enum DesignToken {
         static let caption = SwiftUI.Font.system(size: 11)
         /// Uppercase micro section header (add `.tracking(0.6)` + uppercase text).
         static let sectionHeader = SwiftUI.Font.system(size: 10, weight: .semibold)
+    }
+
+    // MARK: - Motion (unified morph language)
+
+    enum Motion {
+        /// The one spring every card/editor morph uses — card → in-place editor,
+        /// card → full editor, and the reverse collapses. Slightly under-damped
+        /// so surfaces settle with a subtle live beat instead of a mechanical
+        /// ease, matching macOS system animation feel.
+        static let morph = SwiftUI.Animation.spring(response: 0.42, dampingFraction: 0.86)
+        /// Wall-clock budget of `morph` (response plus settle) — used to time
+        /// dependent work, e.g. removing the editor after its shrink finishes.
+        static let morphDuration: TimeInterval = 0.5
     }
 
     // MARK: - Helpers

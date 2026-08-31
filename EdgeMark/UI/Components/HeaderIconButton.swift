@@ -4,6 +4,9 @@ import SwiftUI
 struct HeaderIconButton: View {
     let systemName: String
     let help: String
+    /// Overrides the muted idle color — used by stateful buttons (e.g. the
+    /// lit panel pin).
+    var tint: Color? = nil
     let action: () -> Void
 
     @State private var isHovered = false
@@ -12,7 +15,7 @@ struct HeaderIconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(isHovered ? DesignToken.bodyStrong : DesignToken.muted)
+                .foregroundStyle(idleColor)
                 .frame(width: 28, height: 28)
                 .background {
                     RoundedRectangle(cornerRadius: DesignToken.Radius.sm)
@@ -27,5 +30,10 @@ struct HeaderIconButton: View {
                 isHovered = hovering
             }
         }
+    }
+
+    private var idleColor: Color {
+        if let tint { return tint }
+        return isHovered ? DesignToken.bodyStrong : DesignToken.muted
     }
 }

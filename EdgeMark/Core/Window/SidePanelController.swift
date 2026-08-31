@@ -165,13 +165,25 @@ final class SidePanelController: NSWindowController {
                     return event
                 }
                 // Settings page closes first, then an active selection clears,
-                // then the panel hides — one Escape per layer.
+                // then the full editor shrinks back into its card, then
+                // in-place card editing exits, then the panel hides —
+                // one Escape per layer.
                 if let store = self?.noteStore, store.showSettings {
                     store.showSettings = false
                     return nil
                 }
                 if let store = self?.noteStore, !store.selection.isEmpty {
                     store.clearSelection()
+                    return nil
+                }
+                if let store = self?.noteStore, store.selectedNote != nil {
+                    // Route through the board so the editor animates back into
+                    // its card instead of vanishing.
+                    NotificationCenter.default.post(name: .editorCloseRequested, object: nil)
+                    return nil
+                }
+                if let store = self?.noteStore, store.inlineEditingNoteID != nil {
+                    store.endInlineEdit()
                     return nil
                 }
                 self?.hidePanel()
@@ -188,7 +200,8 @@ final class SidePanelController: NSWindowController {
             if let fr = window.firstResponder as? NSTextView, fr.isFieldEditor {
                 return event
             }
-            if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings {
+            if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings
+                || noteStore.inlineEditingNoteID != nil {
                 return event
             }
             let shift = event.modifierFlags.contains(.shift)
@@ -536,6 +549,8 @@ final class SidePanelController: NSWindowController {
     func hidePanel(restoreFocus: Bool = true) {
         guard let window, isShown else { return }
         Log.window.info("[SidePanelController] hidePanel")
+        // Leaving the panel ends an in-place card edit session (flushes its save).
+        noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
         isShown = false
         let gen = animationGeneration &+ 1
@@ -734,18 +749,30 @@ final class SidePanelController: NSWindowController {
         }
     }
 
-    /// Whether a popup/context menu is currently open. While one is up,
+    /// Whether a popup/context menu is currently open — or was open so recently
+    /// that its dismissal fallout is still in flight. While one is up,
     /// click-outside and auto-hide dismissal are suspended — clicking a menu
     /// item (e.g. setting a note color) lands outside the panel's window and
     /// moving onto the menu reads as a mouse exit, but the user is clearly
     /// mid-interaction, not leaving.
     ///
-    /// Two signals: an explicit flag bracketing our own (blocking)
-    /// `NSMenu.popUpContextMenu` calls, plus a window scan for SwiftUI Menus,
-    /// which we don't drive. The scan matches loosely — the private menu
-    /// window class name varies across macOS versions.
+    /// The grace period covers the moment *after* the menu closes: AppKit
+    /// re-evaluates the cursor once the tracking loop ends and synthesizes
+    /// `mouseExited` / re-delivers the click while the menu window no longer
+    /// exists, which used to hide the panel immediately after picking an item.
+    ///
+    /// Two live signals: an explicit flag bracketing our own (blocking)
+    /// `NSMenu.popUpContextMenu` calls (reset one runloop turn later), plus a
+    /// window scan for SwiftUI Menus, which we don't drive. The scan matches
+    /// loosely — the private menu window class name varies across macOS versions.
     private var isMenuWindowOpen: Bool {
         if NSContextMenuModifier.isShowingMenu {
+            return true
+        }
+        if Date().timeIntervalSince(NSContextMenuModifier.lastMenuDismissAt)
+            < NSContextMenuModifier.menuDismissGracePeriod
+        {
+            Log.window.debug("[SidePanelController] menu dismiss grace period — suppressing auto-hide")
             return true
         }
         if let key = NSApp.keyWindow, NSStringFromClass(type(of: key)).contains("Menu") {
@@ -767,9 +794,13 @@ final class SidePanelController: NSWindowController {
 
 // MARK: - ResizeHandleView
 
-/// Invisible 8pt-wide strip centered on the panel's visible inner card edge. Dragging it resizes the panel.
+/// Invisible strip covering the board's inner gutter (the blank margin left
+/// of the cards — `DesignToken.Space.lg` wide). Hovering anywhere in the
+/// visually blank strip shows the resize cursor; dragging it resizes the panel.
 private final class ResizeHandleView: NSView {
-    static let handleWidth: CGFloat = 8
+    /// Matches the board's horizontal card padding, so the whole visual
+    /// gutter left of the cards is the resize zone.
+    static var handleWidth: CGFloat { DesignToken.Space.lg }
     static let minWidth: CGFloat = 400
 
     var side: EdgeSide = .right
@@ -814,10 +845,18 @@ private final class ResizeHandleView: NSView {
         }
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil,
         ))
+    }
+
+    override func mouseEntered(with _: NSEvent) {
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseExited(with _: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     override func cursorUpdate(with _: NSEvent) {

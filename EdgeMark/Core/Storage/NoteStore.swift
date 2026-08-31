@@ -2,6 +2,14 @@ import Foundation
 import OSLog
 import SwiftUI
 
+extension Notification.Name {
+    /// Request to close the full editor through the animated path — the board
+    /// shrinks the editor box back into its note card before the store closes
+    /// the note. Posted by Escape handling (`SidePanelController`), which lives
+    /// below the SwiftUI layer and can't drive the morph itself.
+    static let editorCloseRequested = Notification.Name("EdgeMark.editorCloseRequested")
+}
+
 @Observable
 final class NoteStore {
     // MARK: - State
@@ -197,7 +205,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] navigateToHome")
         navigationDirection = .backward
         clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedNote = nil
             selectedFolder = nil
         }
@@ -208,7 +216,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] navigateToFolder — \(name, privacy: .public)")
         navigationDirection = .forward
         clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedFolder = folder
         }
     }
@@ -218,7 +226,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] navigateToSubfolder — \(name, privacy: .public)")
         navigationDirection = .forward
         clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedFolder = folder
         }
     }
@@ -230,16 +238,16 @@ final class NoteStore {
         clearSelection()
         if selectedNote != nil {
             saveDirtyNotes()
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedNote = nil
             }
         } else if let parent = selectedFolder?.parentPath, !parent.isEmpty {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedFolder = folders.first { $0.name == parent }
                     ?? Folder(name: parent, noteCount: 0)
             }
         } else {
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedFolder = nil
             }
         }
@@ -249,8 +257,11 @@ final class NoteStore {
         let title = note.title
         Log.navigation.debug("[NoteStore] openNote — \(title, privacy: .public)")
         navigationDirection = .forward
-        clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        // The collapsed card hides behind the morphing editor box, so clearing
+        // the in-place edit here never renders as a visible small-card bounce.
+        withAnimation(DesignToken.Motion.morph) {
+            clearSelection()
+            inlineEditingNoteID = nil
             selectedNote = note
         }
     }
@@ -263,7 +274,7 @@ final class NoteStore {
             selectedFolder = Folder(name: note.folder, noteCount: 0)
         }
         navigationDirection = .forward
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedNote = note
         }
     }
@@ -273,7 +284,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] closeNote — \(title, privacy: .public)")
         navigationDirection = .backward
         saveDirtyNotes()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedNote = nil
         }
     }
@@ -298,7 +309,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] navigateToNextNote — \(title, privacy: .public)")
         saveDirtyNotes()
         navigationDirection = .forward
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedNote = next
         }
     }
@@ -314,7 +325,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] navigateToPreviousNote — \(title, privacy: .public)")
         saveDirtyNotes()
         navigationDirection = .backward
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             selectedNote = prev
         }
     }
@@ -323,7 +334,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] openTrash")
         navigationDirection = .overlay
         clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             showTrash = true
         }
     }
@@ -332,7 +343,7 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] closeTrash")
         navigationDirection = .overlay
         clearSelection()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(DesignToken.Motion.morph) {
             showTrash = false
         }
     }
@@ -631,6 +642,53 @@ final class NoteStore {
         }
     }
 
+    // MARK: - Inline card editing
+
+    /// The note currently being edited in place on its board card (nil = none).
+    /// Lives on the store so AppKit-level Escape handling (SidePanelController)
+    /// can peel this layer off before hiding the panel.
+    var inlineEditingNoteID: UUID?
+
+    /// Enter in-place editing on a card. Only one card edits at a time. The
+    /// card box grows into its editor with the shared morph spring.
+    func beginInlineEdit(_ note: Note) {
+        withAnimation(DesignToken.Motion.morph) {
+            inlineEditingNoteID = note.id
+        }
+    }
+
+    /// Leave in-place editing and flush the debounced save to disk. The card
+    /// box collapses back with the shared morph spring.
+    func endInlineEdit() {
+        guard inlineEditingNoteID != nil else { return }
+        withAnimation(DesignToken.Motion.morph) {
+            inlineEditingNoteID = nil
+        }
+        saveDirtyNotes()
+    }
+
+    /// Toggle the `- [ ]` / `- [x]` marker on `lineIndex` (0-based) of the
+    /// note's content. Line indexes come from the structured card preview.
+    func toggleTask(at lineIndex: Int, on note: Note) {
+        guard let index = notes.firstIndex(where: { $0.id == note.id }) else { return }
+        var lines = notes[index].content.components(separatedBy: "\n")
+        guard lines.indices.contains(lineIndex) else { return }
+        let line = lines[lineIndex]
+        if let range = line.range(of: "[ ]") {
+            lines[lineIndex] = line.replacingCharacters(in: range, with: "[x]")
+        } else if let range = line.range(of: "[x]") ?? line.range(of: "[X]") {
+            lines[lineIndex] = line.replacingCharacters(in: range, with: "[ ]")
+        } else {
+            return
+        }
+        notes[index].content = lines.joined(separator: "\n")
+        notes[index].modifiedAt = Date()
+        dirtyNoteIDs.insert(note.id)
+        if selectedNote?.id == note.id {
+            selectedNote = notes[index]
+        }
+    }
+
     // MARK: - Pin & Manual Order
 
     /// Toggle the board pin on a note. Pin state is sidecar metadata — it does
@@ -652,7 +710,10 @@ final class NoteStore {
     /// Assign a fresh manual drag order to every note in `visible`, placing the
     /// dragged note just above/below its drop target. The first drag flips the
     /// sort setting to `.manual` so the new order is what the board displays.
-    func reorderNote(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [Note]) {
+    /// Pass `persist: false` for live in-drag commits — the board saves the
+    /// sidecar once when the drag ends instead of hitting the disk on every
+    /// reorder crossing.
+    func reorderNote(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [Note], persist: Bool = true) {
         guard draggedID != dropTargetID else { return }
         guard visible.contains(where: { $0.id == draggedID }),
               visible.contains(where: { $0.id == dropTargetID })
@@ -675,7 +736,9 @@ final class NoteStore {
         if AppSettings.shared.sortBy != .manual {
             AppSettings.shared.sortBy = .manual
         }
-        try? SidecarStore.shared.save()
+        if persist {
+            try? SidecarStore.shared.save()
+        }
         let targetTitle = notes.first(where: { $0.id == dropTargetID })?.title ?? "?"
         Log.storage.info("[NoteStore] reorder — '\(draggedID)' → \(above ? "above" : "below", privacy: .public) '\(targetTitle, privacy: .public)'")
     }
@@ -1119,9 +1182,12 @@ final class NoteStore {
         let trashedNote = notes.remove(at: index)
         trashedNotes.append(trashedNote)
 
+        if inlineEditingNoteID == note.id {
+            inlineEditingNoteID = nil
+        }
         if selectedNote?.id == note.id {
             navigationDirection = .backward
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedNote = nil
             }
         }
@@ -1162,7 +1228,7 @@ final class NoteStore {
         // Navigate away if inside this folder or any descendant
         if selectedFolder?.name == name || (selectedFolder?.name.hasPrefix(prefix) ?? false) {
             navigationDirection = .backward
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedFolder = nil
             }
         }
@@ -1170,7 +1236,7 @@ final class NoteStore {
         // Deselect note if it was in the trashed folder
         if let sel = selectedNote, sel.folder == name || sel.folder.hasPrefix(prefix) {
             navigationDirection = .backward
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(DesignToken.Motion.morph) {
                 selectedNote = nil
             }
         }

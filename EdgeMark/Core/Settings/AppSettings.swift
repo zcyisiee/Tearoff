@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import OSLog
 import ServiceManagement
+import SwiftUI
 
 @Observable
 final class AppSettings {
@@ -42,6 +43,15 @@ final class AppSettings {
             UserDefaults.standard.set(editorFontSize, forKey: "editorFontSize")
             NotificationCenter.default.post(name: .editorFontChanged, object: nil)
         }
+    }
+
+    // MARK: - Board typography
+
+    /// Board (card stream) base font size in points. The card title, content
+    /// headings, body and meta text all derive from this so the whole main
+    /// interface scales together. Independent of `editorFontSize`.
+    var boardFontSize: Double = 13.5 {
+        didSet { UserDefaults.standard.set(boardFontSize, forKey: "boardFontSize") }
     }
 
     // MARK: - Outline navigation
@@ -256,6 +266,7 @@ final class AppSettings {
         }
         let savedSize = UserDefaults.standard.object(forKey: "editorFontSize") as? Double
         editorFontSize = savedSize ?? 16
+        boardFontSize = min(max(UserDefaults.standard.object(forKey: "boardFontSize") as? Double ?? 13.5, 11), 20)
         if let raw = UserDefaults.standard.string(forKey: "taskCheckboxPreset"),
            let value = TaskCheckboxPreset(rawValue: raw)
         {
@@ -327,6 +338,21 @@ extension AppSettings.SortBy {
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
+}
+
+// MARK: - Board typography
+
+extension AppSettings {
+    /// Card title — largest tier, bold, identity-colored.
+    var boardTitleFont: Font { .system(size: boardFontSize + 3.5, weight: .bold) }
+    /// Content H2 — a step under the title, semibold, same accent family.
+    var boardHeadingFont: Font { .system(size: boardFontSize + 2, weight: .semibold) }
+    /// Content H3 — a step under H2, semibold, slightly softened accent.
+    var boardSubheadingFont: Font { .system(size: boardFontSize + 1, weight: .semibold) }
+    /// Preview body text.
+    var boardBodyFont: Font { .system(size: boardFontSize) }
+    /// Folder / date meta row.
+    var boardMetaFont: Font { .system(size: max(boardFontSize - 2, 9)) }
 }
 
 extension AppSettings.BoardLayout {

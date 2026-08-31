@@ -310,5 +310,8 @@
   "selection.count": "{0} ausgewählt",
   "selection.clear": "Auswahl aufheben",
   "selection.moveToTrash.button": "In den Papierkorb",
-  "editor.toggleRawSource": "Markdown-Quelltext umschalten"
+  "editor.toggleRawSource": "Markdown-Quelltext umschalten",
+  "settings.board.fontSize": "Board-Schriftgröße",
+  "panel.lock": "Panel verankern (nicht automatisch ausblenden)",
+  "panel.unlock": "Lösen und ausblenden"
 }

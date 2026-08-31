@@ -130,6 +130,25 @@ struct BoardSettingsView: View {
                 }
             }
 
+            row(l10n["settings.board.fontSize"]) {
+                HStack(spacing: DesignToken.Space.xs) {
+                    Text(String(format: "%.1f pt", appSettings.boardFontSize))
+                        .foregroundStyle(DesignToken.muted)
+                        .monospacedDigit()
+                    Stepper(
+                        "",
+                        value: $settings.boardFontSize, in: 11 ... 20, step: 0.5,
+                    )
+                    .labelsHidden()
+                    if appSettings.boardFontSize != 13.5 {
+                        Button(l10n["settings.editor.resetFont"]) {
+                            appSettings.boardFontSize = 13.5
+                        }
+                        .font(DesignToken.Typography.caption)
+                    }
+                }
+            }
+
             Picker(l10n["settings.general.language"], selection: $selectedLocale) {
                 Text(l10n["settings.language.system"]).tag("system")
                 ForEach(L10n.availableLocales, id: \.code) { locale in
@@ -699,9 +718,8 @@ struct BoardSettingsView: View {
 
 // MARK: - SettingsSection
 
-/// A titled group of settings rows rendered as one frosted glass card.
+/// A titled group of settings rows rendered as one solid card.
 private struct SettingsSection<Trailing: View, Content: View>: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let title: String
     let icon: String
     let trailing: Trailing
@@ -739,7 +757,7 @@ private struct SettingsSection<Trailing: View, Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                    .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
+                    .fill(DesignToken.solidCard)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: DesignToken.Radius.card)
@@ -822,7 +840,6 @@ private struct ThemeCard: View {
 private struct ThemeEditorSheet: View {
     @Environment(L10n.self) var l10n
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     @State var theme: EdgeMarkTheme
     let isNew: Bool
@@ -843,7 +860,7 @@ private struct ThemeEditorSheet: View {
             .padding(DesignToken.Space.md)
             .background {
                 RoundedRectangle(cornerRadius: DesignToken.Radius.md)
-                    .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
+                    .fill(DesignToken.solidCard)
             }
 
             HStack {
