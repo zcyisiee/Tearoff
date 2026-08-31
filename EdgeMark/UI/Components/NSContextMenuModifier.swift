@@ -46,6 +46,12 @@ private final class MenuDispatch: NSObject {
 struct NSContextMenuModifier: ViewModifier {
     let menuBuilder: () -> NSMenu
 
+    /// True while one of our NSContextMenuModifier menus is tracking.
+    /// `NSMenu.popUpContextMenu` blocks, so a simple flag brackets the whole
+    /// interaction — SidePanelController uses this to suppress click-outside
+    /// and auto-hide dismissal while the user is picking a menu item.
+    static var isShowingMenu = false
+
     func body(content: Content) -> some View {
         content.overlay {
             NSContextMenuOverlay(menuBuilder: menuBuilder)
@@ -91,7 +97,9 @@ private struct NSContextMenuOverlay: NSViewRepresentable {
 
         override func rightMouseDown(with event: NSEvent) {
             if let menu = menuBuilder?() {
+                NSContextMenuModifier.isShowingMenu = true
                 NSMenu.popUpContextMenu(menu, with: event, for: self)
+                NSContextMenuModifier.isShowingMenu = false
                 MenuDispatch.shared.clear()
             }
         }

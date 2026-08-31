@@ -147,7 +147,11 @@ final class SidePanelController: NSWindowController {
             guard let self, isShown, !self.isMouseInPanel(),
                   PanelSettings.shared.hideOnClickOutside,
                   PanelSettings.shared.dismissalMode == .auto,
-                  !PanelSettings.shared.isPanelPinned else { return }
+                  !PanelSettings.shared.isPanelPinned,
+                  // Clicking a context-menu item lands outside the panel's
+                  // window but must not dismiss the panel mid-action.
+                  !self.isMenuWindowOpen
+            else { return }
             // Don't restore previousApp on click-outside — the click itself is moving
             // focus to the clicked app; re-activating previousApp would yank focus back
             // and race the click, so the user had to click several times (#58).
@@ -436,7 +440,11 @@ final class SidePanelController: NSWindowController {
         guard isShown, !isAnimating, !isEditorFocused,
               PanelSettings.shared.autoHideOnMouseExit,
               PanelSettings.shared.dismissalMode == .auto,
-              !PanelSettings.shared.isPanelPinned else { return }
+              !PanelSettings.shared.isPanelPinned,
+              // Moving onto a context menu window counts as exiting the panel
+              // bounds — the user is mid-interaction, not leaving.
+              !isMenuWindowOpen
+        else { return }
         let delay = PanelSettings.shared.hideDelay
         if delay == 0 {
             hidePanel()
@@ -719,8 +727,31 @@ final class SidePanelController: NSWindowController {
         cancelHideTimer()
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self, isShown, !isMouseInPanel() else { return }
+            // A context menu opened after the exit began — the user is picking
+            // an item; let the interaction finish instead of yanking the panel.
+            guard !isMenuWindowOpen else { return }
             hidePanel()
         }
+    }
+
+    /// Whether a popup/context menu is currently open. While one is up,
+    /// click-outside and auto-hide dismissal are suspended — clicking a menu
+    /// item (e.g. setting a note color) lands outside the panel's window and
+    /// moving onto the menu reads as a mouse exit, but the user is clearly
+    /// mid-interaction, not leaving.
+    ///
+    /// Two signals: an explicit flag bracketing our own (blocking)
+    /// `NSMenu.popUpContextMenu` calls, plus a window scan for SwiftUI Menus,
+    /// which we don't drive. The scan matches loosely — the private menu
+    /// window class name varies across macOS versions.
+    private var isMenuWindowOpen: Bool {
+        if NSContextMenuModifier.isShowingMenu {
+            return true
+        }
+        if let key = NSApp.keyWindow, NSStringFromClass(type(of: key)).contains("Menu") {
+            return true
+        }
+        return NSApp.windows.contains { NSStringFromClass(type(of: $0)).contains("MenuWindow") }
     }
 
     private func cancelHideTimer() {

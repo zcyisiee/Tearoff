@@ -213,12 +213,6 @@ struct BoardSettingsView: View {
                 Text(l10n["sort.ascending"]).tag(true)
             }
 
-            Picker(l10n["settings.noteColorDisplay"], selection: $settings.noteColorDisplay) {
-                ForEach(AppSettings.NoteColorDisplay.allCases, id: \.self) { display in
-                    Text(display.displayName(l10n)).tag(display)
-                }
-            }
-
             Divider()
 
             Text(l10n["settings.tags.section"])
@@ -744,11 +738,11 @@ private struct SettingsSection<Trailing: View, Content: View>: View {
             .padding(DesignToken.Space.md)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                     .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                     .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
             }
         }

@@ -46,10 +46,10 @@ struct SelectionToolbar: View {
             .padding(.horizontal, DesignToken.Space.md)
             .padding(.vertical, DesignToken.Space.sm)
             .background {
-                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                     .fill(.regularMaterial)
                     .overlay {
-                        RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                        RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                             .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
                     }
                     .shadow(color: DesignToken.ink.opacity(0.18), radius: 8, y: 2)

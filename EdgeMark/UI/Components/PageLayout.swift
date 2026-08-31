@@ -1,15 +1,18 @@
 import SwiftUI
 
 /// Shared single-surface layout used across all screens.
-/// One continuous translucent vibrancy backdrop fills the panel; the header is
-/// separated from the content by a hairline, not by card boundaries. Cards and
-/// sheets float on the vibrancy as frosted glass (SideNotes-style). Pass
+/// The backdrop is a near-transparent vibrancy material — cards and the header
+/// pill float on it as frosted glass (SideNotes-style); nothing else paints a
+/// surface. The header renders as its own rounded-rect glass pill. Pass
 /// `onSwipeBack` to enable two-finger trackpad right-swipe to go back on the
 /// header.
 struct PageLayout<Header: View, Content: View>: View {
     var onSwipeBack: (() -> Void)?
     var onContentSwipeRight: (() -> Void)?
     var onContentSwipeLeft: (() -> Void)?
+    /// True when the screen renders its own chrome (expanded editor) — skips
+    /// the header pill entirely instead of showing an empty one.
+    var headerHidden: Bool
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 
@@ -17,34 +20,41 @@ struct PageLayout<Header: View, Content: View>: View {
         onSwipeBack: (() -> Void)? = nil,
         onContentSwipeRight: (() -> Void)? = nil,
         onContentSwipeLeft: (() -> Void)? = nil,
+        headerHidden: Bool = false,
         @ViewBuilder header: () -> Header,
         @ViewBuilder content: () -> Content,
     ) {
         self.onSwipeBack = onSwipeBack
         self.onContentSwipeRight = onContentSwipeRight
         self.onContentSwipeLeft = onContentSwipeLeft
+        self.headerHidden = headerHidden
         self.header = header()
         self.content = content()
     }
 
     var body: some View {
         ZStack {
-            // Single-path vibrancy: NSVisualEffectView renders the frosted
-            // backdrop identically from macOS 15.7 through 26 and honors
-            // Reduce Transparency by going opaque on its own.
-            VisualEffectView(tint: nil, material: .sidebar)
+            // Single-path vibrancy: underWindowBackground keeps the backdrop
+            // nearly invisible (desktop reads through with a light blur, like
+            // SideNotes) and honors Reduce Transparency by going opaque.
+            VisualEffectView(tint: nil, material: .underWindowBackground)
 
-            VStack(spacing: 0) {
-                header
-                    .padding(.horizontal, DesignToken.Space.lg)
-                    .padding(.vertical, DesignToken.Space.sm + 2)
-                    .overlay {
-                        if let onSwipeBack {
-                            SwipeDetectorView(onSwipeBack: onSwipeBack)
+            VStack(spacing: DesignToken.Space.sm) {
+                if !headerHidden {
+                    header
+                        .padding(.horizontal, DesignToken.Space.md)
+                        .padding(.vertical, DesignToken.Space.sm + 2)
+                        .frame(maxWidth: .infinity)
+                        .background { headerPill }
+                        .overlay { headerPillBorder }
+                        .padding(.horizontal, DesignToken.Space.lg)
+                        .padding(.top, DesignToken.Space.sm)
+                        .overlay {
+                            if let onSwipeBack {
+                                SwipeDetectorView(onSwipeBack: onSwipeBack)
+                            }
                         }
-                    }
-
-                DesignToken.hairlineSoft.frame(height: 1)
+                }
 
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,5 +68,17 @@ struct PageLayout<Header: View, Content: View>: View {
                     }
             }
         }
+    }
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    private var headerPill: some View {
+        RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+            .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
+    }
+
+    private var headerPillBorder: some View {
+        RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+            .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
     }
 }

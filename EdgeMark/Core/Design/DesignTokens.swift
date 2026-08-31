@@ -73,6 +73,8 @@ enum DesignToken {
         static let md: CGFloat = 8
         /// Panels, windows, large containers.
         static let lg: CGFloat = 10
+        /// Board cards and the header pill — the SideNotes-style generous rounding.
+        static let card: CGFloat = 16
     }
 
     // MARK: - Space

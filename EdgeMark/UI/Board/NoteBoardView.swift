@@ -119,7 +119,7 @@ struct NoteBoardView: View {
     // MARK: Body
 
     var body: some View {
-        PageLayout {
+        PageLayout(headerHidden: noteStore.selectedNote != nil) {
             header
         } content: {
             VStack(spacing: 0) {
@@ -186,11 +186,7 @@ struct NoteBoardView: View {
 
     @ViewBuilder
     private var header: some View {
-        if noteStore.selectedNote != nil {
-            // ExpandedNoteEditor renders its own header inside the content area.
-            Text("")
-                .frame(height: 0)
-        } else if noteStore.awaitingRootChoice {
+        if noteStore.awaitingRootChoice {
             VStack(spacing: 2) {
                 Label(l10n["picker.chooseStorageLocation"], systemImage: "folder")
                     .font(DesignToken.Typography.heading)
@@ -533,11 +529,11 @@ struct NoteBoardView: View {
         )
         .padding(DesignToken.Space.xs)
         .background(
-            RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .fill(DesignToken.glassCard),
         )
         .overlay {
-            RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .strokeBorder(DesignToken.accent, lineWidth: 1.5)
         }
     }

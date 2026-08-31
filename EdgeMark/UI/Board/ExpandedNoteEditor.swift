@@ -11,6 +11,7 @@ struct ExpandedNoteEditor: View {
     @Environment(NoteStore.self) var noteStore
     @Environment(AppSettings.self) var appSettings
     @Environment(L10n.self) var l10n
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     let note: Note
 
@@ -48,6 +49,20 @@ struct ExpandedNoteEditor: View {
             }
             .frame(maxHeight: .infinity)
         }
+        // The editor is one enlarged glass card floating on the vibrancy,
+        // matching the board-card language (SideNotes-style single surface).
+        .padding(.horizontal, DesignToken.Space.lg)
+        .padding(.top, DesignToken.Space.sm)
+        .padding(.bottom, DesignToken.Space.md)
+        .background {
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+                .fill(reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+                .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
         .alert(l10n["alert.deleteNote.title"], isPresented: $showDeleteConfirm) {
             Button(l10n["common.delete"], role: .destructive) {
                 noteStore.closeNote()

@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 
 /// Card in the note board: light-rendered markdown thumbnail, title, and
 /// meta row on a frosted glass pane floating over the vibrancy backdrop.
-/// Single click expands the note (SideNotes-style in-place editing); ⌘/⇧-click
+/// A note's identity color fills the whole card (SideNotes-style); uncolored
+/// cards stay glass. Single click expands the note in place; ⌘/⇧-click
 /// multi-selects; context menu reuses the shared note menu.
 struct BoardNoteCard: View {
     @Environment(L10n.self) private var l10n
@@ -27,10 +28,6 @@ struct BoardNoteCard: View {
 
     private var title: String {
         note.title.isEmpty ? L10n.shared["common.untitled"] : note.title
-    }
-
-    private var usesTint: Bool {
-        appSettings.noteColorDisplay == .tint && note.color != nil
     }
 
     var body: some View {
@@ -78,12 +75,12 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.mutedSoft)
             }
         }
-        .padding(.leading, usesTint ? DesignToken.Space.sm + 2 : DesignToken.Space.sm + 5)
+        .padding(.leading, DesignToken.Space.sm + 5)
         .padding(.trailing, DesignToken.Space.sm + 2)
         .padding(.vertical, DesignToken.Space.sm + 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .fill(cardFill)
         }
         .background(
@@ -93,28 +90,11 @@ struct BoardNoteCard: View {
                     .onChange(of: geo.size.height) { _, new in cardHeight = new }
             },
         )
-        .overlay {
-            if usesTint {
-                // Tint mode: saturated leading edge keeps the color readable.
-                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
-                    .fill(note.color?.strip ?? .clear)
-                    .frame(width: 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
-            } else if let color = note.color {
-                // Strip mode: narrow color bar on the card's left edge.
-                RoundedRectangle(cornerRadius: DesignToken.Radius.md)
-                    .fill(color.strip)
-                    .frame(width: 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
-            }
-        }
         .overlay(alignment: .topTrailing) {
             pinChrome
         }
         .overlay {
-            RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+            RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .strokeBorder(borderColor, lineWidth: isSelected || isDropTarget ? 1.5 : 1)
         }
         .shadow(
@@ -122,7 +102,7 @@ struct BoardNoteCard: View {
             radius: isHovered ? 6 : 3,
             y: 1,
         )
-        .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
+        .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
         .onTapGesture {
             // Modifier flags come from the live click event — ⌘/⇧ route into
             // Finder-style multi-select instead of opening the note.
@@ -188,16 +168,26 @@ struct BoardNoteCard: View {
             return note.color?.strip ?? DesignToken.accent
         }
         if isHovered {
-            return DesignToken.hairline
+            return note.color?.strip ?? DesignToken.hairline
         }
-        return DesignToken.hairlineSoft
+        return note.color != nil ? DesignToken.clearBorder : DesignToken.hairlineSoft
     }
 
+    /// Identity color fills the entire card (SideNotes-style); uncolored cards
+    /// are frosted glass. Reduce Transparency swaps glass for a solid surface.
     private var cardFill: Color {
-        if usesTint, let color = note.color {
+        if let color = note.color {
             return color.cardTint
         }
         return reduceTransparency ? DesignToken.surfaceCard : DesignToken.glassCard
+    }
+}
+
+private extension DesignToken {
+    /// Hairline that reads on tinted cards — reuse the soft line at reduced
+    /// prominence via the card's own color family.
+    static var clearBorder: Color {
+        Color.primary.opacity(0.12)
     }
 }
 
