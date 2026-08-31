@@ -324,6 +324,8 @@ enum FileStorage {
                 savedAt: savedAt,
                 tags: note.tags.map(\.rawValue),
                 color: note.color?.rawValue,
+                pinned: note.pinned,
+                sortOrder: note.sortOrder,
             ),
             for: note.id,
         )
@@ -808,6 +810,8 @@ enum FileStorage {
                     folder: folder,
                     tags: tags,
                     color: entry.color.flatMap(NoteColor.init),
+                    pinned: entry.pinned ?? false,
+                    sortOrder: entry.sortOrder,
                     savedFilename: filename,
                 )
             }

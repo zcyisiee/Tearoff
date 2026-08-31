@@ -13,6 +13,7 @@ final class AppSettings {
         case name = "Name"
         case dateModified = "Date Modified"
         case dateCreated = "Date Created"
+        case manual = "Manual"
     }
 
     var sortBy: SortBy = .dateModified {
@@ -132,6 +133,13 @@ final class AppSettings {
             UserDefaults.standard.set(appearanceMode.rawValue, forKey: "appearanceMode")
             applyAppearance()
         }
+    }
+
+    /// Whether the editor presents the note as raw Markdown source instead of
+    /// the default rich WYSIWYG rendering. Persisted so the choice survives
+    /// note switches and app restarts.
+    var editorRawSourceMode: Bool = false {
+        didSet { UserDefaults.standard.set(editorRawSourceMode, forKey: "editorRawSourceMode") }
     }
 
     /// Whether to automatically check for updates on launch (24h throttle).
@@ -280,6 +288,7 @@ final class AppSettings {
         {
             appearanceMode = mode
         }
+        editorRawSourceMode = UserDefaults.standard.bool(forKey: "editorRawSourceMode")
         autoCheckUpdates = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
         launchAtLogin = UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? false
         if let raw = UserDefaults.standard.object(forKey: "spellCheckingEnabled") as? Bool {
@@ -316,6 +325,7 @@ final class AppSettings {
         case .name: folder.latestModifiedAt
         case .dateModified: folder.latestModifiedAt
         case .dateCreated: folder.earliestCreatedAt
+        case .manual: folder.latestModifiedAt
         }
     }
 }
@@ -326,6 +336,7 @@ extension AppSettings.SortBy {
         case .name: l10n["sort.name"]
         case .dateModified: l10n["sort.dateModified"]
         case .dateCreated: l10n["sort.dateCreated"]
+        case .manual: l10n["sort.manual"]
         }
     }
 }

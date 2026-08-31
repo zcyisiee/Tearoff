@@ -16,16 +16,20 @@ import SwiftUI
 enum DesignToken {
     // MARK: Color — surfaces
 
-    /// Panel backdrop: the active theme's canvas (warm ivory by default,
-    /// warm charcoal in dark). Theme-reactive — reading it in a view body
-    /// registers a dependency on `ThemeEngine.shared`.
-    static var canvas: Color { ThemeEngine.shared.activeTheme.canvas }
     /// Soft raised surface — secondary strips, insets, hover fills.
     static let surfaceSoft = dynamic(light: 0xF8F7F2, dark: 0x313230)
-    /// Card surface — the brightest layer.
+    /// Card surface — the brightest layer. Also the solid fallback used when
+    /// Reduce Transparency is on (glass fills swap to this).
     static let surfaceCard = dynamic(light: 0xFFFFFF, dark: 0x343533)
     /// Inset surface — wells, code blocks, inputs.
     static let surfaceInset = dynamic(light: 0xF0EEE6, dark: 0x292A29)
+
+    /// Frosted card fill — a translucent wash that lets the vibrancy backdrop
+    /// read through, floating each card as its own pane (SideNotes-style).
+    /// Swap for `surfaceCard` under Reduce Transparency.
+    static let glassCard = dynamicAlpha(light: 0xFFFFFF, dark: 0xFFFFFF, lightAlpha: 0.55, darkAlpha: 0.055)
+    /// Frosted inset fill — inputs and wells on glass surfaces.
+    static let glassInset = dynamicAlpha(light: 0x8A7A55, dark: 0x000000, lightAlpha: 0.08, darkAlpha: 0.22)
 
     // MARK: Color — lines
 
@@ -113,6 +117,14 @@ enum DesignToken {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             return NSColor(rgb: isDark ? dark : light)
+        })
+    }
+
+    private static func dynamicAlpha(light: UInt32, dark: UInt32, lightAlpha: Double, darkAlpha: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let base = NSColor(rgb: isDark ? dark : light)
+            return base.withAlphaComponent(isDark ? darkAlpha : lightAlpha)
         })
     }
 }

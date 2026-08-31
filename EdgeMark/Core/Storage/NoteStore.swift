@@ -14,6 +14,10 @@ final class NoteStore {
     var selectedNote: Note?
     var showTrash = false
 
+    /// Settings page route state. When true the board shows the in-panel
+    /// settings page; Escape (or the back button) returns to the browse state.
+    var showSettings = false
+
     /// Set at launch when "Choose on launch" is on and ≥2 storage roots are configured.
     /// While true, the panel shows a non-blocking storage-root picker instead of the
     /// note list; picking a root clears this and switches (temporary) to that root.
@@ -127,8 +131,24 @@ final class NoteStore {
 
     // MARK: - Sorting
 
+    /// Pinned notes always float to the top; within each group the requested
+    /// sort applies. `.manual` orders by the drag-assigned `sortOrder` (notes
+    /// without one fall back to their title) and ignores `ascending`.
     func sortedNotes(_ notes: [Note], by sortBy: AppSettings.SortBy, ascending: Bool) -> [Note] {
-        notes.sorted { a, b in
+        let ordered = notes.sorted { a, b in
+            if sortBy == .manual {
+                switch (a.sortOrder, b.sortOrder) {
+                case let (lhs?, rhs?):
+                    if lhs != rhs { return lhs < rhs }
+                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                case (nil, _?):
+                    return false // unpositioned notes sink below positioned ones
+                case (_?, nil):
+                    return true
+                case (nil, nil):
+                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                }
+            }
             let result: Bool = switch sortBy {
             case .name:
                 a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
@@ -136,14 +156,19 @@ final class NoteStore {
                 a.modifiedAt < b.modifiedAt
             case .dateCreated:
                 a.createdAt < b.createdAt
+            case .manual:
+                false
             }
             return ascending ? result : !result
         }
+        return ordered.filter(\.pinned) + ordered.filter { !$0.pinned }
     }
 
     func sortedFolders(_ folders: [Folder], by sortBy: AppSettings.SortBy, ascending: Bool) -> [Folder] {
-        folders.sorted { a, b in
-            let result: Bool = switch sortBy {
+        // Manual order only applies to notes; folders fall back to modification date.
+        let effective: AppSettings.SortBy = sortBy == .manual ? .dateModified : sortBy
+        return folders.sorted { a, b in
+            let result: Bool = switch effective {
             case .name:
                 a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
             case .dateModified:
@@ -159,6 +184,8 @@ final class NoteStore {
                 case (nil, _): false
                 case (_, nil): true
                 }
+            case .manual:
+                false
             }
             return ascending ? result : !result
         }
@@ -604,6 +631,65 @@ final class NoteStore {
         }
     }
 
+    // MARK: - Pin & Manual Order
+
+    /// Toggle the board pin on a note. Pin state is sidecar metadata — it does
+    /// not touch the note body or its modified date.
+    func togglePin(on note: Note) {
+        setPinned(!note.pinned, on: note)
+    }
+
+    func setPinned(_ pinned: Bool, on note: Note) {
+        guard let index = notes.firstIndex(where: { $0.id == note.id }) else { return }
+        guard notes[index].pinned != pinned else { return }
+        notes[index].pinned = pinned
+        syncNoteMeta(at: index)
+        if selectedNote?.id == note.id {
+            selectedNote = notes[index]
+        }
+    }
+
+    /// Assign a fresh manual drag order to every note in `visible`, placing the
+    /// dragged note just above/below its drop target. The first drag flips the
+    /// sort setting to `.manual` so the new order is what the board displays.
+    func reorderNote(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [Note]) {
+        guard draggedID != dropTargetID else { return }
+        guard visible.contains(where: { $0.id == draggedID }),
+              visible.contains(where: { $0.id == dropTargetID })
+        else { return }
+
+        var ids = visible.map(\.id)
+        ids.removeAll { $0 == draggedID }
+        guard let targetIndex = ids.firstIndex(of: dropTargetID) else { return }
+        let insertion = min(ids.count, above ? targetIndex : targetIndex + 1)
+        ids.insert(draggedID, at: insertion)
+
+        let order = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        for index in notes.indices where order[notes[index].id] != nil {
+            let newOrder = order[notes[index].id]
+            if notes[index].sortOrder != newOrder {
+                notes[index].sortOrder = newOrder
+                syncNoteMeta(at: index)
+            }
+        }
+        if AppSettings.shared.sortBy != .manual {
+            AppSettings.shared.sortBy = .manual
+        }
+        try? SidecarStore.shared.save()
+        let targetTitle = notes.first(where: { $0.id == dropTargetID })?.title ?? "?"
+        Log.storage.info("[NoteStore] reorder — '\(draggedID)' → \(above ? "above" : "below", privacy: .public) '\(targetTitle, privacy: .public)'")
+    }
+
+    /// Push the current pin/sort metadata of `notes[index]` into its sidecar entry.
+    private func syncNoteMeta(at index: Int) {
+        let note = notes[index]
+        if var entry = SidecarStore.shared.noteEntry(for: note.id) {
+            entry.pinned = note.pinned
+            entry.sortOrder = note.sortOrder
+            SidecarStore.shared.upsertNote(entry, for: note.id)
+        }
+    }
+
     /// Toggle a tag in the active sidebar filter. Multi-select acts as OR.
     func toggleTagFilter(_ tag: TagColor) {
         // Filter change → visible row set may shrink; selection would point at hidden rows.
@@ -673,9 +759,9 @@ final class NoteStore {
     // MARK: - Keyboard navigation
 
     /// Flat row order matching what the active list view is rendering.
-    /// Empty when keyboard navigation shouldn't apply (editor, trash).
+    /// Empty when keyboard navigation shouldn't apply (editor, trash, settings).
     var keyboardNavOrder: [SelectableID] {
-        if selectedNote != nil || showTrash {
+        if selectedNote != nil || showTrash || showSettings {
             return []
         }
         let s = AppSettings.shared
@@ -867,6 +953,25 @@ final class NoteStore {
                 toggleTag(tag, on: note)
             }
         }
+    }
+
+    /// Batch identity-color set across the selected notes (nil clears).
+    func setNoteColorOnSelection(_ color: NoteColor?) {
+        let notes = selectedNotes
+        guard !notes.isEmpty else { return }
+        for note in notes {
+            setNoteColor(color, on: note)
+        }
+    }
+
+    /// Batch pin/unpin across the selected notes.
+    func setPinnedOnSelection(_ pinned: Bool) {
+        let notes = selectedNotes
+        guard !notes.isEmpty else { return }
+        for note in notes {
+            setPinned(pinned, on: note)
+        }
+        try? SidecarStore.shared.save()
     }
 
     func deleteNote(_ note: Note) {

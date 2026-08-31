@@ -300,5 +300,15 @@
   "themes.material": "सामग्री",
   "themes.material.translucent": "पारभासी",
   "themes.material.opaque": "अपारदर्शी",
-  "common.save": "सहेजें"
+  "common.save": "सहेजें",
+  "settings.board.title": "सेटिंग्स",
+  "settings.section.layout": "लेआउट और क्रम",
+  "sort.manual": "मैनुअल (खींचने का क्रम)",
+  "note.pin": "ऊपर पिन करें",
+  "note.pinned": "पिन किया गया",
+  "note.unpin": "पिन हटाएँ",
+  "selection.count": "{0} चयनित",
+  "selection.clear": "चयन साफ़ करें",
+  "selection.moveToTrash.button": "कूड़ेदान में ले जाएँ",
+  "editor.toggleRawSource": "रॉ मार्कडाउन सोर्स टॉगल करें"
 }

@@ -300,5 +300,15 @@
   "themes.material": "Material",
   "themes.material.translucent": "Translucent",
   "themes.material.opaque": "Opak",
-  "common.save": "Sichern"
+  "common.save": "Sichern",
+  "settings.board.title": "Einstellungen",
+  "settings.section.layout": "Layout & Sortierung",
+  "sort.manual": "Manuell (Ziehreihenfolge)",
+  "note.pin": "Oben anheften",
+  "note.pinned": "Angeheftet",
+  "note.unpin": "Nicht mehr anheften",
+  "selection.count": "{0} ausgewählt",
+  "selection.clear": "Auswahl aufheben",
+  "selection.moveToTrash.button": "In den Papierkorb",
+  "editor.toggleRawSource": "Markdown-Quelltext umschalten"
 }

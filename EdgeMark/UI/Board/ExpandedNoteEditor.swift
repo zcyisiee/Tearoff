@@ -104,6 +104,8 @@ struct ExpandedNoteEditor: View {
 
                 NoteColorMenuButton(note: note)
 
+                RawSourceToggleButton()
+
                 OutlineToggleButton()
 
                 CopyMenuButton(note: note)
@@ -217,6 +219,34 @@ struct NoteColorMenuButton: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help(L10n.shared["noteColor.menu"])
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Raw Source Toggle Button
+
+/// Source-view switch in the editor header; accent-tinted while the note is
+/// presented as raw Markdown. The choice persists via AppSettings.
+struct RawSourceToggleButton: View {
+    @State private var isHovered = false
+
+    private var isRaw: Bool {
+        AppSettings.shared.editorRawSourceMode
+    }
+
+    var body: some View {
+        Button {
+            AppSettings.shared.editorRawSourceMode.toggle()
+        } label: {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .iconHoverChrome(isHovered: isHovered, isActive: isRaw)
+        }
+        .buttonStyle(.plain)
+        .help(L10n.shared["editor.toggleRawSource"])
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering

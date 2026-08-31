@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// Shared single-surface layout used across all screens.
-/// One continuous backdrop fills the panel; the header is separated from the
-/// content by a hairline, not by card boundaries. Pass `onSwipeBack` to enable
-/// two-finger trackpad right-swipe to go back on the header.
+/// One continuous translucent vibrancy backdrop fills the panel; the header is
+/// separated from the content by a hairline, not by card boundaries. Cards and
+/// sheets float on the vibrancy as frosted glass (SideNotes-style). Pass
+/// `onSwipeBack` to enable two-finger trackpad right-swipe to go back on the
+/// header.
 struct PageLayout<Header: View, Content: View>: View {
     var onSwipeBack: (() -> Void)?
     var onContentSwipeRight: (() -> Void)?
@@ -25,17 +27,12 @@ struct PageLayout<Header: View, Content: View>: View {
         self.content = content()
     }
 
-    /// Theme canvas wash over the vibrancy material. Opaque themes paint
-    /// nearly solid; translucent ones keep the backdrop visible through the wash.
-    private var canvasWash: some View {
-        DesignToken.canvas
-            .opacity(ThemeEngine.shared.activeTheme.material.washOpacity)
-    }
-
     var body: some View {
         ZStack {
-            VisualEffectView(tint: nil, material: ThemeEngine.shared.activeTheme.material.nsMaterial)
-            canvasWash.ignoresSafeArea()
+            // Single-path vibrancy: NSVisualEffectView renders the frosted
+            // backdrop identically from macOS 15.7 through 26 and honors
+            // Reduce Transparency by going opaque on its own.
+            VisualEffectView(tint: nil, material: .sidebar)
 
             VStack(spacing: 0) {
                 header

@@ -21,6 +21,13 @@ struct Note: Identifiable {
     /// Identity color (SideNotes-style card color). Persisted in the sidecar.
     var color: NoteColor?
 
+    /// Pinned notes float above the rest of the board. Persisted in the sidecar.
+    var pinned: Bool
+
+    /// Manual sort position within a visible list (drag-reorder). nil = no
+    /// explicit position yet. Persisted in the sidecar.
+    var sortOrder: Int?
+
     /// When the note was moved to Trash (nil = active). Persisted in YAML front matter.
     var trashedAt: Date?
 
@@ -58,6 +65,8 @@ struct Note: Identifiable {
         folder: String = "",
         tags: [TagColor] = [],
         color: NoteColor? = nil,
+        pinned: Bool = false,
+        sortOrder: Int? = nil,
         trashedAt: Date? = nil,
         savedFilename: String? = nil,
     ) {
@@ -70,6 +79,8 @@ struct Note: Identifiable {
         self.folder = folder
         self.tags = tags
         self.color = color
+        self.pinned = pinned
+        self.sortOrder = sortOrder
         self.trashedAt = trashedAt
         self.savedFilename = savedFilename
     }
@@ -84,6 +95,8 @@ struct Note: Identifiable {
             && lhs.folder == rhs.folder
             && lhs.tags == rhs.tags
             && lhs.color == rhs.color
+            && lhs.pinned == rhs.pinned
+            && lhs.sortOrder == rhs.sortOrder
             && lhs.trashedAt == rhs.trashedAt
     }
 }

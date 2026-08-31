@@ -300,5 +300,15 @@
   "themes.material": "Material",
   "themes.material.translucent": "Translucent",
   "themes.material.opaque": "Opaque",
-  "common.save": "Save"
+  "common.save": "Save",
+  "settings.board.title": "Settings",
+  "settings.section.layout": "Layout & Sorting",
+  "sort.manual": "Manual (drag order)",
+  "note.pin": "Pin to Top",
+  "note.pinned": "Pinned",
+  "note.unpin": "Unpin",
+  "selection.count": "{0} selected",
+  "selection.clear": "Clear Selection",
+  "selection.moveToTrash.button": "Move to Trash",
+  "editor.toggleRawSource": "Toggle Raw Markdown Source"
 }

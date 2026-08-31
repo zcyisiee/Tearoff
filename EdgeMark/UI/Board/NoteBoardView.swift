@@ -17,6 +17,7 @@ struct NoteBoardView: View {
     @State private var isSearching = false
     @State private var searchQuery = ""
     @State private var collapsedSections: Set<String> = []
+    @State private var draggingNoteID: UUID?
 
     // Folder delete confirmation
     @State private var deletingFolderName: String?
@@ -126,6 +127,8 @@ struct NoteBoardView: View {
                     ExpandedNoteEditor(note: note)
                 } else if noteStore.awaitingRootChoice {
                     pickerRows
+                } else if noteStore.showSettings {
+                    BoardSettingsView()
                 } else if isSearching {
                     searchResultsList
                 } else {
@@ -197,6 +200,16 @@ struct NoteBoardView: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
+        } else if noteStore.showSettings {
+            HStack(spacing: DesignToken.Space.sm) {
+                HeaderIconButton(systemName: "chevron.left", help: l10n["common.back"]) {
+                    noteStore.showSettings = false
+                }
+                Text(l10n["settings.board.title"])
+                    .font(DesignToken.Typography.heading)
+                    .foregroundStyle(DesignToken.bodyStrong)
+                Spacer()
+            }
         } else if isSearching {
             HStack(spacing: DesignToken.Space.sm) {
                 Image(systemName: "magnifyingglass")
@@ -227,6 +240,9 @@ struct NoteBoardView: View {
                 }
                 HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
                     createNote()
+                }
+                HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
+                    noteStore.showSettings = true
                 }
             }
         }
@@ -309,8 +325,13 @@ struct NoteBoardView: View {
                 }
                 .padding(.horizontal, DesignToken.Space.lg)
                 .padding(.vertical, DesignToken.Space.md)
+                .padding(.bottom, 44) // clearance for the floating selection toolbar
                 .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
                 .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
+            }
+            .overlay(alignment: .bottom) {
+                SelectionToolbar()
+                    .padding(.bottom, DesignToken.Space.md)
             }
         }
     }
@@ -429,31 +450,71 @@ struct NoteBoardView: View {
         }
     }
 
+    /// Vertical card stream — SideNotes-style single column, card width fills
+    /// the panel minus the shared horizontal padding.
     private func noteGrid(_ notes: [Note]) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: DesignToken.Space.sm)],
-            spacing: DesignToken.Space.sm,
-        ) {
+        LazyVStack(spacing: DesignToken.Space.sm) {
             ForEach(notes) { note in
                 if noteRename.renamingNoteID == note.id {
                     boardRenameCard(for: note)
                 } else {
-                    BoardNoteCard(note: note) {
-                        noteStore.openNote(note)
-                    }
-                    .nsContextMenu {
-                        NoteListMenus.noteMenu(
-                            note: note,
-                            noteStore: noteStore,
-                            l10n: l10n,
-                            onRename: { startRenamingNote(note) },
-                            onSetColor: { color in
-                                noteStore.setNoteColor(color, on: note)
-                            },
-                        )
-                    }
+                    card(for: note, in: notes)
                 }
             }
+        }
+    }
+
+    private func card(for note: Note, in visible: [Note]) -> some View {
+        BoardNoteCard(
+            note: note,
+            isSelected: noteStore.selection.contains(.note(note.id)),
+            onOpen: { flags in handleCardClick(note, flags: flags, visible: visible) },
+            onPinToggle: { noteStore.togglePin(on: note) },
+            onDragStart: { draggingNoteID = note.id },
+            onDrop: { targetID, above in
+                guard let dragging = draggingNoteID else { return }
+                draggingNoteID = nil
+                noteStore.reorderNote(dragging, dropTargetID: targetID, above: above, in: visible)
+            },
+        )
+        .nsContextMenu {
+            if noteStore.selection.contains(.note(note.id)), noteStore.selection.count > 1 {
+                NoteListMenus.selectionMenu(noteStore: noteStore, l10n: l10n)
+            } else {
+                NoteListMenus.noteMenu(
+                    note: note,
+                    noteStore: noteStore,
+                    l10n: l10n,
+                    onRename: { startRenamingNote(note) },
+                    onSetColor: { color in
+                        noteStore.setNoteColor(color, on: note)
+                    },
+                )
+            }
+        }
+    }
+
+    /// Finder-style click semantics: plain click opens, ⌘-click toggles the
+    /// card's selection, ⇧-click selects the range to the anchor.
+    private func handleCardClick(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
+        let mods = flags.intersection([.command, .shift])
+        let order = visible.map { NoteStore.SelectableID.note($0.id) }
+        if mods.contains(.command) {
+            noteStore.handleSelectionClick(
+                on: .note(note.id),
+                isShift: false,
+                isCommand: true,
+                visibleOrder: order,
+            )
+        } else if mods.contains(.shift) {
+            noteStore.handleSelectionClick(
+                on: .note(note.id),
+                isShift: true,
+                isCommand: false,
+                visibleOrder: order,
+            )
+        } else {
+            noteStore.openNote(note)
         }
     }
 
@@ -473,7 +534,7 @@ struct NoteBoardView: View {
         .padding(DesignToken.Space.xs)
         .background(
             RoundedRectangle(cornerRadius: DesignToken.Radius.md)
-                .fill(DesignToken.surfaceCard),
+                .fill(DesignToken.glassCard),
         )
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.md)

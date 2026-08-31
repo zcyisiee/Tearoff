@@ -163,6 +163,18 @@ enum NoteListMenus {
 
         menu.addActionItem(title: l10n["common.rename"], icon: "pencil", action: onRename)
 
+        // Pin to top (SideNotes-style board pin)
+        let noteIDForPin = note.id
+        menu.addActionItem(
+            title: note.pinned ? l10n["note.unpin"] : l10n["note.pin"],
+            icon: note.pinned ? "pin.slash" : "pin",
+        ) {
+            if let current = noteStore.notes.first(where: { $0.id == noteIDForPin }) {
+                noteStore.togglePin(on: current)
+                try? SidecarStore.shared.save()
+            }
+        }
+
         // Color submenu (identity color, SideNotes-style)
         if let onSetColor {
             let colorItem = NSMenuItem(title: l10n["noteColor.menu"], action: nil, keyEquivalent: "")

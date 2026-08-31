@@ -3,59 +3,46 @@ import SwiftUI
 
 // MARK: - EdgeMarkTheme
 
-/// A named appearance: canvas tint + accent color (each with light/dark
-/// values) and a material preference. Replaces the old PanelTint palette +
-/// PanelStyle pair, which were absorbed into this system.
+/// A named accent pairing: light/dark accent values the whole UI tints from.
+/// The panel backdrop is a single fixed vibrancy material (SideNotes-style);
+/// themes no longer carry a canvas tint or material choice.
 struct EdgeMarkTheme: Identifiable, Hashable, Codable {
     var id = UUID()
     var name: String
     var isBuiltin = false
 
-    var lightCanvas: Color
-    var darkCanvas: Color
     var lightAccent: Color
     var darkAccent: Color
 
-    /// Panel surface preference: vibrant translucency or solid.
-    var material: ThemeMaterial
-
     enum CodingKeys: String, CodingKey {
         case id, name, isBuiltin
-        case lightCanvas, darkCanvas, lightAccent, darkAccent
-        case material
+        case lightAccent, darkAccent
     }
 
     init(
         id: UUID = UUID(),
         name: String,
         isBuiltin: Bool = false,
-        lightCanvas: Color,
-        darkCanvas: Color,
         lightAccent: Color,
         darkAccent: Color,
-        material: ThemeMaterial,
     ) {
         self.id = id
         self.name = name
         self.isBuiltin = isBuiltin
-        self.lightCanvas = lightCanvas
-        self.darkCanvas = darkCanvas
         self.lightAccent = lightAccent
         self.darkAccent = darkAccent
-        self.material = material
     }
 
     /// `Color` isn't Codable on this deployment target — persist as hex strings.
+    /// Legacy keys (lightCanvas/darkCanvas/material) are accepted and dropped so
+    /// v2 theme payloads decode cleanly.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decode(String.self, forKey: .id)).flatMap(UUID.init(uuidString:)) ?? UUID()
         name = try c.decode(String.self, forKey: .name)
         isBuiltin = try c.decodeIfPresent(Bool.self, forKey: .isBuiltin) ?? false
-        lightCanvas = Self.decodeColor(c, .lightCanvas) ?? EdgeMarkTheme.builtinThemes[0].lightCanvas
-        darkCanvas = Self.decodeColor(c, .darkCanvas) ?? EdgeMarkTheme.builtinThemes[0].darkCanvas
         lightAccent = Self.decodeColor(c, .lightAccent) ?? EdgeMarkTheme.builtinThemes[0].lightAccent
         darkAccent = Self.decodeColor(c, .darkAccent) ?? EdgeMarkTheme.builtinThemes[0].darkAccent
-        material = try c.decodeIfPresent(ThemeMaterial.self, forKey: .material) ?? .translucent
     }
 
     private static func decodeColor(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Color? {
@@ -68,18 +55,8 @@ struct EdgeMarkTheme: Identifiable, Hashable, Codable {
         try c.encode(id.uuidString, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(isBuiltin, forKey: .isBuiltin)
-        try c.encode(lightCanvas.toHex(), forKey: .lightCanvas)
-        try c.encode(darkCanvas.toHex(), forKey: .darkCanvas)
         try c.encode(lightAccent.toHex(), forKey: .lightAccent)
         try c.encode(darkAccent.toHex(), forKey: .darkAccent)
-        try c.encode(material, forKey: .material)
-    }
-
-    /// The canvas wash painted over the vibrancy material (PageLayout).
-    var canvas: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            NSColor(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? darkCanvas : lightCanvas)
-        })
     }
 
     /// Interactive accent — selection, toggles, highlights.
@@ -91,28 +68,7 @@ struct EdgeMarkTheme: Identifiable, Hashable, Codable {
 
     /// Small preview swatches for the settings grid.
     var previewColors: [Color] {
-        [lightCanvas, lightAccent, darkCanvas, darkAccent]
-    }
-}
-
-// MARK: - ThemeMaterial
-
-enum ThemeMaterial: String, Codable, CaseIterable {
-    case translucent
-    case opaque
-
-    var nsMaterial: NSVisualEffectView.Material {
-        switch self {
-        case .translucent: .sidebar
-        case .opaque: .contentBackground
-        }
-    }
-
-    var washOpacity: Double {
-        switch self {
-        case .translucent: 0.8
-        case .opaque: 0.94
-        }
+        [lightAccent, darkAccent]
     }
 }
 
@@ -126,61 +82,43 @@ extension EdgeMarkTheme {
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E01")!,
             name: "Cream",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xF5 / 255, green: 0xF3 / 255, blue: 0xE9 / 255),
-            darkCanvas: Color(red: 0x2D / 255, green: 0x2E / 255, blue: 0x2D / 255),
             lightAccent: Color(red: 0xB7 / 255, green: 0x79 / 255, blue: 0x1F / 255),
             darkAccent: Color(red: 0xE6 / 255, green: 0xBF / 255, blue: 0x7A / 255),
-            material: .translucent,
         ),
         EdgeMarkTheme(
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E02")!,
             name: "Graphite",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xF1 / 255, green: 0xF1 / 255, blue: 0xF3 / 255),
-            darkCanvas: Color(red: 0x27 / 255, green: 0x27 / 255, blue: 0x2A / 255),
             lightAccent: Color(red: 0x51 / 255, green: 0x5B / 255, blue: 0x74 / 255),
             darkAccent: Color(red: 0xA2 / 255, green: 0xB0 / 255, blue: 0xCC / 255),
-            material: .translucent,
         ),
         EdgeMarkTheme(
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E03")!,
             name: "Sage",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xEE / 255, green: 0xF1 / 255, blue: 0xEA / 255),
-            darkCanvas: Color(red: 0x27 / 255, green: 0x2B / 255, blue: 0x26 / 255),
             lightAccent: Color(red: 0x5F / 255, green: 0x7A / 255, blue: 0x52 / 255),
             darkAccent: Color(red: 0xA9 / 255, green: 0xC2 / 255, blue: 0x9A / 255),
-            material: .translucent,
         ),
         EdgeMarkTheme(
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E04")!,
             name: "Slate",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xED / 255, green: 0xF0 / 255, blue: 0xF3 / 255),
-            darkCanvas: Color(red: 0x25 / 255, green: 0x28 / 255, blue: 0x2C / 255),
             lightAccent: Color(red: 0x3E / 255, green: 0x5C / 255, blue: 0x76 / 255),
             darkAccent: Color(red: 0x8F / 255, green: 0xB0 / 255, blue: 0xCC / 255),
-            material: .translucent,
         ),
         EdgeMarkTheme(
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E05")!,
             name: "Rose",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xF5 / 255, green: 0xEF / 255, blue: 0xF0 / 255),
-            darkCanvas: Color(red: 0x2D / 255, green: 0x28 / 255, blue: 0x2A / 255),
             lightAccent: Color(red: 0xA1 / 255, green: 0x5A / 255, blue: 0x66 / 255),
             darkAccent: Color(red: 0xD9 / 255, green: 0x9A / 255, blue: 0xA6 / 255),
-            material: .translucent,
         ),
         EdgeMarkTheme(
             id: UUID(uuidString: "A0E5A7B4-6F2E-4C1D-9A50-1D2B3C4D5E06")!,
             name: "Sand",
             isBuiltin: true,
-            lightCanvas: Color(red: 0xF3 / 255, green: 0xEE / 255, blue: 0xE4 / 255),
-            darkCanvas: Color(red: 0x2C / 255, green: 0x28 / 255, blue: 0x22 / 255),
             lightAccent: Color(red: 0x8A / 255, green: 0x5E / 255, blue: 0x16 / 255),
             darkAccent: Color(red: 0xD9 / 255, green: 0xB2 / 255, blue: 0x5E / 255),
-            material: .translucent,
         ),
     ]
 
@@ -190,9 +128,9 @@ extension EdgeMarkTheme {
 // MARK: - ThemeEngine
 
 /// Observable theme registry — the single source of truth for the active
-/// theme. `DesignToken.canvas` / `.accent` read through this engine, so any
-/// view body that touches those tokens re-renders on theme change (the
-/// Observation framework tracks the access through the singleton).
+/// theme. `DesignToken.accent` reads through this engine, so any view body
+/// that touches that token re-renders on theme change (the Observation
+/// framework tracks the access through the singleton).
 @Observable
 final class ThemeEngine {
     static let shared = ThemeEngine()
@@ -336,4 +274,4 @@ extension Color {
 }
 
 // MARK: - DesignToken integration is in Core/Design/DesignTokens.swift
-// (`canvas` and `accent` are computed properties backed by ThemeEngine).
+// (`accent` is a computed property backed by ThemeEngine).

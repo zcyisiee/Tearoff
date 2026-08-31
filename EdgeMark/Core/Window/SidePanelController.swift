@@ -160,7 +160,12 @@ final class SidePanelController: NSWindowController {
                 if let fr = self?.window?.firstResponder as? NSTextView, fr.isFieldEditor {
                     return event
                 }
-                // Selection takes priority over panel-hide: clear it instead of hiding.
+                // Settings page closes first, then an active selection clears,
+                // then the panel hides — one Escape per layer.
+                if let store = self?.noteStore, store.showSettings {
+                    store.showSettings = false
+                    return nil
+                }
                 if let store = self?.noteStore, !store.selection.isEmpty {
                     store.clearSelection()
                     return nil
@@ -170,20 +175,30 @@ final class SidePanelController: NSWindowController {
             return event
         }
 
-        // List keyboard navigation: ↑ / ↓ / ⇧↑ / ⇧↓ / Return.
+        // List keyboard navigation: ↑ / ↓ / ⇧↑ / ⇧↓ move the Finder-style
+        // selection, Return opens the single selected item.
         // Runs before any SwiftUI .onKeyPress so it wins over default focus traversal.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, isShown else { return event }
-            // Skip while editing text or browsing the editor / trash.
+            // Skip while editing text or browsing the editor / trash / settings.
             if let fr = window.firstResponder as? NSTextView, fr.isFieldEditor {
                 return event
             }
-            if noteStore.selectedNote != nil || noteStore.showTrash {
+            if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings {
                 return event
             }
             let shift = event.modifierFlags.contains(.shift)
             switch event.keyCode {
-            case 125, 126, 36, 76: // ↓ ↑ Return / numpad Enter — board has no row list
+            case 125: // ↓
+                noteStore.moveSelection(direction: 1, extending: shift)
+                return nil
+            case 126: // ↑
+                noteStore.moveSelection(direction: -1, extending: shift)
+                return nil
+            case 36, 76: // Return / numpad Enter
+                if noteStore.openSelectedItem() {
+                    return nil
+                }
                 return event
             default:
                 return event
@@ -194,6 +209,20 @@ final class SidePanelController: NSWindowController {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, isShown else { return event }
             let s = ShortcutSettings.shared
+            // ⌘, toggles the in-panel settings page (panel key only).
+            if event.keyCode == 44, // comma
+               event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.shift),
+               !event.modifierFlags.contains(.option),
+               !event.modifierFlags.contains(.control)
+            {
+                if noteStore.showSettings {
+                    noteStore.showSettings = false
+                } else if noteStore.selectedNote == nil, !noteStore.showTrash, !noteStore.awaitingRootChoice {
+                    noteStore.showSettings = true
+                }
+                return nil
+            }
             if s.searchShortcut?.matches(event) == true {
                 // Trash overlay: pass through (navigateToHome while Trash is active leaves
                 // pendingSearchOnHome stuck).

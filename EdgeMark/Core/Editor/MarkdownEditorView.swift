@@ -96,6 +96,7 @@ struct MarkdownEditorView: View {
         // whenever editorFontName or editorFontSize changes.
         let appSettings = AppSettings.shared
         let fontName = Self.resolvedFontFamily(from: appSettings.editorFontName) ?? "SF Pro"
+        let isRawSource = appSettings.editorRawSourceMode
 
         var config = MarkdownEditorConfiguration.makeEdgeMarkConfig(
             noteFolder: noteFolder,
@@ -111,6 +112,7 @@ struct MarkdownEditorView: View {
                 findScrollToRange: .editorFindScrollToRange,
                 findClearHighlights: .editorFindClearHighlights,
             ),
+            rawSourceMode: isRawSource,
         )
         config.spellChecking = SpellCheckingPolicy(
             continuousSpellChecking: appSettings.spellCheckingEnabled,
@@ -156,6 +158,24 @@ struct MarkdownEditorView: View {
             // changes — the engine's updateNSView doesn't sync taskCheckbox, so only a
             // full config re-application picks up the new SF Symbols.
             .id(appSettings.taskCheckboxPreset)
+            .onChange(of: isRawSource) { _, raw in
+                // Mode flip: re-express the same document without saving a mid-state.
+                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`) and image
+                // embeds converted; raw shows the complete on-disk file verbatim.
+                // Always cancel the pending debounce first so the swap can't flush a
+                // half-converted representation.
+                saveDebouncer.cancel()
+                if raw {
+                    let body = Self.embedsToImages(text)
+                    let heading = hiddenHeadingLine
+                    hiddenHeadingLine = ""
+                    text = heading.isEmpty ? body : heading + "\n\n" + body
+                } else {
+                    let (heading, body) = Self.splitHeading(text)
+                    hiddenHeadingLine = heading
+                    text = Self.imagesToEmbeds(body)
+                }
+            }
             .onChange(of: text) { _, newText in
                 outline?.update(body: newText, hiddenHeading: hiddenHeadingLine)
                 let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
@@ -172,9 +192,15 @@ struct MarkdownEditorView: View {
             .onChange(of: pendingReload) { _, newContent in
                 guard let newContent else { return }
                 saveDebouncer.cancel()
-                let (heading, body) = Self.splitHeading(newContent)
-                hiddenHeadingLine = heading
-                text = Self.imagesToEmbeds(body)
+                if AppSettings.shared.editorRawSourceMode {
+                    // Raw mode shows the complete file — no heading split.
+                    hiddenHeadingLine = ""
+                    text = newContent
+                } else {
+                    let (heading, body) = Self.splitHeading(newContent)
+                    hiddenHeadingLine = heading
+                    text = Self.imagesToEmbeds(body)
+                }
                 pendingReload = nil
             }
             .overlay(

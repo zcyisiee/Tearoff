@@ -15,10 +15,12 @@ extension MarkdownEditorConfiguration {
     static func makeEdgeMarkConfig(
         noteFolder: String,
         bus: MarkdownEditorBus = .default,
+        rawSourceMode: Bool = false,
     ) -> MarkdownEditorConfiguration {
         let preset = AppSettings.shared.taskCheckboxPreset
         var config = MarkdownEditorConfiguration.default
         config.textInsets = TextInsets(horizontal: 16, vertical: 12)
+        config.rawSourceMode = rawSourceMode
         // Register highlight (==text==) and strikethrough (~~text~~). Opt-in since
         // swift-markdown-engine 0.10; without this, the markers render as literal text.
         config.extensions = [HighlightExtension(), StrikethroughExtension()]
