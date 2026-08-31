@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// Shared two-section card layout used across all screens.
-/// Header and content are each wrapped in a rounded VisualEffectView card.
-/// Pass `onSwipeBack` to enable two-finger trackpad right-swipe to go back on the header.
+/// Shared single-surface layout used across all screens.
+/// No window backdrop — the desktop shows through the gaps, and every surface
+/// (header pill, cards) paints its own near-opaque fill (SideNotes-style).
+/// The header renders as its own rounded-rect pill. Pass `onSwipeBack` to
+/// enable two-finger trackpad right-swipe to go back on the header.
 struct PageLayout<Header: View, Content: View>: View {
-    @Environment(AppSettings.self) private var appSettings
     var onSwipeBack: (() -> Void)?
     var onContentSwipeRight: (() -> Void)?
     var onContentSwipeLeft: (() -> Void)?
+    /// True when the screen renders its own chrome (expanded editor) — skips
+    /// the header pill entirely instead of showing an empty one.
+    var headerHidden: Bool
     @ViewBuilder let header: Header
     @ViewBuilder let content: Content
 
@@ -15,32 +19,38 @@ struct PageLayout<Header: View, Content: View>: View {
         onSwipeBack: (() -> Void)? = nil,
         onContentSwipeRight: (() -> Void)? = nil,
         onContentSwipeLeft: (() -> Void)? = nil,
+        headerHidden: Bool = false,
         @ViewBuilder header: () -> Header,
         @ViewBuilder content: () -> Content,
     ) {
         self.onSwipeBack = onSwipeBack
         self.onContentSwipeRight = onContentSwipeRight
         self.onContentSwipeLeft = onContentSwipeLeft
+        self.headerHidden = headerHidden
         self.header = header()
         self.content = content()
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            header
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background { VisualEffectView(tint: appSettings.panelTint.color, material: appSettings.panelStyle.material) }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay {
-                    if let onSwipeBack {
-                        SwipeDetectorView(onSwipeBack: onSwipeBack)
+        VStack(spacing: DesignToken.Space.sm) {
+            if !headerHidden {
+                header
+                    .padding(.horizontal, DesignToken.Space.md)
+                    .padding(.vertical, DesignToken.Space.sm + 2)
+                    .frame(maxWidth: .infinity)
+                    .background { headerPill }
+                    .overlay { headerPillBorder }
+                    .padding(.horizontal, DesignToken.Space.lg)
+                    .padding(.top, DesignToken.Space.sm)
+                    .overlay {
+                        if let onSwipeBack {
+                            SwipeDetectorView(onSwipeBack: onSwipeBack)
+                        }
                     }
-                }
+            }
 
             content
-                .background { VisualEffectView(tint: appSettings.panelTint.color, material: appSettings.panelStyle.material) }
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     if onContentSwipeRight != nil || onContentSwipeLeft != nil {
                         SwipeDetectorView(
@@ -50,8 +60,15 @@ struct PageLayout<Header: View, Content: View>: View {
                     }
                 }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+    }
+
+    private var headerPill: some View {
+        RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+            .fill(DesignToken.solidCard)
+    }
+
+    private var headerPillBorder: some View {
+        RoundedRectangle(cornerRadius: DesignToken.Radius.card)
+            .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
     }
 }

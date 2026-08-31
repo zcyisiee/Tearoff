@@ -2,39 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(NoteStore.self) var noteStore
-    @Environment(PeekCoordinator.self) var peekCoordinator
-
-    private var showHome: Bool {
-        !noteStore.showTrash && noteStore.selectedFolder == nil && noteStore.selectedNote == nil
-    }
-
-    private var showNoteList: Bool {
-        !noteStore.showTrash && noteStore.selectedFolder != nil && noteStore.selectedNote == nil
-    }
-
-    private var showEditor: Bool {
-        !noteStore.showTrash && noteStore.selectedNote != nil
-    }
-
-    /// Horizontal page transition based on navigation direction.
-    /// Falls back to opacity when the user has chosen Fade animation style.
-    private var pageTransition: AnyTransition {
-        guard PanelSettings.shared.animationStyle == .slide else { return .opacity }
-        switch noteStore.navigationDirection {
-        case .forward:
-            return .asymmetric(
-                insertion: .move(edge: .trailing),
-                removal: .move(edge: .leading),
-            )
-        case .backward:
-            return .asymmetric(
-                insertion: .move(edge: .leading),
-                removal: .move(edge: .trailing),
-            )
-        case .overlay, .none:
-            return .opacity
-        }
-    }
 
     /// Trash uses vertical slide (from bottom), or opacity in Fade mode.
     private var trashTransition: AnyTransition {
@@ -47,26 +14,10 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // HomeFolderView hosts the storage-root picker as an in-card mode
-            // (header + content swap), so when awaitingRootChoice it shows the
-            // picker rows; picking crossfades to the folder list within the same
-            // stable card. No separate picker view / card-over-card layer.
-            if showHome {
-                HomeFolderView()
-                    .transition(pageTransition)
-            }
-
-            if showNoteList {
-                NoteListView()
-                    .id(noteStore.selectedFolder?.name)
-                    .transition(pageTransition)
-            }
-
-            if showEditor {
-                EditorScreen()
-                    .id(noteStore.selectedNote?.id)
-                    .transition(pageTransition)
-            }
+            // The board is the single home surface: tabs/sections over note
+            // cards, with the expanded editor living inside it. Trash overlays
+            // as its own page.
+            NoteBoardView()
 
             if noteStore.showTrash {
                 TrashView()
@@ -74,25 +25,6 @@ struct ContentView: View {
             }
         }
         .clipped()
-        // Dismiss any open hover/Quick-Look preview when the user navigates
-        // deeper (open note, enter folder, open trash). The preview is anchored
-        // to a row in the list view we're leaving, so it would otherwise float
-        // detached after the transition.
-        .onChange(of: noteStore.selectedNote?.id) { _, newID in
-            if newID != nil {
-                peekCoordinator.dismissNow()
-            }
-        }
-        .onChange(of: noteStore.selectedFolder?.name) { _, newName in
-            if newName != nil {
-                peekCoordinator.dismissNow()
-            }
-        }
-        .onChange(of: noteStore.showTrash) { _, isOn in
-            if isOn {
-                peekCoordinator.dismissNow()
-            }
-        }
     }
 }
 
@@ -101,6 +33,5 @@ struct ContentView: View {
         .environment(NoteStore())
         .environment(AppSettings.shared)
         .environment(L10n.shared)
-        .environment(PeekCoordinator())
         .frame(width: 400, height: 600)
 }

@@ -157,10 +157,31 @@ enum NoteListMenus {
         noteStore: NoteStore,
         l10n: L10n,
         onRename: @escaping () -> Void,
+        onSetColor: ((NoteColor?) -> Void)? = nil,
     ) -> NSMenu {
         let menu = NSMenu()
 
         menu.addActionItem(title: l10n["common.rename"], icon: "pencil", action: onRename)
+
+        // Pin to top (SideNotes-style board pin)
+        let noteIDForPin = note.id
+        menu.addActionItem(
+            title: note.pinned ? l10n["note.unpin"] : l10n["note.pin"],
+            icon: note.pinned ? "pin.slash" : "pin",
+        ) {
+            if let current = noteStore.notes.first(where: { $0.id == noteIDForPin }) {
+                noteStore.togglePin(on: current)
+                try? SidecarStore.shared.save()
+            }
+        }
+
+        // Color submenu (identity color, SideNotes-style)
+        if let onSetColor {
+            let colorItem = NSMenuItem(title: l10n["noteColor.menu"], action: nil, keyEquivalent: "")
+            colorItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: nil)
+            colorItem.submenu = colorSubmenu(for: note, l10n: l10n, onSetColor: onSetColor)
+            menu.addItem(colorItem)
+        }
 
         // Move To submenu
         if let moveSubmenu = noteMoveSubmenu(for: note, noteStore: noteStore, l10n: l10n) {
@@ -213,6 +234,52 @@ enum NoteListMenus {
         }
 
         return menu
+    }
+
+    // MARK: - Note Color Submenu
+
+    private static func colorSubmenu(for note: Note, l10n: L10n, onSetColor: @escaping (NoteColor?) -> Void) -> NSMenu {
+        let menu = NSMenu()
+        let noteID = note.id
+
+        let none = menu.addActionItem(title: l10n["noteColor.none"], icon: "circle.slash") {
+            onSetColor(nil)
+        }
+        if note.color == nil {
+            none.state = .on
+        }
+
+        menu.addItem(.separator())
+        for color in NoteColor.allCases {
+            let item = menu.addActionItem(title: color.label, icon: "circle.fill") {
+                onSetColor(color)
+            }
+            item.image = swatchImage(color.strip, ring: note.color == color)
+            if note.color == color {
+                item.state = .on
+            }
+        }
+        return menu
+    }
+
+    /// Small filled circle swatch; selected color gets a ring.
+    private static func swatchImage(_ color: Color, ring: Bool) -> NSImage? {
+        let size = NSSize(width: 14, height: 14)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let nsColor = NSColor(color)
+            if ring {
+                let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
+                NSColor.controlAccentColor.setStroke()
+                ring.lineWidth = 1.5
+                ring.stroke()
+            }
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 3, dy: 3))
+            nsColor.setFill()
+            circle.fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     // MARK: - Tags Submenu

@@ -33,7 +33,6 @@ final class SidePanelController: NSWindowController {
     let edgeDetector: EdgeDetector
     let noteStore = NoteStore()
     let appSettings = AppSettings.shared
-    private let peekCoordinator = PeekCoordinator()
 
     // MARK: - Init
 
@@ -74,7 +73,6 @@ final class SidePanelController: NSWindowController {
             rootView: ContentView()
                 .environment(noteStore)
                 .environment(appSettings)
-                .environment(peekCoordinator)
                 .environment(L10n.shared),
         )
         hostingView.frame = containerView.bounds
@@ -149,7 +147,11 @@ final class SidePanelController: NSWindowController {
             guard let self, isShown, !self.isMouseInPanel(),
                   PanelSettings.shared.hideOnClickOutside,
                   PanelSettings.shared.dismissalMode == .auto,
-                  !PanelSettings.shared.isPanelPinned else { return }
+                  !PanelSettings.shared.isPanelPinned,
+                  // Clicking a context-menu item lands outside the panel's
+                  // window but must not dismiss the panel mid-action.
+                  !self.isMenuWindowOpen
+            else { return }
             // Don't restore previousApp on click-outside — the click itself is moving
             // focus to the clicked app; re-activating previousApp would yank focus back
             // and race the click, so the user had to click several times (#58).
@@ -162,9 +164,26 @@ final class SidePanelController: NSWindowController {
                 if let fr = self?.window?.firstResponder as? NSTextView, fr.isFieldEditor {
                     return event
                 }
-                // Selection takes priority over panel-hide: clear it instead of hiding.
+                // Settings page closes first, then an active selection clears,
+                // then the full editor shrinks back into its card, then
+                // in-place card editing exits, then the panel hides —
+                // one Escape per layer.
+                if let store = self?.noteStore, store.showSettings {
+                    store.showSettings = false
+                    return nil
+                }
                 if let store = self?.noteStore, !store.selection.isEmpty {
                     store.clearSelection()
+                    return nil
+                }
+                if let store = self?.noteStore, store.selectedNote != nil {
+                    // Route through the board so the editor animates back into
+                    // its card instead of vanishing.
+                    NotificationCenter.default.post(name: .editorCloseRequested, object: nil)
+                    return nil
+                }
+                if let store = self?.noteStore, store.inlineEditingNoteID != nil {
+                    store.endInlineEdit()
                     return nil
                 }
                 self?.hidePanel()
@@ -172,31 +191,32 @@ final class SidePanelController: NSWindowController {
             return event
         }
 
-        // List keyboard navigation: ↑ / ↓ / ⇧↑ / ⇧↓ / Return.
+        // List keyboard navigation: ↑ / ↓ / ⇧↑ / ⇧↓ move the Finder-style
+        // selection, Return opens the single selected item.
         // Runs before any SwiftUI .onKeyPress so it wins over default focus traversal.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, isShown else { return event }
-            // Skip while editing text or browsing the editor / trash.
+            // Skip while editing text or browsing the editor / trash / settings.
             if let fr = window.firstResponder as? NSTextView, fr.isFieldEditor {
                 return event
             }
-            if noteStore.selectedNote != nil || noteStore.showTrash {
+            if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings
+                || noteStore.inlineEditingNoteID != nil {
                 return event
             }
             let shift = event.modifierFlags.contains(.shift)
             switch event.keyCode {
             case 125: // ↓
-                guard noteStore.moveSelection(direction: 1, extending: shift) else { return event }
-                refreshPeekForSelection()
+                noteStore.moveSelection(direction: 1, extending: shift)
                 return nil
             case 126: // ↑
-                guard noteStore.moveSelection(direction: -1, extending: shift) else { return event }
-                refreshPeekForSelection()
+                noteStore.moveSelection(direction: -1, extending: shift)
                 return nil
             case 36, 76: // Return / numpad Enter
-                return noteStore.openSelectedItem() ? nil : event
-            case 49: // Space — Quick Look preview
-                return handleSpacePeek() ? nil : event
+                if noteStore.openSelectedItem() {
+                    return nil
+                }
+                return event
             default:
                 return event
             }
@@ -206,6 +226,20 @@ final class SidePanelController: NSWindowController {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, isShown else { return event }
             let s = ShortcutSettings.shared
+            // ⌘, toggles the in-panel settings page (panel key only).
+            if event.keyCode == 44, // comma
+               event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.shift),
+               !event.modifierFlags.contains(.option),
+               !event.modifierFlags.contains(.control)
+            {
+                if noteStore.showSettings {
+                    noteStore.showSettings = false
+                } else if noteStore.selectedNote == nil, !noteStore.showTrash, !noteStore.awaitingRootChoice {
+                    noteStore.showSettings = true
+                }
+                return nil
+            }
             if s.searchShortcut?.matches(event) == true {
                 // Trash overlay: pass through (navigateToHome while Trash is active leaves
                 // pendingSearchOnHome stuck).
@@ -296,7 +330,6 @@ final class SidePanelController: NSWindowController {
         resizeHandleView?.frame = Self.resizeHandleFrame(for: side, containerWidth: panelWidth, height: containerView.bounds.height)
 
         // If panel is visible, hide it — user re-triggers to see it on the new edge
-        peekCoordinator.dismissNow()
         if isShown {
             hidePanel()
         } else {
@@ -420,7 +453,11 @@ final class SidePanelController: NSWindowController {
         guard isShown, !isAnimating, !isEditorFocused,
               PanelSettings.shared.autoHideOnMouseExit,
               PanelSettings.shared.dismissalMode == .auto,
-              !PanelSettings.shared.isPanelPinned else { return }
+              !PanelSettings.shared.isPanelPinned,
+              // Moving onto a context menu window counts as exiting the panel
+              // bounds — the user is mid-interaction, not leaving.
+              !isMenuWindowOpen
+        else { return }
         let delay = PanelSettings.shared.hideDelay
         if delay == 0 {
             hidePanel()
@@ -462,7 +499,6 @@ final class SidePanelController: NSWindowController {
             // Interrupt hide animation — snap to shown position instantly
             Log.window.debug("[SidePanelController] showPanel interrupted hide animation")
             isAnimating = false
-            peekCoordinator.suppressPeek = false
             window.setFrame(shownFrame, display: true)
             window.alphaValue = 1
             window.ignoresMouseEvents = false
@@ -470,7 +506,6 @@ final class SidePanelController: NSWindowController {
             NSApp.activate(ignoringOtherApps: true)
         } else {
             isAnimating = true
-            peekCoordinator.suppressPeek = true
             window.ignoresMouseEvents = false
             window.makeKeyAndOrderFront(nil)
 
@@ -489,7 +524,6 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
-                    peekCoordinator.suppressPeek = false
                 }
             } else {
                 // Fade: position at the final frame while invisible, then animate alpha 0 → 1.
@@ -504,7 +538,6 @@ final class SidePanelController: NSWindowController {
                 } completionHandler: { [weak self] in
                     guard let self, animationGeneration == gen else { return }
                     isAnimating = false
-                    peekCoordinator.suppressPeek = false
                 }
             }
 
@@ -516,8 +549,9 @@ final class SidePanelController: NSWindowController {
     func hidePanel(restoreFocus: Bool = true) {
         guard let window, isShown else { return }
         Log.window.info("[SidePanelController] hidePanel")
+        // Leaving the panel ends an in-place card edit session (flushes its save).
+        noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
-        peekCoordinator.dismissNow()
         isShown = false
         let gen = animationGeneration &+ 1
         animationGeneration = gen
@@ -655,17 +689,15 @@ final class SidePanelController: NSWindowController {
     }
 
     /// Frame of the resize handle within the container view.
-    /// Centered on the visible card boundary (PageLayout uses 12pt horizontal padding).
+    /// Single-surface layout: the visible edge is the window edge itself, so the
+    /// handle sits fully inside, hugging the inner edge.
     private static func resizeHandleFrame(for side: EdgeSide, containerWidth: CGFloat, height: CGFloat) -> NSRect {
-        // The visible card edge is 12pt from the window edge (PageLayout.padding(.horizontal, 12)).
-        // Center the handle on that boundary so the cursor appears on the visible border.
-        let cardInset: CGFloat = 12
         let w = ResizeHandleView.handleWidth
         switch side {
         case .right:
-            return NSRect(x: cardInset - w / 2, y: 0, width: w, height: height)
+            return NSRect(x: 0, y: 0, width: w, height: height)
         case .left:
-            return NSRect(x: containerWidth - cardInset - w / 2, y: 0, width: w, height: height)
+            return NSRect(x: containerWidth - w, y: 0, width: w, height: height)
         }
     }
 
@@ -703,24 +735,6 @@ final class SidePanelController: NSWindowController {
         if window.frame.contains(cursor) {
             return true
         }
-        // 2. Inside the peek preview window
-        if let peekFrame = peekCoordinator.peekWindowFrame, peekFrame.contains(cursor) {
-            return true
-        }
-        // 3. Inside the 12pt gap strip between the panel and the preview
-        let gap = PeekWindowController.gap
-        let side = PanelSettings.shared.edgeSide
-        let gapStrip = switch side {
-        case .right:
-            NSRect(x: window.frame.minX - gap, y: window.frame.minY,
-                   width: gap, height: window.frame.height)
-        case .left:
-            NSRect(x: window.frame.maxX, y: window.frame.minY,
-                   width: gap, height: window.frame.height)
-        }
-        if gapStrip.contains(cursor) {
-            return true
-        }
         return false
     }
 
@@ -728,8 +742,43 @@ final class SidePanelController: NSWindowController {
         cancelHideTimer()
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self, isShown, !isMouseInPanel() else { return }
+            // A context menu opened after the exit began — the user is picking
+            // an item; let the interaction finish instead of yanking the panel.
+            guard !isMenuWindowOpen else { return }
             hidePanel()
         }
+    }
+
+    /// Whether a popup/context menu is currently open — or was open so recently
+    /// that its dismissal fallout is still in flight. While one is up,
+    /// click-outside and auto-hide dismissal are suspended — clicking a menu
+    /// item (e.g. setting a note color) lands outside the panel's window and
+    /// moving onto the menu reads as a mouse exit, but the user is clearly
+    /// mid-interaction, not leaving.
+    ///
+    /// The grace period covers the moment *after* the menu closes: AppKit
+    /// re-evaluates the cursor once the tracking loop ends and synthesizes
+    /// `mouseExited` / re-delivers the click while the menu window no longer
+    /// exists, which used to hide the panel immediately after picking an item.
+    ///
+    /// Two live signals: an explicit flag bracketing our own (blocking)
+    /// `NSMenu.popUpContextMenu` calls (reset one runloop turn later), plus a
+    /// window scan for SwiftUI Menus, which we don't drive. The scan matches
+    /// loosely — the private menu window class name varies across macOS versions.
+    private var isMenuWindowOpen: Bool {
+        if NSContextMenuModifier.isShowingMenu {
+            return true
+        }
+        if Date().timeIntervalSince(NSContextMenuModifier.lastMenuDismissAt)
+            < NSContextMenuModifier.menuDismissGracePeriod
+        {
+            Log.window.debug("[SidePanelController] menu dismiss grace period — suppressing auto-hide")
+            return true
+        }
+        if let key = NSApp.keyWindow, NSStringFromClass(type(of: key)).contains("Menu") {
+            return true
+        }
+        return NSApp.windows.contains { NSStringFromClass(type(of: $0)).contains("MenuWindow") }
     }
 
     private func cancelHideTimer() {
@@ -741,53 +790,17 @@ final class SidePanelController: NSWindowController {
     private var isEditorFocused: Bool {
         window?.firstResponder is NSTextView
     }
-
-    /// Handle Space-to-preview (Quick Look). Returns true if the event was consumed.
-    private func handleSpacePeek() -> Bool {
-        guard AppSettings.shared.spaceToPreviewEnabled, !peekCoordinator.suppressPeek else { return false }
-        guard noteStore.pendingEditorFind == false else { return false }
-        guard noteStore.selection.count == 1 else { return false }
-        guard let win = window else { return false }
-        let panelFrame = win.convertToScreen(win.contentView?.bounds ?? win.frame)
-
-        let item = noteStore.selection.first!
-        let content: PeekContent
-        switch item {
-        case let .folder(name):
-            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return false }
-            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
-        case let .note(id):
-            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return false }
-            content = .note(note)
-        }
-        peekCoordinator.triggerPeek(content: content, panelFrame: panelFrame)
-        return true
-    }
-
-    /// If the peek preview was keyboard-triggered and showing, update its
-    /// content to match the new selection after arrow-key navigation.
-    private func refreshPeekForSelection() {
-        guard peekCoordinator.isKeyboardTriggered else { return }
-        guard noteStore.selection.count == 1 else { return }
-        let item = noteStore.selection.first!
-        let content: PeekContent
-        switch item {
-        case let .folder(name):
-            guard let folder = noteStore.folders.first(where: { $0.name == name }) else { return }
-            content = .folder(folder, noteStore.subfolders(of: folder), noteStore.recentNotes(in: folder))
-        case let .note(id):
-            guard let note = noteStore.notes.first(where: { $0.id == id }) else { return }
-            content = .note(note)
-        }
-        peekCoordinator.updateForSelectionChange(content: content)
-    }
 }
 
 // MARK: - ResizeHandleView
 
-/// Invisible 8pt-wide strip centered on the panel's visible inner card edge. Dragging it resizes the panel.
+/// Invisible strip covering the board's inner gutter (the blank margin left
+/// of the cards — `DesignToken.Space.lg` wide). Hovering anywhere in the
+/// visually blank strip shows the resize cursor; dragging it resizes the panel.
 private final class ResizeHandleView: NSView {
-    static let handleWidth: CGFloat = 8
+    /// Matches the board's horizontal card padding, so the whole visual
+    /// gutter left of the cards is the resize zone.
+    static var handleWidth: CGFloat { DesignToken.Space.lg }
     static let minWidth: CGFloat = 400
 
     var side: EdgeSide = .right
@@ -832,10 +845,18 @@ private final class ResizeHandleView: NSView {
         }
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            options: [.cursorUpdate, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil,
         ))
+    }
+
+    override func mouseEntered(with _: NSEvent) {
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseExited(with _: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     override func cursorUpdate(with _: NSEvent) {

@@ -14,6 +14,9 @@ final class SidecarStore {
         var modifiedAt: Date
         var savedAt: Date // last EdgeMark write — external-change sentinel
         var tags: [String] // TagColor rawValues
+        var color: String? // NoteColor rawValue
+        var pinned: Bool? // v3 — board pin (nil/false = not pinned)
+        var sortOrder: Int? // v3 — manual drag order within a visible list
     }
 
     struct TrashEntry: Codable {
@@ -23,6 +26,7 @@ final class SidecarStore {
         var createdAt: Date
         var modifiedAt: Date
         var tags: [String]
+        var color: String? // NoteColor rawValue
     }
 
     struct FolderEntry: Codable {
@@ -30,7 +34,7 @@ final class SidecarStore {
     }
 
     struct Payload: Codable {
-        var version: Int = 2
+        var version: Int = 3
         var notes: [String: NoteEntry] = [:] // UUID string → NoteEntry
         var trash: [String: TrashEntry] = [:] // UUID string → TrashEntry
         var folders: [String: FolderEntry] = [:] // folder path → FolderEntry
@@ -74,7 +78,15 @@ final class SidecarStore {
         let raw = try Data(contentsOf: sidecarURL)
         data = try decoder.decode(Payload.self, from: raw)
         let count = data.notes.count
-        Log.storage.info("[Sidecar] loaded \(count) note entries")
+        let version = data.version
+        Log.storage.info("[Sidecar] loaded \(count) note entries (v\(version))")
+        // v2 → v3: pin/order fields are optional on NoteEntry, so old payloads
+        // decode as-is; just stamp the new version back to disk.
+        if data.version < 3 {
+            data.version = 3
+            try? save()
+            Log.storage.info("[Sidecar] migrated payload v2 → v3")
+        }
     }
 
     func save() throws {

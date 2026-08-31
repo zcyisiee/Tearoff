@@ -6,7 +6,6 @@ import SwiftUI
 struct ContentFooterBar: View {
     @Environment(AppSettings.self) var settings
     @Environment(NoteStore.self) var noteStore
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let l10n = L10n.shared
@@ -16,7 +15,7 @@ struct ContentFooterBar: View {
             }
             Spacer()
             HeaderIconButton(systemName: "gearshape", help: l10n["menu.settings"]) {
-                showSettingsMenu()
+                AppDelegate.shared?.openSettings()
             }
         }
         .padding(.horizontal, 16)
@@ -35,11 +34,13 @@ struct ContentFooterBar: View {
             case .name: #selector(AppDelegate.setSortByName)
             case .dateModified: #selector(AppDelegate.setSortByDateModified)
             case .dateCreated: #selector(AppDelegate.setSortByDateCreated)
+            case .manual: #selector(AppDelegate.setSortByManual)
             }
             let iconName = switch option {
             case .name: "textformat"
             case .dateModified: "clock"
             case .dateCreated: "calendar"
+            case .manual: "hand.draw"
             }
             let item = NSMenuItem(title: option.displayName(l10n), action: action, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
@@ -83,8 +84,8 @@ struct ContentFooterBar: View {
 
         menu.addItem(.separator())
 
-        menu.addActionItem(title: l10n["menu.settings"], icon: "gearshape") { [openSettings] in
-            openSettings()
+        menu.addActionItem(title: l10n["menu.settings"], icon: "gearshape") {
+            AppDelegate.shared?.openSettings()
         }
 
         let updateItem = NSMenuItem(
@@ -117,6 +118,8 @@ struct ContentFooterBar: View {
         guard let event = NSApp.currentEvent,
               let view = event.window?.contentView
         else { return }
+        NSContextMenuModifier.isShowingMenu = true
         NSMenu.popUpContextMenu(menu, with: event, for: view)
+        NSContextMenuModifier.isShowingMenu = false
     }
 }

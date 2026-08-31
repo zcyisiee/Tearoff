@@ -277,9 +277,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.app.info("[AppDelegate] switched storage root to \(name, privacy: .public)\(suffix, privacy: .public)")
     }
 
+    /// Opens the in-panel settings page. The panel slides in first so the
+    /// page appears inside it (the standalone settings window is gone).
     @objc func openSettings() {
         NSApp.activate(ignoringOtherApps: true)
-        EnvironmentValues().openSettings()
+        panelController?.showPanel()
+        panelController?.noteStore.showSettings = true
     }
 
     @objc func checkForUpdates() {
@@ -435,6 +438,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func setSortByDateCreated() {
         panelController?.appSettings.sortBy = .dateCreated
+    }
+
+    @objc func setSortByManual() {
+        panelController?.appSettings.sortBy = .manual
     }
 
     @objc func toggleSortDirection() {

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import OSLog
 import ServiceManagement
+import SwiftUI
 
 @Observable
 final class AppSettings {
@@ -13,29 +14,7 @@ final class AppSettings {
         case name = "Name"
         case dateModified = "Date Modified"
         case dateCreated = "Date Created"
-    }
-
-    // MARK: - Panel Tint
-
-    enum PanelTint: String, CaseIterable {
-        case system
-        case graphite
-        case slate
-        case sand
-        case sage
-        case rose
-
-        /// Translucent tint applied as a sublayer behind content. nil = no tint (system material only).
-        var color: NSColor? {
-            switch self {
-            case .system: nil
-            case .graphite: NSColor(white: 0.4, alpha: 0.18)
-            case .slate: NSColor(red: 0.40, green: 0.50, blue: 0.62, alpha: 0.18)
-            case .sand: NSColor(red: 0.80, green: 0.68, blue: 0.48, alpha: 0.18)
-            case .sage: NSColor(red: 0.52, green: 0.68, blue: 0.55, alpha: 0.18)
-            case .rose: NSColor(red: 0.82, green: 0.58, blue: 0.62, alpha: 0.18)
-            }
-        }
+        case manual = "Manual"
     }
 
     var sortBy: SortBy = .dateModified {
@@ -44,10 +23,6 @@ final class AppSettings {
 
     var sortAscending: Bool = false {
         didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
-    }
-
-    var panelTint: PanelTint = .system {
-        didSet { UserDefaults.standard.set(panelTint.rawValue, forKey: "panelTint") }
     }
 
     /// PostScript font name (e.g. "HelveticaNeue", "SFMono-Regular"). nil = system font.
@@ -68,6 +43,39 @@ final class AppSettings {
             UserDefaults.standard.set(editorFontSize, forKey: "editorFontSize")
             NotificationCenter.default.post(name: .editorFontChanged, object: nil)
         }
+    }
+
+    // MARK: - Board typography
+
+    /// Board (card stream) base font size in points. The card title, content
+    /// headings, body and meta text all derive from this so the whole main
+    /// interface scales together. Independent of `editorFontSize`.
+    var boardFontSize: Double = 13.5 {
+        didSet { UserDefaults.standard.set(boardFontSize, forKey: "boardFontSize") }
+    }
+
+    // MARK: - Outline navigation
+
+    /// Where the markdown outline lives: a right-hand tree panel or a top
+    /// breadcrumb strip under the note header.
+    enum OutlinePosition: String, CaseIterable {
+        case top
+        case right
+    }
+
+    /// Whether the outline (panel or breadcrumb) is shown in the editor.
+    var outlineVisible: Bool = true {
+        didSet { UserDefaults.standard.set(outlineVisible, forKey: "outlineVisible") }
+    }
+
+    /// Outline placement — right panel or top breadcrumb.
+    var outlinePosition: OutlinePosition = .right {
+        didSet { UserDefaults.standard.set(outlinePosition.rawValue, forKey: "outlinePosition") }
+    }
+
+    /// Right outline panel width in points; user-draggable.
+    var outlinePanelWidth: CGFloat = 230 {
+        didSet { UserDefaults.standard.set(Double(outlinePanelWidth), forKey: "outlinePanelWidth") }
     }
 
     // MARK: - Task checkbox symbols
@@ -137,6 +145,13 @@ final class AppSettings {
         }
     }
 
+    /// Whether the editor presents the note as raw Markdown source instead of
+    /// the default rich WYSIWYG rendering. Persisted so the choice survives
+    /// note switches and app restarts.
+    var editorRawSourceMode: Bool = false {
+        didSet { UserDefaults.standard.set(editorRawSourceMode, forKey: "editorRawSourceMode") }
+    }
+
     /// Whether to automatically check for updates on launch (24h throttle).
     var autoCheckUpdates: Bool = true {
         didSet { UserDefaults.standard.set(autoCheckUpdates, forKey: "autoCheckUpdates") }
@@ -174,24 +189,6 @@ final class AppSettings {
         }
     }
 
-    // MARK: - Panel opacity
-
-    enum PanelStyle: String, CaseIterable {
-        case translucent
-        case opaque
-
-        var material: NSVisualEffectView.Material {
-            switch self {
-            case .translucent: .sidebar
-            case .opaque: .contentBackground
-            }
-        }
-    }
-
-    var panelStyle: PanelStyle = .translucent {
-        didSet { UserDefaults.standard.set(panelStyle.rawValue, forKey: "panelStyle") }
-    }
-
     // MARK: - Spell checking
 
     /// Mirrors `SpellCheckingPolicy.continuousSpellChecking`.
@@ -212,52 +209,17 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(automaticSpellingCorrectionEnabled, forKey: "automaticSpellingCorrectionEnabled") }
     }
 
-    // MARK: - Hover-to-peek
+    // MARK: - Board layout
 
-    /// Discrete dwell options for hover-to-preview. Space-to-preview is
-    /// always instant (no delay) regardless of this setting.
-    enum HoverPeekDelay: String, CaseIterable {
-        case fast
-        case normal
-        case slow
-        case verySlow
-
-        var seconds: TimeInterval {
-            switch self {
-            case .fast: 0.15
-            case .normal: 0.35
-            case .slow: 0.7
-            case .verySlow: 1.2
-            }
-        }
+    /// Note board organization: folder tabs over a card grid, or every folder
+    /// as a collapsible section in one scrolling view.
+    enum BoardLayout: String, CaseIterable {
+        case tabs
+        case sections
     }
 
-    /// Whether hovering over a note/folder row shows a floating read-only
-    /// preview on the opposite side of the panel. Default on — opt-out via
-    /// the General settings tab.
-    var hoverPeekEnabled: Bool = true {
-        didSet {
-            UserDefaults.standard.set(hoverPeekEnabled, forKey: "hoverPeekEnabled")
-            NotificationCenter.default.post(name: .previewSettingsChanged, object: nil)
-        }
-    }
-
-    /// Whether pressing Space on a single selected row shows the preview
-    /// instantly (Quick Look behavior). Independent from hover-to-peek.
-    /// Default on.
-    var spaceToPreviewEnabled: Bool = true {
-        didSet {
-            UserDefaults.standard.set(spaceToPreviewEnabled, forKey: "spaceToPreviewEnabled")
-            NotificationCenter.default.post(name: .previewSettingsChanged, object: nil)
-        }
-    }
-
-    /// Hover dwell tier before the preview appears. Does not affect
-    /// Space-to-preview, which is always instant.
-    var hoverPeekDelay: HoverPeekDelay = .normal {
-        didSet {
-            UserDefaults.standard.set(hoverPeekDelay.rawValue, forKey: "hoverPeekDelay")
-        }
+    var boardLayout: BoardLayout = .tabs {
+        didSet { UserDefaults.standard.set(boardLayout.rawValue, forKey: "boardLayout") }
     }
 
     /// Custom labels for color tags. Missing entries fall back to `TagColor.defaultLabel`.
@@ -293,16 +255,6 @@ final class AppSettings {
             sortBy = value
         }
         sortAscending = UserDefaults.standard.bool(forKey: "sortAscending")
-        if let raw = UserDefaults.standard.string(forKey: "panelTint"),
-           let value = PanelTint(rawValue: raw)
-        {
-            panelTint = value
-        }
-        if let raw = UserDefaults.standard.string(forKey: "panelStyle"),
-           let value = PanelStyle(rawValue: raw)
-        {
-            panelStyle = value
-        }
         // If the saved font is no longer installed (e.g. user uninstalled it),
         // drop it silently so the editor falls back to the system font.
         if let saved = UserDefaults.standard.string(forKey: "editorFontName"),
@@ -314,17 +266,29 @@ final class AppSettings {
         }
         let savedSize = UserDefaults.standard.object(forKey: "editorFontSize") as? Double
         editorFontSize = savedSize ?? 16
+        boardFontSize = min(max(UserDefaults.standard.object(forKey: "boardFontSize") as? Double ?? 13.5, 11), 20)
         if let raw = UserDefaults.standard.string(forKey: "taskCheckboxPreset"),
            let value = TaskCheckboxPreset(rawValue: raw)
         {
             taskCheckboxPreset = value
         }
+        outlineVisible = UserDefaults.standard.object(forKey: "outlineVisible") as? Bool ?? true
+        if let raw = UserDefaults.standard.string(forKey: "outlinePosition"),
+           let value = OutlinePosition(rawValue: raw)
+        {
+            outlinePosition = value
+        }
+        if let savedWidth = UserDefaults.standard.object(forKey: "outlinePanelWidth") as? Double {
+            outlinePanelWidth = max(180, min(420, CGFloat(savedWidth)))
+        }
+
         // Appearance, updates, launch (moved from ShortcutSettings)
         if let raw = UserDefaults.standard.string(forKey: "appearanceMode"),
            let mode = AppearanceMode(rawValue: raw)
         {
             appearanceMode = mode
         }
+        editorRawSourceMode = UserDefaults.standard.bool(forKey: "editorRawSourceMode")
         autoCheckUpdates = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
         launchAtLogin = UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? false
         if let raw = UserDefaults.standard.object(forKey: "spellCheckingEnabled") as? Bool {
@@ -336,16 +300,10 @@ final class AppSettings {
         if let raw = UserDefaults.standard.object(forKey: "automaticSpellingCorrectionEnabled") as? Bool {
             automaticSpellingCorrectionEnabled = raw
         }
-        if let raw = UserDefaults.standard.object(forKey: "hoverPeekEnabled") as? Bool {
-            hoverPeekEnabled = raw
-        }
-        if let raw = UserDefaults.standard.object(forKey: "spaceToPreviewEnabled") as? Bool {
-            spaceToPreviewEnabled = raw
-        }
-        if let raw = UserDefaults.standard.string(forKey: "hoverPeekDelay"),
-           let value = HoverPeekDelay(rawValue: raw)
+        if let raw = UserDefaults.standard.string(forKey: "boardLayout"),
+           let value = BoardLayout(rawValue: raw)
         {
-            hoverPeekDelay = value
+            boardLayout = value
         }
         if let raw = UserDefaults.standard.dictionary(forKey: "tagLabels") as? [String: String] {
             tagLabels = raw.reduce(into: [TagColor: String]()) { result, kv in
@@ -362,6 +320,7 @@ final class AppSettings {
         case .name: folder.latestModifiedAt
         case .dateModified: folder.latestModifiedAt
         case .dateCreated: folder.earliestCreatedAt
+        case .manual: folder.latestModifiedAt
         }
     }
 }
@@ -372,44 +331,45 @@ extension AppSettings.SortBy {
         case .name: l10n["sort.name"]
         case .dateModified: l10n["sort.dateModified"]
         case .dateCreated: l10n["sort.dateCreated"]
+        case .manual: l10n["sort.manual"]
         }
     }
 }
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
-    static let previewSettingsChanged = Notification.Name("previewSettingsChanged")
 }
 
-extension AppSettings.HoverPeekDelay {
+// MARK: - Board typography
+
+extension AppSettings {
+    /// Card title — largest tier, bold, identity-colored.
+    var boardTitleFont: Font { .system(size: boardFontSize + 3.5, weight: .bold) }
+    /// Content H2 — a step under the title, semibold, same accent family.
+    var boardHeadingFont: Font { .system(size: boardFontSize + 2, weight: .semibold) }
+    /// Content H3 — a step under H2, semibold, slightly softened accent.
+    var boardSubheadingFont: Font { .system(size: boardFontSize + 1, weight: .semibold) }
+    /// Preview body text.
+    var boardBodyFont: Font { .system(size: boardFontSize) }
+    /// Folder / date meta row.
+    var boardMetaFont: Font { .system(size: max(boardFontSize - 2, 9)) }
+}
+
+extension AppSettings.BoardLayout {
     func displayName(_ l10n: L10n) -> String {
         switch self {
-        case .fast: l10n["settings.hoverDelay.fast"]
-        case .normal: l10n["settings.hoverDelay.normal"]
-        case .slow: l10n["settings.hoverDelay.slow"]
-        case .verySlow: l10n["settings.hoverDelay.verySlow"]
+        case .tabs: l10n["settings.boardLayout.tabs"]
+        case .sections: l10n["settings.boardLayout.sections"]
         }
     }
 }
 
-extension AppSettings.PanelTint {
+extension AppSettings.OutlinePosition {
     func displayName(_ l10n: L10n) -> String {
         switch self {
-        case .system: l10n["settings.panelTint.system"]
-        case .graphite: l10n["settings.panelTint.graphite"]
-        case .slate: l10n["settings.panelTint.slate"]
-        case .sand: l10n["settings.panelTint.sand"]
-        case .sage: l10n["settings.panelTint.sage"]
-        case .rose: l10n["settings.panelTint.rose"]
+        case .top: l10n["settings.editor.outlinePosition.top"]
+        case .right: l10n["settings.editor.outlinePosition.right"]
         }
     }
 }
 
-extension AppSettings.PanelStyle {
-    func displayName(_ l10n: L10n) -> String {
-        switch self {
-        case .translucent: l10n["settings.panelStyle.translucent"]
-        case .opaque: l10n["settings.panelStyle.opaque"]
-        }
-    }
-}

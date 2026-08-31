@@ -4,27 +4,32 @@ struct NoteCardView: View {
     let note: Note
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DesignToken.Space.xs) {
             HStack {
                 Text(note.title.isEmpty ? "Untitled" : note.title)
-                    .font(.headline)
+                    .font(DesignToken.Typography.heading)
+                    .foregroundStyle(DesignToken.bodyStrong)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(note.createdAt.homeDisplayFormat)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(DesignToken.Typography.caption)
+                    .foregroundStyle(DesignToken.mutedSoft)
             }
 
             Text(note.previewText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(DesignToken.Typography.caption)
+                .foregroundStyle(DesignToken.muted)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.quinary)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(DesignToken.Space.sm + 2)
+        .background(DesignToken.surfaceCard)
+        .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
+        }
     }
 }

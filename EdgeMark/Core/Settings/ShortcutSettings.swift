@@ -85,6 +85,7 @@ final class ShortcutSettings {
 
     // MARK: - Defaults
 
+    static let defaultTogglePanel = KeyboardShortcut(keyCode: UInt16(kVK_Space), modifiers: UInt32(controlKey | shiftKey))
     static let defaultNewNote = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_N), modifiers: UInt32(cmdKey))
     static let defaultNewFolder = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_N), modifiers: UInt32(cmdKey | shiftKey))
     static let defaultSearch = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_F), modifiers: UInt32(cmdKey))
@@ -159,8 +160,7 @@ final class ShortcutSettings {
     }
 
     private func loadShortcuts() {
-        let toggleDefault = KeyboardShortcut(keyCode: UInt16(kVK_Space), modifiers: UInt32(controlKey | shiftKey))
-        togglePanelShortcut = load(forKey: togglePanelKey, default: toggleDefault)
+        togglePanelShortcut = load(forKey: togglePanelKey, default: Self.defaultTogglePanel)
     }
 
     private func loadLocalShortcuts() {

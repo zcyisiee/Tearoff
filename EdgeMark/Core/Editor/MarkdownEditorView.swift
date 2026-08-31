@@ -44,6 +44,8 @@ struct MarkdownEditorView: View {
     var showFindBar: Binding<Bool> = .constant(false)
     var onNavigateNext: (() -> Void)?
     var onNavigatePrevious: (() -> Void)?
+    /// Outline state fed from the editor text; nil disables outline tracking.
+    var outline: OutlineState? = nil
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
@@ -70,6 +72,7 @@ struct MarkdownEditorView: View {
         showFindBar: Binding<Bool> = .constant(false),
         onNavigateNext: (() -> Void)? = nil,
         onNavigatePrevious: (() -> Void)? = nil,
+        outline: OutlineState? = nil,
     ) {
         self.noteID = noteID
         self.noteTitle = noteTitle
@@ -80,6 +83,7 @@ struct MarkdownEditorView: View {
         self.showFindBar = showFindBar
         self.onNavigateNext = onNavigateNext
         self.onNavigatePrevious = onNavigatePrevious
+        self.outline = outline
         let (heading, body) = Self.splitHeading(initialContent)
         _text = State(initialValue: Self.imagesToEmbeds(body))
         _hiddenHeadingLine = State(initialValue: heading)
@@ -92,6 +96,7 @@ struct MarkdownEditorView: View {
         // whenever editorFontName or editorFontSize changes.
         let appSettings = AppSettings.shared
         let fontName = Self.resolvedFontFamily(from: appSettings.editorFontName) ?? "SF Pro"
+        let isRawSource = appSettings.editorRawSourceMode
 
         var config = MarkdownEditorConfiguration.makeEdgeMarkConfig(
             noteFolder: noteFolder,
@@ -107,6 +112,7 @@ struct MarkdownEditorView: View {
                 findScrollToRange: .editorFindScrollToRange,
                 findClearHighlights: .editorFindClearHighlights,
             ),
+            rawSourceMode: isRawSource,
         )
         config.spellChecking = SpellCheckingPolicy(
             continuousSpellChecking: appSettings.spellCheckingEnabled,
@@ -115,6 +121,12 @@ struct MarkdownEditorView: View {
         )
 
         return ZStack(alignment: .bottom) {
+            // Anchors the outline coordinator to this window (editor + outline live together).
+            OutlineWindowAnchor { window in
+                outline?.scrollCoordinator.attach(to: window)
+            }
+            .frame(width: 0, height: 0)
+
             NativeTextViewWrapper(
                 text: $text,
                 configuration: config,
@@ -146,7 +158,26 @@ struct MarkdownEditorView: View {
             // changes — the engine's updateNSView doesn't sync taskCheckbox, so only a
             // full config re-application picks up the new SF Symbols.
             .id(appSettings.taskCheckboxPreset)
+            .onChange(of: isRawSource) { _, raw in
+                // Mode flip: re-express the same document without saving a mid-state.
+                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`) and image
+                // embeds converted; raw shows the complete on-disk file verbatim.
+                // Always cancel the pending debounce first so the swap can't flush a
+                // half-converted representation.
+                saveDebouncer.cancel()
+                if raw {
+                    let body = Self.embedsToImages(text)
+                    let heading = hiddenHeadingLine
+                    hiddenHeadingLine = ""
+                    text = heading.isEmpty ? body : heading + "\n\n" + body
+                } else {
+                    let (heading, body) = Self.splitHeading(text)
+                    hiddenHeadingLine = heading
+                    text = Self.imagesToEmbeds(body)
+                }
+            }
             .onChange(of: text) { _, newText in
+                outline?.update(body: newText, hiddenHeading: hiddenHeadingLine)
                 let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
                 slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
                 let heading = hiddenHeadingLine
@@ -161,9 +192,15 @@ struct MarkdownEditorView: View {
             .onChange(of: pendingReload) { _, newContent in
                 guard let newContent else { return }
                 saveDebouncer.cancel()
-                let (heading, body) = Self.splitHeading(newContent)
-                hiddenHeadingLine = heading
-                text = Self.imagesToEmbeds(body)
+                if AppSettings.shared.editorRawSourceMode {
+                    // Raw mode shows the complete file — no heading split.
+                    hiddenHeadingLine = ""
+                    text = newContent
+                } else {
+                    let (heading, body) = Self.splitHeading(newContent)
+                    hiddenHeadingLine = heading
+                    text = Self.imagesToEmbeds(body)
+                }
                 pendingReload = nil
             }
             .overlay(
@@ -191,6 +228,7 @@ struct MarkdownEditorView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
+            outline?.update(body: text, hiddenHeading: hiddenHeadingLine)
             noteNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
                 // Markdown formatting shortcuts — route through the engine's bus so the
                 // didMarkdown* actions run (with word-boundary auto-wrap when no selection).
@@ -226,6 +264,7 @@ struct MarkdownEditorView: View {
             }
         }
         .onDisappear {
+            outline?.scrollCoordinator.detach()
             // Flush debounced save immediately on note switch or panel hide.
             // Use stableNoteID (latched @State) — not noteID (let) — because @Observable
             // may re-render this view with a new note's data while it's animating out,
