@@ -192,10 +192,14 @@ struct BoardNoteCard: View {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .strokeBorder(borderColor, lineWidth: isSelected || isDragging ? 1.5 : 1)
         }
+        // Depth is constant across hover/selection: on the translucent panel
+        // a boosted shadow reads as a misaligned frosted ring around the card
+        // (top-hugging, sagging at the bottom). The border alone carries
+        // hover/selected feedback; only dragging lifts the card.
         .shadow(
-            color: DesignToken.ink.opacity(isDragging ? 0.20 : isHovered ? 0.14 : 0.08),
-            radius: isDragging ? 14 : isHovered ? 10 : 6,
-            y: isDragging ? 6 : isHovered ? 3 : 2,
+            color: DesignToken.ink.opacity(isDragging ? 0.20 : 0.08),
+            radius: isDragging ? 14 : 6,
+            y: isDragging ? 6 : 2,
         )
         .scaleEffect(isDragging ? 1.015 : 1)
     }
