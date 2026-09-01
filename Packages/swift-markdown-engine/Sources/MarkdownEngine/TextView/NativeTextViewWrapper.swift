@@ -75,6 +75,16 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// `"![[my-image]]"`) to insert at the caret, or `nil` to fall through
     /// to the system's default plain-text paste.
     public var onPasteImage: ((NSPasteboard) -> String?)?
+    /// Optional text-paste hook, consulted before the engine's markdown/HTML/
+    /// plain branches. Receives the pasteboard, the raw `.string`-flavor text,
+    /// and the currently selected text (nil when no selection). Return a
+    /// non-nil string to insert instead; nil falls through to the default
+    /// paste pipeline.
+    public var onPasteText: ((NSPasteboard, String, String?) -> String?)?
+    /// Optional completion hook fired synchronously after any paste-driven
+    /// insertion (image embed, onPasteText replacement, regular text) with
+    /// the final inserted range — for embedder caret placement.
+    public var onPasteCompleted: ((NSTextView, NSRange) -> Void)?
 
     /// Fires when the user clicks a `[[Name]]` link. The argument is the
     /// resolved opaque identifier (or the display name when no resolver
@@ -147,6 +157,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         documentId: String = "default",
         isEditable: Bool = true,
         onPasteImage: ((NSPasteboard) -> String?)? = nil,
+        onPasteText: ((NSPasteboard, String, String?) -> String?)? = nil,
+        onPasteCompleted: ((NSTextView, NSRange) -> Void)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
         onCaretRectChange: ((CGRect) -> Void)? = nil,
         onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)? = nil,
@@ -172,6 +184,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         self.documentId = documentId
         self.isEditable = isEditable
         self.onPasteImage = onPasteImage
+        self.onPasteText = onPasteText
+        self.onPasteCompleted = onPasteCompleted
         self.onLinkClick = onLinkClick
         self.onCaretRectChange = onCaretRectChange
         self.onBuildContextMenu = onBuildContextMenu
@@ -284,6 +298,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         textView.isAutomaticDataDetectionEnabled = true
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.onPasteImage = onPasteImage
+        textView.onPasteText = onPasteText
+        textView.onPasteCompleted = onPasteCompleted
         if #available(macOS 15.1, *) {
             // `.limited` = the Writing Tools popover panel; `.complete` = the inline
             // experience that morphs the text with an animation. We use `.limited` so
@@ -446,6 +462,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         }
 
         textView.onPasteImage = onPasteImage
+        textView.onPasteText = onPasteText
+        textView.onPasteCompleted = onPasteCompleted
         textView.isCursorExcluded = isCursorExcluded
         textView.setPlaceholder(placeholder)
         // Sync heightBehavior across all three layers (scroll view, text view,

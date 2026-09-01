@@ -46,6 +46,17 @@ final class NativeTextView: NSTextView {
 
     // MARK: Editor wiring
     var onPasteImage: ((NSPasteboard) -> String?)?
+    /// Intercepts a text paste BEFORE the engine's own markdown/HTML/plain
+    /// branches. Receives the pasteboard, the raw `.string`-flavor text, and
+    /// the text currently selected in the view (nil when the insertion point
+    /// has no selection). Return a non-nil string to insert that instead;
+    /// return nil to fall through to the default paste pipeline.
+    var onPasteText: ((NSPasteboard, String, String?) -> String?)?
+    /// Fires synchronously after any paste-driven insertion commits (image
+    /// embed, onPasteText replacement, markdown/HTML/plain text) with the
+    /// final inserted range — the embedder's chance to reposition the caret
+    /// (e.g. select a freshly pasted `![name](…)` alt text).
+    var onPasteCompleted: ((NSTextView, NSRange) -> Void)?
     weak var layoutBridge: LayoutBridge?
     var baseFont: NSFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 

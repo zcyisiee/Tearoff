@@ -26,6 +26,14 @@ extension NativeTextView {
             return
         }
 
+        // Embedder text interception (e.g. bare URL → markdown link). Runs before
+        // the own-markdown/HTML/plain branches so a URL-bearing pasteboard converts
+        // even when richer flavors ride along; a nil return falls through untouched.
+        if let replaced = interceptPastedText(pasteboard) {
+            insertPreservingBlockquote(replaced)
+            return
+        }
+
         // Our own copy: prefer the private raw-markdown flavor so an in-app
         // copy→paste round-trips byte-exact. The derived HTML flavor is lossy
         // (e.g. the HTML renderer drops the `|UUID` of a wiki link), so this
@@ -77,11 +85,24 @@ extension NativeTextView {
     /// Insert pasted content as its own coalescing-fenced undo step: the paste
     /// enters via `insertText` (the typing path), so without fences before and
     /// after, the next edit coalesces into it and one Cmd+Z reverts both.
-    private func insertPasted(_ text: String, replacementRange: NSRange) {
+    /// After the insertion commits, fires `onPasteCompleted` with the inserted
+    /// range so the embedder can land the caret (e.g. on a `![name](…)` alt).
+    func insertPasted(_ text: String, replacementRange: NSRange) {
         breakUndoCoalescing()
         insertText(text, replacementRange: replacementRange)
         undoManager?.setActionName("Paste")
         breakUndoCoalescing()
+        onPasteCompleted?(self, NSRange(location: replacementRange.location, length: (text as NSString).length))
+    }
+
+    /// Runs the embedder's `onPasteText` over the raw `.string` flavor.
+    /// Returns the replacement string to insert, or nil when the embedder
+    /// declines (hook unset, no string flavor, or the embedder returns nil).
+    func interceptPastedText(_ pasteboard: NSPasteboard) -> String? {
+        guard let onPasteText, let raw = pasteboard.string(forType: .string) else { return nil }
+        let sel = selectedRange()
+        let selectedText: String? = sel.length > 0 ? (string as NSString).substring(with: sel) : nil
+        return onPasteText(pasteboard, raw, selectedText)
     }
 
     /// Insert pasted text, extending the `>` prefix to every line when the
