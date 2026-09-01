@@ -34,6 +34,61 @@ struct TearoffImageProvider: EmbeddedImageProvider {
     }
 }
 
+// MARK: - Inserted-link caret resolution
+
+/// Locates the name/alt span of the first markdown link or image inside a
+/// freshly inserted range, so paste/drop insertions can land the caret
+/// Typora-style: between empty `[]`, on a prefilled name, or after a name.
+enum InsertedLinkCaret {
+    enum Intent {
+        /// `![name](…)` — select `name` so typing replaces it (dragged-in image).
+        case selectName
+        /// `![](…)` / `[](…)` — caret between empty brackets; when a name is
+        /// already present, caret at its end (pasted image, pasted link).
+        case caretAtName
+    }
+
+    enum Resolved {
+        case insideBrackets(location: Int)
+        case nameSpan(NSRange)
+    }
+
+    /// First `[…` … `](` span fully inside `range`. `nil` when the inserted
+    /// text carries no link-shaped construct (plain text paste).
+    static func resolve(in text: NSString, range: NSRange) -> Resolved? {
+        guard range.length >= 4,
+              range.location >= 0,
+              NSMaxRange(range) <= text.length else { return nil }
+        let open = text.range(of: "[", options: [], range: range)
+        guard open.location != NSNotFound else { return nil }
+        let nameStart = NSMaxRange(open)
+        var i = nameStart
+        let end = NSMaxRange(range) - 1  // "](" needs the char after i too
+        while i < end {
+            if text.character(at: i) == 0x5D /* ] */, text.character(at: i + 1) == 0x28 /* ( */ {
+                let length = i - nameStart
+                return length > 0
+                    ? .nameSpan(NSRange(location: nameStart, length: length))
+                    : .insideBrackets(location: nameStart)
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    static func apply(_ intent: Intent, in range: NSRange, to textView: NSTextView) {
+        guard let resolved = resolve(in: textView.string as NSString, range: range) else { return }
+        switch (intent, resolved) {
+        case (_, .insideBrackets(let location)):
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+        case (.selectName, .nameSpan(let span)):
+            textView.setSelectedRange(span)
+        case (.caretAtName, .nameSpan(let span)):
+            textView.setSelectedRange(NSRange(location: NSMaxRange(span), length: 0))
+        }
+    }
+}
+
 // MARK: - MarkdownEditorView
 
 /// SwiftUI wrapper around NativeTextViewWrapper (swift-markdown-engine).
@@ -69,6 +124,10 @@ struct MarkdownEditorView: View {
     /// a new selectedNote into the animating-out EditorScreen, which would overwrite
     /// onContentChanged's captured note ID while @State text still holds the old note's content.
     @State private var stableNoteID: UUID
+    /// Set right before a paste hook returns markdown; consumed once by the
+    /// matching `onPasteCompleted` to land the caret (Typora-style name
+    /// positioning). nil leaves the caret where the engine put it.
+    @State private var pendingCaretIntent: InsertedLinkCaret.Intent?
 
     init(
         noteID: UUID,
@@ -142,11 +201,35 @@ struct MarkdownEditorView: View {
                 fontSize: CGFloat(appSettings.editorFontSize),
                 documentId: noteID.uuidString,
                 onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
-                    guard let (data, ext) = Self.imageData(from: pasteboard) else { return nil }
+                    // Pasting a file URL (Finder copy) keeps the original bytes
+                    // and name; anything else decodes through the engine's
+                    // reader (png/tiff/NSImage flavors) as PNG.
+                    let data: Data, ext: String, preferredName: String?
+                    if let fileURL = PasteboardImageReader.imageFileURL(from: pasteboard),
+                       let bytes = try? Data(contentsOf: fileURL) {
+                        data = bytes
+                        ext = fileURL.pathExtension.lowercased()
+                        preferredName = fileURL.lastPathComponent
+                    } else if let png = PasteboardImageReader.imageData(from: pasteboard) {
+                        data = png
+                        ext = "png"
+                        preferredName = nil
+                    } else {
+                        return nil
+                    }
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    // Standard `![](path)` markdown — the engine renders it inline
-                    // (styleImageLinks routes the path through TearoffImageProvider).
-                    return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.markdown
+                    // Standard `![](path)` markdown with an empty alt — the
+                    // engine renders it (styleImageLinks) and the caret lands
+                    // between the brackets via the pending intent.
+                    pendingCaretIntent = .caretAtName
+                    return (try? FileStorage.saveImage(
+                        data: data, ext: ext, forNote: note, preferredName: preferredName
+                    ))?.markdown
+                },
+                onPasteCompleted: { tv, insertedRange in
+                    guard let intent = pendingCaretIntent else { return }
+                    pendingCaretIntent = nil
+                    InsertedLinkCaret.apply(intent, in: insertedRange, to: tv)
                 },
                 onSpellCheckingPolicyChanged: { policy in
                     // Persist context-menu spelling/grammar/autocorrect toggles back to settings
@@ -212,7 +295,10 @@ struct MarkdownEditorView: View {
                     guard let data = try? Data(contentsOf: url) else { return }
                     let ext = url.pathExtension.lowercased()
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    guard let result = try? FileStorage.saveImage(data: data, ext: ext, forNote: note) else { return }
+                    // Dragged-in files keep their original name (Typora-style).
+                    guard let result = try? FileStorage.saveImage(
+                        data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent
+                    ) else { return }
                     // After a drag completes the text view may have lost first responder.
                     // Fall back to walking the window hierarchy to find it.
                     let window = NSApp.keyWindow
@@ -220,7 +306,13 @@ struct MarkdownEditorView: View {
                         ?? findEditorTextView(in: window?.contentView)
                     guard let tv else { return }
                     window?.makeFirstResponder(tv)
-                    tv.insertText(result.markdown, replacementRange: tv.selectedRange())
+                    // Prefill the alt with the dropped file's name so it reads as
+                    // a caption; the caret selects it for immediate retyping.
+                    let alt = Self.dropImageAlt(for: url)
+                    let markdown = alt.isEmpty
+                        ? result.markdown
+                        : "![\(alt)](\(result.relativePath))"
+                    Self.insertImageMarkdown(markdown, selectingName: !alt.isEmpty, in: tv)
                 },
             )
 
@@ -302,18 +394,40 @@ struct MarkdownEditorView: View {
         return font.familyName
     }
 
-    private static func imageData(from pasteboard: NSPasteboard) -> (Data, String)? {
-        if let data = pasteboard.data(forType: NSPasteboard.PasteboardType("public.png")) {
-            return (data, "png")
+    /// Alt text for a dragged-in image: the file's display name. Dropped when
+    /// the legacy hidden-dir mode is on (it writes opaque UUID filenames) or
+    /// the name would break the link syntax.
+    private static func dropImageAlt(for url: URL) -> String {
+        guard AppSettings.shared.imageStorageMode == .sharedAssets else { return "" }
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard !stem.isEmpty, !stem.contains(where: { "[]()".contains($0) || $0.isNewline }) else {
+            return ""
         }
-        if let tiff = pasteboard.data(forType: .tiff),
-           let img = NSImage(data: tiff),
-           let rep = NSBitmapImageRep(data: img.tiffRepresentation ?? Data()),
-           let png = rep.representation(using: .png, properties: [:])
-        {
-            return (png, "png")
+        return stem
+    }
+
+    /// Insert `![…](…)` as its own line with undo fencing (one Cmd+Z reverts
+    /// the whole insertion), then land the caret: select a prefilled name so
+    /// typing replaces it, or park between empty brackets.
+    private static func insertImageMarkdown(_ markdown: String, selectingName: Bool, in tv: NSTextView) {
+        let sel = tv.selectedRange()
+        let nsText = tv.string as NSString
+        var prefix = ""
+        var suffix = ""
+        if sel.location > 0, nsText.character(at: sel.location - 1) != 0x0A {
+            prefix = "\n"
         }
-        return nil
+        let after = sel.location + sel.length
+        if after < nsText.length, nsText.character(at: after) != 0x0A {
+            suffix = "\n"
+        }
+        let inserted = prefix + markdown + suffix
+        tv.breakUndoCoalescing()
+        tv.insertText(inserted, replacementRange: sel)
+        tv.undoManager?.setActionName("Paste")
+        tv.breakUndoCoalescing()
+        let range = NSRange(location: sel.location, length: (inserted as NSString).length)
+        InsertedLinkCaret.apply(selectingName ? .selectName : .caretAtName, in: range, to: tv)
     }
 }
 
