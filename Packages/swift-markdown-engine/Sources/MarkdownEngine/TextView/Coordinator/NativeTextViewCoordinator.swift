@@ -79,8 +79,8 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var onLinkClick: ((String) -> Void)?
     var onCaretRectChange: ((CGRect) -> Void)?
     /// Embedder hook to build the right-click menu (the engine ships none). Gets the
-    /// default menu + current selection range, returns the menu to show.
-    var onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)?
+    /// default menu, current selection range, and click charIndex, returns the menu to show.
+    var onBuildContextMenu: ((NSMenu, NSRange, Int) -> NSMenu)?
     var onInlineSelectionChange: ((InlineSelectionState?) -> Void)?
     var onInlinePreviewKey: ((InlinePreviewKey) -> Bool)?
     var onCodeBlockSelectionChange: (([CodeBlockSelection]) -> Void)?

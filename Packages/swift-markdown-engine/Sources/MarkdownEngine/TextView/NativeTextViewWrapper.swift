@@ -102,8 +102,10 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// so embedders can position a follow-the-caret UI.
     public var onCaretRectChange: ((CGRect) -> Void)?
     /// Build the editor's right-click menu (the engine ships no menu). Receives the default
-    /// NSMenu + the current selection range; return the menu to display (or unchanged).
-    public var onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)?
+    /// NSMenu, the current selection range, and the character index under the click — distinct
+    /// from the selection, which a right-click doesn't move, so token-scoped menus (e.g. over
+    /// an image) resolve from it. Return the menu to display (or unchanged).
+    public var onBuildContextMenu: ((NSMenu, NSRange, Int) -> NSMenu)?
     /// Fires when the caret enters or leaves a `[[Name]]` or `![[…]]`
     /// token. `nil` means the caret is no longer inside such a token.
     public var onInlineSelectionChange: ((InlineSelectionState?) -> Void)?
@@ -169,7 +171,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         onPasteCompleted: ((NSTextView, NSRange) -> Void)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
         onCaretRectChange: ((CGRect) -> Void)? = nil,
-        onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)? = nil,
+        onBuildContextMenu: ((NSMenu, NSRange, Int) -> NSMenu)? = nil,
         onInlineSelectionChange: ((InlineSelectionState?) -> Void)? = nil,
         onInlinePreviewKey: ((InlinePreviewKey) -> Bool)? = nil,
         onCodeBlockSelectionChange: (([CodeBlockSelection]) -> Void)? = nil,

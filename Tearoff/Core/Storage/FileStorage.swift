@@ -202,6 +202,27 @@ enum FileStorage {
         return base.appendingPathComponent(path)
     }
 
+    /// True when any note markdown in `folder` OTHER than the note named
+    /// `excludingNoteTitle` references `path`. Disk-based (reads the folder's
+    /// .md files) so editor menus can gate file deletion without NoteStore
+    /// access. The excluded note's on-disk copy may lag its in-memory text —
+    /// its own reference is the one being deleted anyway.
+    static func isImageFileReferenced(path: String, excludingNoteTitle: String, folder: String) -> Bool {
+        let dir = folder.isEmpty
+            ? rootURL
+            : rootURL.appendingPathComponent(folder, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.isRegularFileKey]
+        ) else { return false }
+        let selfFile = excludingNoteTitle + ".md"
+        for file in files
+        where file.pathExtension.lowercased() == "md" && file.lastPathComponent != selfFile {
+            guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            if content.contains("](\(path))") || content.contains("](<\(path)>)") { return true }
+        }
+        return false
+    }
+
     /// Result of saving a pasted/dropped image into note storage.
     struct SavedImage {
         /// Standard markdown reference, e.g. `![](assets/IMG_20260901_143025.png)`.

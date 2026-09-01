@@ -244,6 +244,13 @@ struct MarkdownEditorView: View {
                     pendingCaretIntent = nil
                     InsertedLinkCaret.apply(intent, in: insertedRange, to: tv)
                 },
+                onBuildContextMenu: { menu, _, charIndex in
+                    Self.appendImageMenuItems(
+                        to: menu, charIndex: charIndex,
+                        noteTitle: noteTitle, noteFolder: noteFolder
+                    )
+                    return menu
+                },
                 onSpellCheckingPolicyChanged: { policy in
                     // Persist context-menu spelling/grammar/autocorrect toggles back to settings
                     // so they survive note switches and app restarts.
@@ -443,6 +450,145 @@ struct MarkdownEditorView: View {
         s.components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    // MARK: Image context menu
+
+    /// A `![alt](path)` reference located on the clicked line.
+    struct ImageReferenceSpan {
+        let tokenRange: NSRange
+        let altRange: NSRange
+        /// Whole source line (newline included) — the delete action's target.
+        let lineRange: NSRange
+        let path: String
+    }
+
+    /// The image reference at `index`. The rendered block spans its whole
+    /// line, so when the line is exactly one image any click on it counts;
+    /// inside prose the click must land within the raw token.
+    static func imageReference(at index: Int, in text: NSString) -> ImageReferenceSpan? {
+        guard index >= 0, index <= text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: index, length: 0))
+        let lineText = text.substring(with: line)
+        let nsLine = lineText as NSString
+        guard let regex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)\s]+)\)"#),
+              let match = regex.firstMatch(in: lineText, range: NSRange(location: 0, length: nsLine.length))
+        else { return nil }
+        let tokenRange = NSRange(location: line.location + match.range.location, length: match.range.length)
+        let inlineHit = index >= tokenRange.location && index < NSMaxRange(tokenRange)
+        let wholeLine = lineText.trimmingCharacters(in: .whitespacesAndNewlines)
+            == nsLine.substring(with: match.range)
+        guard inlineHit || wholeLine else { return nil }
+        return ImageReferenceSpan(
+            tokenRange: tokenRange,
+            altRange: NSRange(
+                location: line.location + match.range(at: 1).location,
+                length: match.range(at: 1).length
+            ),
+            lineRange: line,
+            path: nsLine.substring(with: match.range(at: 2))
+        )
+    }
+
+    /// Right-click additions when the click lands on an image reference:
+    /// Finder reveal / copy / delete (optionally with the file, gated on no
+    /// other note referencing it) / width presets written into the alt
+    /// `|pt` suffix.
+    static func appendImageMenuItems(
+        to menu: NSMenu,
+        charIndex: Int,
+        noteTitle: String,
+        noteFolder: String
+    ) {
+        guard let tv = (NSApp.keyWindow?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: NSApp.keyWindow?.contentView),
+            let ref = imageReference(at: charIndex, in: tv.string as NSString)
+        else { return }
+        let fileURL = FileStorage.imageURL(forRelativePath: ref.path, folder: noteFolder)
+
+        menu.addItem(.separator())
+        menu.addActionItem(title: L10n.shared["editor.image.reveal"], icon: "folder") {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        }
+        menu.addActionItem(title: L10n.shared["editor.image.copy"], icon: "doc.on.doc") {
+            guard let image = NSImage(contentsOf: fileURL) else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([image])
+        }
+        menu.addActionItem(title: L10n.shared["editor.image.removeReference"], icon: "trash") {
+            deleteImageReference(ref, inFile: nil, in: tv)
+        }
+        if !FileStorage.isImageFileReferenced(path: ref.path, excludingNoteTitle: noteTitle, folder: noteFolder) {
+            menu.addActionItem(title: L10n.shared["editor.image.removeReferenceAndFile"], icon: "trash.fill") {
+                deleteImageReference(ref, inFile: fileURL, in: tv)
+            }
+        }
+
+        let widthItem = NSMenuItem(title: L10n.shared["editor.image.width"], action: nil, keyEquivalent: "")
+        let widthMenu = NSMenu()
+        for (fraction, label) in [(0.25, "25%"), (0.5, "50%"), (1.0, "100%")] {
+            widthMenu.addActionItem(title: label, icon: "arrow.left.and.right") {
+                applyImageWidth(fraction: fraction, to: ref, in: tv)
+            }
+        }
+        widthMenu.addItem(.separator())
+        widthMenu.addActionItem(title: L10n.shared["editor.image.width.reset"], icon: "arrow.counterclockwise") {
+            applyImageWidth(fraction: nil, to: ref, in: tv)
+        }
+        widthItem.submenu = widthMenu
+        menu.addItem(widthItem)
+    }
+
+    /// Remove the reference's whole line; also delete the file when the
+    /// caller verified no other reference exists.
+    private static func deleteImageReference(_ ref: ImageReferenceSpan, inFile fileURL: URL?, in tv: NSTextView) {
+        let nsText = tv.string as NSString
+        guard ref.lineRange.location + ref.lineRange.length <= nsText.length else { return }
+        tv.breakUndoCoalescing()
+        guard tv.shouldChangeText(in: ref.lineRange, replacementString: "") else { return }
+        tv.replaceCharacters(in: ref.lineRange, with: "")
+        tv.didChangeText()
+        tv.undoManager?.setActionName(L10n.shared["editor.image.removeReference"])
+        tv.breakUndoCoalescing()
+        if let fileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    /// Write (fraction × live container width, rounded to pt) into the alt's
+    /// `|pt` suffix; `fraction == nil` strips an existing suffix.
+    static func applyImageWidth(fraction: Double?, to ref: ImageReferenceSpan, in tv: NSTextView) {
+        let nsText = tv.string as NSString
+        guard ref.altRange.location + ref.altRange.length <= nsText.length else { return }
+        let alt = nsText.substring(with: ref.altRange)
+        let base = altWithoutWidthSuffix(alt)
+        let newAlt: String
+        if let fraction {
+            let containerWidth: CGFloat = {
+                guard let container = tv.textContainer else { return 650 }
+                let w = container.containerSize.width - container.lineFragmentPadding * 2
+                return w > 0 ? w : 650
+            }()
+            newAlt = base + "|\(Int((containerWidth * fraction).rounded()))"
+        } else {
+            guard base != alt else { return }  // nothing to reset
+            newAlt = base
+        }
+        tv.breakUndoCoalescing()
+        guard tv.shouldChangeText(in: ref.altRange, replacementString: newAlt) else { return }
+        tv.replaceCharacters(in: ref.altRange, with: newAlt)
+        tv.didChangeText()
+        tv.breakUndoCoalescing()
+    }
+
+    /// Alt with a trailing `|<number>` width suffix removed; unchanged when
+    /// the trailing pipe isn't followed by a positive number.
+    static func altWithoutWidthSuffix(_ alt: String) -> String {
+        guard let pipe = alt.range(of: "|", options: .backwards) else { return alt }
+        let suffix = alt[pipe.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard let width = Double(suffix), width > 0 else { return alt }
+        return String(alt[..<pipe.lowerBound])
     }
 
     /// Shared drag-in path for editor drop overlays: save the file into note

@@ -40,7 +40,10 @@ extension NativeTextViewWrapper.Coordinator {
             menu.removeItem(at: fontIndex)
         }
         guard let build = onBuildContextMenu else { return menu }
-        return build(menu, textView.selectedRange())
+        // charIndex = where the click landed — distinct from the selection,
+        // which a right-click doesn't move. Embedders use it to resolve the
+        // token under the pointer (e.g. an image for a media context menu).
+        return build(menu, textView.selectedRange(), charIndex)
     }
 
     /// Returns the smallest bold or boldItalic token that fully contains the selection, or nil when the selection isn't enclosed by emphasis with a bold trait.
