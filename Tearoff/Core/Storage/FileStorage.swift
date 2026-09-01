@@ -191,6 +191,17 @@ enum FileStorage {
         return base.appendingPathComponent(sharedAssetsDirName, isDirectory: true)
     }
 
+    /// Absolute URL of a note-relative image reference (`assets/…` shared
+    /// dialect or legacy `.NoteName/…`), resolved against the note's folder.
+    /// The single resolver for editor, read-only preview, and card thumbnails.
+    static func imageURL(forRelativePath path: String, folder: String) -> URL {
+        var base = rootURL
+        if !folder.isEmpty {
+            base = base.appendingPathComponent(folder, isDirectory: true)
+        }
+        return base.appendingPathComponent(path)
+    }
+
     /// Result of saving a pasted/dropped image into note storage.
     struct SavedImage {
         /// Standard markdown reference, e.g. `![](assets/IMG_20260901_143025.png)`.

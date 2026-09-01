@@ -19,12 +19,8 @@ struct TearoffImageProvider: EmbeddedImageProvider {
         // request.name is the relative path, e.g. "assets/IMG_….png"
         // or legacy ".My-Note/IMG-uuid.png".
         guard !request.name.isEmpty, !request.name.hasPrefix("/") else { return nil }
-        var base = FileStorage.rootURL
-        if !noteFolder.isEmpty {
-            base = base.appendingPathComponent(noteFolder, isDirectory: true)
-        }
         return ImageDecodingCache.shared.image(
-            at: base.appendingPathComponent(request.name),
+            at: FileStorage.imageURL(forRelativePath: request.name, folder: noteFolder),
             maxDimension: ImageDecodingCache.editorMaxDimension,
         )
     }

@@ -40,6 +40,19 @@ final class ImageDecodingCache {
         return image
     }
 
+    /// `image(at:)` off the main thread — same cache keys, so a miss here
+    /// becomes an instant hit on the next synchronous lookup. For surfaces
+    /// that can't stall the main thread (card thumbnails).
+    func imageAsync(at url: URL, maxDimension: CGFloat) async -> NSImage? {
+        let target = url
+        let dimension = maxDimension
+        return await withCheckedContinuation { continuation in
+            decodeQueue.async { [self] in
+                continuation.resume(returning: image(at: target, maxDimension: dimension))
+            }
+        }
+    }
+
     /// Warm the cache off the main thread (large-note open path). The cache
     /// write is keyed exactly like `image(at:)`, so later synchronous lookups hit.
     func prefetch(urls: [URL], maxDimension: CGFloat) {

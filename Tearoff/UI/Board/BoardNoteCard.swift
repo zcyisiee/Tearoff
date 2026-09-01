@@ -343,6 +343,11 @@ struct BoardNoteCard: View {
                 .font(.system(size: appSettings.boardFontSize - 1, design: .monospaced))
                 .foregroundStyle(DesignToken.muted)
 
+        case .image(let path):
+            CardImageThumbnail(
+                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder)
+            )
+
         case .text(let text):
             Text(text)
                 .font(appSettings.boardBodyFont)
@@ -461,6 +466,49 @@ struct BoardNoteCard: View {
             return color.cardTint
         }
         return DesignToken.solidCard
+    }
+}
+
+// MARK: - CardImageThumbnail
+
+/// Card-width, height-capped image thumbnail for standalone `![alt](path)`
+/// preview blocks. Decodes off the main thread through the shared downsample
+/// cache — a placeholder fills the slot until the frame lands, and a failed
+/// decode keeps it (missing file reads as an empty slot, not a broken glyph).
+/// Shared-`assets` references across cards hit the same cache entry.
+private struct CardImageThumbnail: View {
+    static let height: CGFloat = 120
+
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(DesignToken.hairlineSoft.opacity(0.5))
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 14))
+                    .foregroundStyle(DesignToken.mutedSoft)
+            }
+        }
+        .frame(height: Self.height)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .task(id: url) {
+            let decoded = await ImageDecodingCache.shared.imageAsync(
+                at: url,
+                maxDimension: ImageDecodingCache.cardMaxDimension,
+            )
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                image = decoded
+            }
+        }
     }
 }
 
