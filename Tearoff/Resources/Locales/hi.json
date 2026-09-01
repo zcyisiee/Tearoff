@@ -97,6 +97,12 @@
   "editor.createdAt": "{0} पर बनाया गया",
   "editor.readOnly": "(केवल पढ़ने के लिए)",
   "editor.restoreNote": "नोट वापस लाएं",
+  "editor.image.reveal": "फ़ाइंडर में दिखाएँ",
+  "editor.image.copy": "छवि कॉपी करें",
+  "editor.image.removeReference": "संदर्भ हटाएँ",
+  "editor.image.removeReferenceAndFile": "संदर्भ और फ़ाइल हटाएँ",
+  "editor.image.width": "चौड़ाई",
+  "editor.image.width.reset": "रीसेट",
   "trash.title": "ट्रैश",
   "trash.emptyTrash": "ट्रैश खाली करें",
   "trash.empty.title": "ट्रैश खाली है",
@@ -313,5 +319,9 @@
   "editor.toggleRawSource": "रॉ मार्कडाउन सोर्स टॉगल करें",
   "settings.board.fontSize": "बोर्ड फ़ॉन्ट आकार",
   "panel.lock": "पैनल लॉक करें (स्वतः छिपाएं नहीं)",
-  "panel.unlock": "अनलॉक करें और छिपाएँ"
+  "panel.unlock": "अनलॉक करें और छिपाएँ",
+  "settings.storage.imageLocation": "छवि संग्रहण स्थान",
+  "settings.storage.images.shared": "साझा assets फ़ोल्डर (Typora-शैली)",
+  "settings.storage.images.hidden": "प्रति नोट छिपा फ़ोल्डर",
+  "settings.storage.images.hint": "साझा मोड छवियों को नोट्स के बगल के assets/ फ़ोल्डर में सहेजता है, जो Finder में दिखता है। छिपा मोड पुराने प्रति-नोट .नोटनाम/ फ़ोल्डर को बनाए रखता है। मौजूदा नोट्स दोनों मोड में काम करते हैं।"
 }

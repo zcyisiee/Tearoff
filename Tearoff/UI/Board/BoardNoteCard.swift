@@ -43,7 +43,7 @@ final class BoardDragSession {
     private(set) var note: Note?
     /// Where inside the card the pointer grabbed, in `BoardCardSpace`.
     private(set) var grabOffset: CGSize = .zero
-    /// Captured card width — keeps the replica at the source card's footprint.
+    /// Captured card size — keeps the replica at the source card's footprint.
     private(set) var size: CGSize = .zero
     /// Current pointer position in `BoardCardSpace`.
     private(set) var pointer: CGPoint?
@@ -100,6 +100,9 @@ struct BoardNoteCard: View {
     /// False while any drag is in flight — the pointer sweeps neighbors that
     /// shouldn't light up with hover effects mid-drag.
     var hoverEnabled: Bool = true
+    /// Brief acknowledgment after an image was dropped onto this card — the
+    /// border pulses in the accent color so the append is discoverable.
+    var isDropped: Bool = false
     /// Board-wide frame registry the drag hit-test reads.
     var layout: BoardCardLayout?
     /// Plain single click (modifiers included for ⌘/⇧ multi-select routing).
@@ -141,8 +144,8 @@ struct BoardNoteCard: View {
     }
 
     /// Shared visuals: title / preview / meta row on the tinted card, pin
-    /// chrome, border, shadow. Used verbatim by the list card and the drag
-    /// replica.
+    /// chrome, border. Used verbatim by the list card and the drag replica;
+    /// depth (rest shadow / drag lift) is layered on by each consumer.
     private var cardFace: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.xs + 2) {
             HStack(spacing: 0) {
@@ -153,6 +156,12 @@ struct BoardNoteCard: View {
 
                 titleEditToggleArea
             }
+            // Hug the title's height. The drag replica is laid out by a
+            // board-content overlay that proposes the full content height,
+            // and the vertically flexible Color in `titleEditToggleArea`
+            // would otherwise absorb it, inflating the replica to the whole
+            // board's height.
+            .fixedSize(horizontal: false, vertical: true)
 
             if isEditing {
                 inlineEditor
@@ -190,18 +199,8 @@ struct BoardNoteCard: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                .strokeBorder(borderColor, lineWidth: isSelected || isDragging ? 1.5 : 1)
+                .strokeBorder(borderColor, lineWidth: isSelected || isDragging || isDropped ? 1.5 : 1)
         }
-        // Depth is constant across hover/selection: on the translucent panel
-        // a boosted shadow reads as a misaligned frosted ring around the card
-        // (top-hugging, sagging at the bottom). The border alone carries
-        // hover/selected feedback; only dragging lifts the card.
-        .shadow(
-            color: DesignToken.ink.opacity(isDragging ? 0.20 : 0.08),
-            radius: isDragging ? 14 : 6,
-            y: isDragging ? 6 : 2,
-        )
-        .scaleEffect(isDragging ? 1.015 : 1)
     }
 
     private var interactiveBody: some View {
@@ -217,6 +216,12 @@ struct BoardNoteCard: View {
                         }
                 }
             }
+            // Rest-tier depth, constant across hover/selection: on the
+            // translucent panel a boosted shadow reads as a misaligned
+            // frosted ring around the card (top-hugging, sagging at the
+            // bottom). The border alone carries hover/selected feedback;
+            // the drag lift lives on the replica.
+            .shadow(color: DesignToken.ink.opacity(0.08), radius: 6, y: 2)
             // Hidden in-slot while the replica carries the visuals; the
             // reserved frame keeps the layout stable for live reorders.
             .opacity(isDragging ? 0 : 1)
@@ -343,6 +348,11 @@ struct BoardNoteCard: View {
                 .font(.system(size: appSettings.boardFontSize - 1, design: .monospaced))
                 .foregroundStyle(DesignToken.muted)
 
+        case .image(let path):
+            CardImageThumbnail(
+                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder)
+            )
+
         case .text(let text):
             Text(text)
                 .font(appSettings.boardBodyFont)
@@ -444,6 +454,9 @@ struct BoardNoteCard: View {
     // MARK: Fill / border
 
     private var borderColor: Color {
+        if isDropped {
+            return accentColor
+        }
         if isSelected || isDragging {
             return accentColor
         }
@@ -461,6 +474,49 @@ struct BoardNoteCard: View {
             return color.cardTint
         }
         return DesignToken.solidCard
+    }
+}
+
+// MARK: - CardImageThumbnail
+
+/// Card-width, height-capped image thumbnail for standalone `![alt](path)`
+/// preview blocks. Decodes off the main thread through the shared downsample
+/// cache — a placeholder fills the slot until the frame lands, and a failed
+/// decode keeps it (missing file reads as an empty slot, not a broken glyph).
+/// Shared-`assets` references across cards hit the same cache entry.
+private struct CardImageThumbnail: View {
+    static let height: CGFloat = 120
+
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(DesignToken.hairlineSoft.opacity(0.5))
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 14))
+                    .foregroundStyle(DesignToken.mutedSoft)
+            }
+        }
+        .frame(height: Self.height)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .task(id: url) {
+            let decoded = await ImageDecodingCache.shared.imageAsync(
+                at: url,
+                maxDimension: ImageDecodingCache.cardMaxDimension,
+            )
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                image = decoded
+            }
+        }
     }
 }
 
@@ -484,7 +540,22 @@ struct BoardDragReplica: View {
                 isReplica: true,
                 onTap: { _ in },
             )
-            .frame(width: session.size.width, alignment: .topLeading)
+            // Pin to the captured source footprint. The board-content
+            // overlay proposes its full height to the replica, and the
+            // replica's natural height can also diverge from the slot (an
+            // in-place editing card swaps its 280pt editor for the
+            // preview), so the ghost must be capped and its content
+            // clipped to the card.
+            .frame(
+                width: session.size.width,
+                height: session.size.height,
+                alignment: .topLeading,
+            )
+            .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+            // Drag lift, applied outside the clip so the soft shadow keeps
+            // its edges.
+            .shadow(color: DesignToken.ink.opacity(0.20), radius: 14, y: 6)
+            .scaleEffect(1.015)
             .offset(
                 x: pointer.x - session.grabOffset.width,
                 y: pointer.y - session.grabOffset.height,

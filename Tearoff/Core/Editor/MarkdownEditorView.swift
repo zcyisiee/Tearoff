@@ -6,23 +6,82 @@ import SwiftUI
 
 // MARK: - Image provider
 
-/// Loads Tearoff asset-dir images for the `![[.STEM/IMG-uuid.ext]]` embed syntax
-/// used by the editor's display layer. The on-disk format stays as standard
-/// `![](path)` markdown; MarkdownEditorView converts between the two transparently.
+/// Resolves markdown image references (`![alt](path)`) for the engine's
+/// `styleImageLinks` renderer. Accepts both path dialects the app has ever
+/// written — shared `assets/…` (Typora-style) and legacy hidden
+/// `.NoteName/IMG-uuid.ext` — resolving them relative to the note's folder.
+/// Decoding is downsampled and cached by `ImageDecodingCache` (path + mtime),
+/// so restyles never re-read image bytes.
 struct TearoffImageProvider: EmbeddedImageProvider {
     let noteFolder: String
 
     func image(for request: EmbeddedImageRequest) -> NSImage? {
-        // request.name is the relative path, e.g. ".My-Note/IMG-uuid.png"
-        var base = FileStorage.rootURL
-        if !noteFolder.isEmpty {
-            base = base.appendingPathComponent(noteFolder, isDirectory: true)
-        }
-        return NSImage(contentsOf: base.appendingPathComponent(request.name))
+        // request.name is the relative path, e.g. "assets/IMG_….png"
+        // or legacy ".My-Note/IMG-uuid.png".
+        guard !request.name.isEmpty, !request.name.hasPrefix("/") else { return nil }
+        return ImageDecodingCache.shared.image(
+            at: FileStorage.imageURL(forRelativePath: request.name, folder: noteFolder),
+            maxDimension: ImageDecodingCache.editorMaxDimension,
+        )
     }
 
     func fingerprint() -> AnyHashable {
         noteFolder
+    }
+}
+
+// MARK: - Inserted-link caret resolution
+
+/// Locates the name/alt span of the first markdown link or image inside a
+/// freshly inserted range, so paste/drop insertions can land the caret
+/// Typora-style: between empty `[]`, on a prefilled name, or after a name.
+enum InsertedLinkCaret {
+    enum Intent {
+        /// `![name](…)` — select `name` so typing replaces it (dragged-in image).
+        case selectName
+        /// `![](…)` / `[](…)` — caret between empty brackets; when a name is
+        /// already present, caret at its end (pasted image, pasted link).
+        case caretAtName
+    }
+
+    enum Resolved {
+        case insideBrackets(location: Int)
+        case nameSpan(NSRange)
+    }
+
+    /// First `[…` … `](` span fully inside `range`. `nil` when the inserted
+    /// text carries no link-shaped construct (plain text paste).
+    static func resolve(in text: NSString, range: NSRange) -> Resolved? {
+        guard range.length >= 4,
+              range.location >= 0,
+              NSMaxRange(range) <= text.length else { return nil }
+        let open = text.range(of: "[", options: [], range: range)
+        guard open.location != NSNotFound else { return nil }
+        let nameStart = NSMaxRange(open)
+        var i = nameStart
+        let end = NSMaxRange(range) - 1  // "](" needs the char after i too
+        while i < end {
+            if text.character(at: i) == 0x5D /* ] */, text.character(at: i + 1) == 0x28 /* ( */ {
+                let length = i - nameStart
+                return length > 0
+                    ? .nameSpan(NSRange(location: nameStart, length: length))
+                    : .insideBrackets(location: nameStart)
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    static func apply(_ intent: Intent, in range: NSRange, to textView: NSTextView) {
+        guard let resolved = resolve(in: textView.string as NSString, range: range) else { return }
+        switch (intent, resolved) {
+        case (_, .insideBrackets(let location)):
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+        case (.selectName, .nameSpan(let span)):
+            textView.setSelectedRange(span)
+        case (.caretAtName, .nameSpan(let span)):
+            textView.setSelectedRange(NSRange(location: NSMaxRange(span), length: 0))
+        }
     }
 }
 
@@ -61,6 +120,10 @@ struct MarkdownEditorView: View {
     /// a new selectedNote into the animating-out EditorScreen, which would overwrite
     /// onContentChanged's captured note ID while @State text still holds the old note's content.
     @State private var stableNoteID: UUID
+    /// Set right before a paste hook returns markdown; consumed once by the
+    /// matching `onPasteCompleted` to land the caret (Typora-style name
+    /// positioning). nil leaves the caret where the engine put it.
+    @State private var pendingCaretIntent: InsertedLinkCaret.Intent?
 
     init(
         noteID: UUID,
@@ -85,7 +148,7 @@ struct MarkdownEditorView: View {
         self.onNavigatePrevious = onNavigatePrevious
         self.outline = outline
         let (heading, body) = Self.splitHeading(initialContent)
-        _text = State(initialValue: Self.imagesToEmbeds(body))
+        _text = State(initialValue: body)
         _hiddenHeadingLine = State(initialValue: heading)
         _stableNoteID = State(initialValue: noteID)
     }
@@ -134,11 +197,59 @@ struct MarkdownEditorView: View {
                 fontSize: CGFloat(appSettings.editorFontSize),
                 documentId: noteID.uuidString,
                 onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
-                    guard let (data, ext) = Self.imageData(from: pasteboard) else { return nil }
+                    // Pasting a file URL (Finder copy) keeps the original bytes
+                    // and name; anything else decodes through the engine's
+                    // reader (png/tiff/NSImage flavors) as PNG.
+                    let data: Data, ext: String, preferredName: String?
+                    if let fileURL = PasteboardImageReader.imageFileURL(from: pasteboard),
+                       let bytes = try? Data(contentsOf: fileURL) {
+                        data = bytes
+                        ext = fileURL.pathExtension.lowercased()
+                        preferredName = fileURL.lastPathComponent
+                    } else if let png = PasteboardImageReader.imageData(from: pasteboard) {
+                        data = png
+                        ext = "png"
+                        preferredName = nil
+                    } else {
+                        return nil
+                    }
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    // Return embed syntax — gets inserted into the display-layer text.
-                    // onChange converts it back to standard ![](path) markdown before saving.
-                    return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.embedMarkdown
+                    // Standard `![](path)` markdown with an empty alt — the
+                    // engine renders it (styleImageLinks) and the caret lands
+                    // between the brackets via the pending intent.
+                    pendingCaretIntent = .caretAtName
+                    return (try? FileStorage.saveImage(
+                        data: data, ext: ext, forNote: note, preferredName: preferredName
+                    ))?.markdown
+                },
+                onPasteText: { pasteboard, raw, selectedText in
+                    // Typora-style link paste: a bare URL becomes a markdown
+                    // link with the caret on the (empty or selected) name.
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if Self.isWebURL(trimmed) {
+                        pendingCaretIntent = .caretAtName
+                        return "[\(selectedText ?? "")](\(trimmed))"
+                    }
+                    // Browser-copied hyperlink text: `.string` is just the
+                    // label and the URL rides only in an inline-only HTML
+                    // flavor the engine's own converter skips — recover it.
+                    if let anchor = Self.inlineHTMLLink(pasteboard: pasteboard, plainText: trimmed) {
+                        pendingCaretIntent = .caretAtName
+                        return "[\(anchor.text)](\(anchor.url))"
+                    }
+                    return nil
+                },
+                onPasteCompleted: { tv, insertedRange in
+                    guard let intent = pendingCaretIntent else { return }
+                    pendingCaretIntent = nil
+                    InsertedLinkCaret.apply(intent, in: insertedRange, to: tv)
+                },
+                onBuildContextMenu: { menu, _, charIndex in
+                    Self.appendImageMenuItems(
+                        to: menu, charIndex: charIndex,
+                        noteTitle: noteTitle, noteFolder: noteFolder
+                    )
+                    return menu
                 },
                 onSpellCheckingPolicyChanged: { policy in
                     // Persist context-menu spelling/grammar/autocorrect toggles back to settings
@@ -160,20 +271,18 @@ struct MarkdownEditorView: View {
             .id(appSettings.taskCheckboxPreset)
             .onChange(of: isRawSource) { _, raw in
                 // Mode flip: re-express the same document without saving a mid-state.
-                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`) and image
-                // embeds converted; raw shows the complete on-disk file verbatim.
-                // Always cancel the pending debounce first so the swap can't flush a
-                // half-converted representation.
+                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`); raw shows
+                // the complete on-disk file verbatim. Always cancel the pending
+                // debounce first so the swap can't flush a half-converted state.
                 saveDebouncer.cancel()
                 if raw {
-                    let body = Self.embedsToImages(text)
                     let heading = hiddenHeadingLine
                     hiddenHeadingLine = ""
-                    text = heading.isEmpty ? body : heading + "\n\n" + body
+                    text = heading.isEmpty ? text : heading + "\n\n" + text
                 } else {
                     let (heading, body) = Self.splitHeading(text)
                     hiddenHeadingLine = heading
-                    text = Self.imagesToEmbeds(body)
+                    text = body
                 }
             }
             .onChange(of: text) { _, newText in
@@ -183,9 +292,7 @@ struct MarkdownEditorView: View {
                 let heading = hiddenHeadingLine
                 let noteIDSnapshot = stableNoteID
                 saveDebouncer.call { [onContentChanged] in
-                    // Convert display-layer ![[path]] embeds back to on-disk ![]( path) before saving.
-                    let storage = Self.embedsToImages(newText)
-                    let full = heading.isEmpty ? storage : heading + "\n\n" + storage
+                    let full = heading.isEmpty ? newText : heading + "\n\n" + newText
                     onContentChanged(noteIDSnapshot, full)
                 }
             }
@@ -199,24 +306,14 @@ struct MarkdownEditorView: View {
                 } else {
                     let (heading, body) = Self.splitHeading(newContent)
                     hiddenHeadingLine = heading
-                    text = Self.imagesToEmbeds(body)
+                    text = body
                 }
                 pendingReload = nil
             }
             .overlay(
                 ImageDropOverlay { [noteID, noteTitle, noteFolder] url in
-                    guard let data = try? Data(contentsOf: url) else { return }
-                    let ext = url.pathExtension.lowercased()
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    guard let result = try? FileStorage.saveImage(data: data, ext: ext, forNote: note) else { return }
-                    // After a drag completes the text view may have lost first responder.
-                    // Fall back to walking the window hierarchy to find it.
-                    let window = NSApp.keyWindow
-                    let tv = (window?.firstResponder as? NSTextView)
-                        ?? findEditorTextView(in: window?.contentView)
-                    guard let tv else { return }
-                    window?.makeFirstResponder(tv)
-                    tv.insertText(result.embedMarkdown, replacementRange: tv.selectedRange())
+                    Self.insertDroppedImageFile(url, for: note)
                 },
             )
 
@@ -229,6 +326,17 @@ struct MarkdownEditorView: View {
         .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
             outline?.update(body: text, hiddenHeading: hiddenHeadingLine)
+            // Warm the decode cache off-main so the first style pass (and
+            // first scroll to an image) hits cache instead of decoding on the
+            // main thread. Capped — a note can reference far more images than
+            // its opening screen can show.
+            let warmupURLs = FileStorage.imageReferences(in: text)
+                .prefix(40)
+                .map { FileStorage.imageURL(forRelativePath: $0, folder: noteFolder) }
+            ImageDecodingCache.shared.prefetch(
+                urls: warmupURLs,
+                maxDimension: ImageDecodingCache.editorMaxDimension
+            )
             noteNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
                 // Markdown formatting shortcuts — route through the engine's bus so the
                 // didMarkdown* actions run (with word-boundary auto-wrap when no selection).
@@ -272,8 +380,7 @@ struct MarkdownEditorView: View {
             // always holds the note that was active when this view was first inserted.
             let capturedID = stableNoteID
             saveDebouncer.cancel()
-            let storage = Self.embedsToImages(text)
-            let full = hiddenHeadingLine.isEmpty ? storage : hiddenHeadingLine + "\n\n" + storage
+            let full = hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
             onContentChanged(capturedID, full)
             slashHandler.dismiss()
             if let m = noteNavMonitor {
@@ -299,49 +406,259 @@ struct MarkdownEditorView: View {
         return font.familyName
     }
 
-    /// Convert on-disk `![](. STEM/IMG-uuid.ext)` references to editor embed `![[.STEM/IMG-uuid.ext]]`.
-    /// Only converts Tearoff-format images (path starts with `.`, filename starts with `IMG-`).
-    static func imagesToEmbeds(_ text: String) -> String {
-        guard text.contains("![") else { return text }
-        let pattern = #"!\[[^\]]*\]\((\.[^/)][^)]+/IMG-[A-Za-z0-9\-]+\.[A-Za-z0-9]+)\)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed()
-        let result = NSMutableString(string: text)
-        for match in matches {
-            let path = ns.substring(with: match.range(at: 1))
-            result.replaceCharacters(in: match.range, with: "![[\(path)]]")
-        }
-        return result as String
+    // MARK: Link paste conversion
+
+    /// Single-line absolute http(s) URL — the shape worth auto-linking.
+    private static func isWebURL(_ s: String) -> Bool {
+        guard !s.isEmpty, !s.contains(where: \.isNewline),
+              let url = URL(string: s), let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
     }
 
-    /// Convert editor embed `![[.STEM/IMG-uuid.ext]]` back to on-disk `![](path)`.
-    static func embedsToImages(_ text: String) -> String {
-        guard text.contains("![[") else { return text }
-        let pattern = #"!\[\[(\.[^/)][^\]]+/IMG-[A-Za-z0-9\-]+\.[A-Za-z0-9]+)\]\]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed()
-        let result = NSMutableString(string: text)
-        for match in matches {
-            let path = ns.substring(with: match.range(at: 1))
-            result.replaceCharacters(in: match.range, with: "![](\(path))")
-        }
-        return result as String
+    /// An inline-only HTML flavor whose first hyperlink's visible text matches
+    /// `plainText` — the "copied a link's text off a webpage" clipboard, where
+    /// the URL exists only in the HTML. nil for anything else (no HTML, block
+    /// structure, mismatched text, non-web href).
+    private static func inlineHTMLLink(pasteboard: NSPasteboard, plainText: String) -> (text: String, url: String)? {
+        guard !plainText.isEmpty,
+              let html = pasteboard.string(forType: .html),
+              !NativeTextViewWrapper.htmlHasBlockStructure(html),
+              let anchor = firstHTMLAnchor(html),
+              isWebURL(anchor.href),
+              collapsedWhitespace(anchor.text) == collapsedWhitespace(plainText)
+        else { return nil }
+        return (text: plainText, url: anchor.href)
     }
 
-    private static func imageData(from pasteboard: NSPasteboard) -> (Data, String)? {
-        if let data = pasteboard.data(forType: NSPasteboard.PasteboardType("public.png")) {
-            return (data, "png")
+    /// First `<a href="…">label</a>` in `html`, inner tags stripped.
+    private static func firstHTMLAnchor(_ html: String) -> (text: String, href: String)? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<a\s[^>]*?href="([^"]*)"[^>]*>(.*?)</a>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ), let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: (html as NSString).length))
+        else { return nil }
+        let ns = html as NSString
+        let href = decodeHTMLEntities(ns.substring(with: match.range(at: 1)))
+        let inner = ns.substring(with: match.range(at: 2))
+        let text = decodeHTMLEntities(
+            inner.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        )
+        return (text: text, href: href)
+    }
+
+    /// The handful of entities browsers actually emit in copied HTML.
+    /// `&amp;` decodes last so pre-escaped sequences survive one round only.
+    private static func decodeHTMLEntities(_ s: String) -> String {
+        s.replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    private static func collapsedWhitespace(_ s: String) -> String {
+        s.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    // MARK: Image context menu
+
+    /// A `![alt](path)` reference located on the clicked line.
+    struct ImageReferenceSpan {
+        let tokenRange: NSRange
+        let altRange: NSRange
+        /// Whole source line (newline included) — the delete action's target.
+        let lineRange: NSRange
+        let path: String
+    }
+
+    /// The image reference at `index`. The rendered block spans its whole
+    /// line, so when the line is exactly one image any click on it counts;
+    /// inside prose the click must land within the raw token.
+    static func imageReference(at index: Int, in text: NSString) -> ImageReferenceSpan? {
+        guard index >= 0, index <= text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: index, length: 0))
+        let lineText = text.substring(with: line)
+        let nsLine = lineText as NSString
+        guard let regex = try? NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)\s]+)\)"#),
+              let match = regex.firstMatch(in: lineText, range: NSRange(location: 0, length: nsLine.length))
+        else { return nil }
+        let tokenRange = NSRange(location: line.location + match.range.location, length: match.range.length)
+        let inlineHit = index >= tokenRange.location && index < NSMaxRange(tokenRange)
+        let wholeLine = lineText.trimmingCharacters(in: .whitespacesAndNewlines)
+            == nsLine.substring(with: match.range)
+        guard inlineHit || wholeLine else { return nil }
+        return ImageReferenceSpan(
+            tokenRange: tokenRange,
+            altRange: NSRange(
+                location: line.location + match.range(at: 1).location,
+                length: match.range(at: 1).length
+            ),
+            lineRange: line,
+            path: nsLine.substring(with: match.range(at: 2))
+        )
+    }
+
+    /// Right-click additions when the click lands on an image reference:
+    /// Finder reveal / copy / delete (optionally with the file, gated on no
+    /// other note referencing it) / width presets written into the alt
+    /// `|pt` suffix.
+    static func appendImageMenuItems(
+        to menu: NSMenu,
+        charIndex: Int,
+        noteTitle: String,
+        noteFolder: String
+    ) {
+        guard let tv = (NSApp.keyWindow?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: NSApp.keyWindow?.contentView),
+            let ref = imageReference(at: charIndex, in: tv.string as NSString)
+        else { return }
+        let fileURL = FileStorage.imageURL(forRelativePath: ref.path, folder: noteFolder)
+
+        menu.addItem(.separator())
+        menu.addActionItem(title: L10n.shared["editor.image.reveal"], icon: "folder") {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
         }
-        if let tiff = pasteboard.data(forType: .tiff),
-           let img = NSImage(data: tiff),
-           let rep = NSBitmapImageRep(data: img.tiffRepresentation ?? Data()),
-           let png = rep.representation(using: .png, properties: [:])
-        {
-            return (png, "png")
+        menu.addActionItem(title: L10n.shared["editor.image.copy"], icon: "doc.on.doc") {
+            guard let image = NSImage(contentsOf: fileURL) else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([image])
         }
-        return nil
+        menu.addActionItem(title: L10n.shared["editor.image.removeReference"], icon: "trash") {
+            deleteImageReference(ref, inFile: nil, in: tv)
+        }
+        if !FileStorage.isImageFileReferenced(path: ref.path, excludingNoteTitle: noteTitle, folder: noteFolder) {
+            menu.addActionItem(title: L10n.shared["editor.image.removeReferenceAndFile"], icon: "trash.fill") {
+                deleteImageReference(ref, inFile: fileURL, in: tv)
+            }
+        }
+
+        let widthItem = NSMenuItem(title: L10n.shared["editor.image.width"], action: nil, keyEquivalent: "")
+        let widthMenu = NSMenu()
+        for (fraction, label) in [(0.25, "25%"), (0.5, "50%"), (1.0, "100%")] {
+            widthMenu.addActionItem(title: label, icon: "arrow.left.and.right") {
+                applyImageWidth(fraction: fraction, to: ref, in: tv)
+            }
+        }
+        widthMenu.addItem(.separator())
+        widthMenu.addActionItem(title: L10n.shared["editor.image.width.reset"], icon: "arrow.counterclockwise") {
+            applyImageWidth(fraction: nil, to: ref, in: tv)
+        }
+        widthItem.submenu = widthMenu
+        menu.addItem(widthItem)
+    }
+
+    /// Remove the reference's whole line; also delete the file when the
+    /// caller verified no other reference exists.
+    private static func deleteImageReference(_ ref: ImageReferenceSpan, inFile fileURL: URL?, in tv: NSTextView) {
+        let nsText = tv.string as NSString
+        guard ref.lineRange.location + ref.lineRange.length <= nsText.length else { return }
+        tv.breakUndoCoalescing()
+        guard tv.shouldChangeText(in: ref.lineRange, replacementString: "") else { return }
+        tv.replaceCharacters(in: ref.lineRange, with: "")
+        tv.didChangeText()
+        tv.undoManager?.setActionName(L10n.shared["editor.image.removeReference"])
+        tv.breakUndoCoalescing()
+        if let fileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+
+    /// Write (fraction × live container width, rounded to pt) into the alt's
+    /// `|pt` suffix; `fraction == nil` strips an existing suffix.
+    static func applyImageWidth(fraction: Double?, to ref: ImageReferenceSpan, in tv: NSTextView) {
+        let nsText = tv.string as NSString
+        guard ref.altRange.location + ref.altRange.length <= nsText.length else { return }
+        let alt = nsText.substring(with: ref.altRange)
+        let base = altWithoutWidthSuffix(alt)
+        let newAlt: String
+        if let fraction {
+            let containerWidth: CGFloat = {
+                guard let container = tv.textContainer else { return 650 }
+                let w = container.containerSize.width - container.lineFragmentPadding * 2
+                return w > 0 ? w : 650
+            }()
+            newAlt = base + "|\(Int((containerWidth * fraction).rounded()))"
+        } else {
+            guard base != alt else { return }  // nothing to reset
+            newAlt = base
+        }
+        tv.breakUndoCoalescing()
+        guard tv.shouldChangeText(in: ref.altRange, replacementString: newAlt) else { return }
+        tv.replaceCharacters(in: ref.altRange, with: newAlt)
+        tv.didChangeText()
+        tv.breakUndoCoalescing()
+    }
+
+    /// Alt with a trailing `|<number>` width suffix removed; unchanged when
+    /// the trailing pipe isn't followed by a positive number.
+    static func altWithoutWidthSuffix(_ alt: String) -> String {
+        guard let pipe = alt.range(of: "|", options: .backwards) else { return alt }
+        let suffix = alt[pipe.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard let width = Double(suffix), width > 0 else { return alt }
+        return String(alt[..<pipe.lowerBound])
+    }
+
+    /// Shared drag-in path for editor drop overlays: save the file into note
+    /// storage (original name kept), focus the live text view (falling back
+    /// to a hierarchy walk — a finished drag may have dropped first
+    /// responder), insert the reference on its own line, and land the caret
+    /// on the name.
+    static func insertDroppedImageFile(_ url: URL, for note: Note) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        let ext = url.pathExtension.lowercased()
+        guard let result = try? FileStorage.saveImage(
+            data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent
+        ) else { return }
+        let window = NSApp.keyWindow
+        let tv = (window?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: window?.contentView)
+        guard let tv else { return }
+        window?.makeFirstResponder(tv)
+        let alt = dropImageAlt(for: url)
+        let markdown = alt.isEmpty
+            ? result.markdown
+            : "![\(alt)](\(result.relativePath))"
+        insertImageMarkdown(markdown, selectingName: !alt.isEmpty, in: tv)
+    }
+
+    /// Alt text for a dragged-in image: the file's display name. Dropped when
+    /// the legacy hidden-dir mode is on (it writes opaque UUID filenames) or
+    /// the name would break the link syntax.
+    static func dropImageAlt(for url: URL) -> String {
+        guard AppSettings.shared.imageStorageMode == .sharedAssets else { return "" }
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard !stem.isEmpty, !stem.contains(where: { "[]()".contains($0) || $0.isNewline }) else {
+            return ""
+        }
+        return stem
+    }
+
+    /// Insert `![…](…)` as its own line with undo fencing (one Cmd+Z reverts
+    /// the whole insertion), then land the caret: select a prefilled name so
+    /// typing replaces it, or park between empty brackets.
+    static func insertImageMarkdown(_ markdown: String, selectingName: Bool, in tv: NSTextView) {
+        let sel = tv.selectedRange()
+        let nsText = tv.string as NSString
+        var prefix = ""
+        var suffix = ""
+        if sel.location > 0, nsText.character(at: sel.location - 1) != 0x0A {
+            prefix = "\n"
+        }
+        let after = sel.location + sel.length
+        if after < nsText.length, nsText.character(at: after) != 0x0A {
+            suffix = "\n"
+        }
+        let inserted = prefix + markdown + suffix
+        tv.breakUndoCoalescing()
+        tv.insertText(inserted, replacementRange: sel)
+        tv.undoManager?.setActionName("Paste")
+        tv.breakUndoCoalescing()
+        let range = NSRange(location: sel.location, length: (inserted as NSString).length)
+        InsertedLinkCaret.apply(selectingName ? .selectName : .caretAtName, in: range, to: tv)
     }
 }
 

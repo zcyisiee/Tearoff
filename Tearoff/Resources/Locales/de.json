@@ -97,6 +97,12 @@
   "editor.createdAt": "Erstellt am {0}",
   "editor.readOnly": "(schreibgeschützt)",
   "editor.restoreNote": "Notiz wiederherstellen",
+  "editor.image.reveal": "Im Finder anzeigen",
+  "editor.image.copy": "Bild kopieren",
+  "editor.image.removeReference": "Verweis entfernen",
+  "editor.image.removeReferenceAndFile": "Verweis und Datei entfernen",
+  "editor.image.width": "Breite",
+  "editor.image.width.reset": "Zurücksetzen",
   "trash.title": "Papierkorb",
   "trash.emptyTrash": "Papierkorb leeren",
   "trash.empty.title": "Papierkorb ist leer",
@@ -313,5 +319,9 @@
   "editor.toggleRawSource": "Markdown-Quelltext umschalten",
   "settings.board.fontSize": "Board-Schriftgröße",
   "panel.lock": "Panel verankern (nicht automatisch ausblenden)",
-  "panel.unlock": "Lösen und ausblenden"
+  "panel.unlock": "Lösen und ausblenden",
+  "settings.storage.imageLocation": "Bildspeicherort",
+  "settings.storage.images.shared": "Gemeinsamer assets-Ordner (wie Typora)",
+  "settings.storage.images.hidden": "Versteckter Ordner pro Notiz",
+  "settings.storage.images.hint": "Im gemeinsamen Modus werden Bilder im Ordner assets/ neben den Notizen gespeichert und im Finder angezeigt. Der versteckte Modus behält den bisherigen Ordner .Notizname/ pro Notiz. Bestehende Notizen funktionieren in beiden Modi."
 }

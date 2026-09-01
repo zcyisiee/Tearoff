@@ -152,6 +152,26 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(editorRawSourceMode, forKey: "editorRawSourceMode") }
     }
 
+    // MARK: - Image storage
+
+    /// Where pasted/dropped images are written. Both modes stay readable at
+    /// render time — switching never migrates or breaks existing notes; it
+    /// only decides where NEW images land.
+    enum ImageStorageMode: String, CaseIterable {
+        /// Shared `assets/` directory next to the note (Typora-style): visible
+        /// in Finder and shared by every note in the same folder.
+        case sharedAssets
+        /// Legacy hidden `.<NoteName>/` directory co-located with each note.
+        case hiddenDirectory
+    }
+
+    /// Default `.sharedAssets` (new Typora-like behavior); existing vaults keep
+    /// rendering legacy hidden-dir images regardless of this setting.
+    var imageStorageMode: ImageStorageMode = .sharedAssets {
+        didSet { UserDefaults.standard.set(imageStorageMode.rawValue, forKey: "imageStorageMode") }
+    }
+
+
     /// Whether to automatically check for updates on launch (24h throttle).
     var autoCheckUpdates: Bool = true {
         didSet { UserDefaults.standard.set(autoCheckUpdates, forKey: "autoCheckUpdates") }
@@ -290,6 +310,11 @@ final class AppSettings {
             appearanceMode = mode
         }
         editorRawSourceMode = UserDefaults.standard.bool(forKey: "editorRawSourceMode")
+        if let raw = UserDefaults.standard.string(forKey: "imageStorageMode"),
+           let value = ImageStorageMode(rawValue: raw)
+        {
+            imageStorageMode = value
+        }
         autoCheckUpdates = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
         launchAtLogin = UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? false
         if let raw = UserDefaults.standard.object(forKey: "spellCheckingEnabled") as? Bool {
@@ -370,6 +395,15 @@ extension AppSettings.OutlinePosition {
         switch self {
         case .top: l10n["settings.editor.outlinePosition.top"]
         case .right: l10n["settings.editor.outlinePosition.right"]
+        }
+    }
+}
+
+extension AppSettings.ImageStorageMode {
+    func displayName(_ l10n: L10n) -> String {
+        switch self {
+        case .sharedAssets: l10n["settings.storage.images.shared"]
+        case .hiddenDirectory: l10n["settings.storage.images.hidden"]
         }
     }
 }

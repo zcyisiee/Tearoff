@@ -48,6 +48,9 @@ struct NoteBoardView: View {
     /// Last plain tap (note + time) for manual double-click classification —
     /// keeps single taps instant instead of waiting out a multi-tap window.
     @State private var lastCardTap: (id: UUID, at: Date)?
+    /// Card that just received a dropped image — pulses its border so the
+    /// append is discoverable. Cleared shortly after the drop.
+    @State private var droppedFlashID: UUID?
 
     // Folder delete confirmation
     @State private var deletingFolderName: String?
@@ -460,6 +463,62 @@ struct NoteBoardView: View {
                     .padding(.bottom, DesignToken.Space.md)
             }
         }
+        // Same frame as the enclosing BoardViewportSpace, and below the
+        // expanded editor in the ZStack — board-level image drops hit-test
+        // cards, while a full editor session keeps its own drop overlay on top.
+        .overlay {
+            BoardImageDropOverlay { url, viewportPoint in
+                handleBoardImageDrop(url: url, viewportPoint: viewportPoint)
+            }
+        }
+    }
+
+    // MARK: Board image drops
+
+    /// Image dropped onto the board at `viewportPoint` (in
+    /// `BoardViewportSpace`): the card under the point wins. An in-place
+    /// editing card receives the insert through its live editor; any other
+    /// card gets the reference appended to its content plus a border pulse.
+    private func handleBoardImageDrop(url: URL, viewportPoint: CGPoint) {
+        guard let (noteID, _) = cardLayout.viewportFrames.first(where: { $0.value.contains(viewportPoint) })
+        else { return }
+
+        if noteID == noteStore.inlineEditingNoteID,
+           let note = noteStore.notes.first(where: { $0.id == noteID }) {
+            // Route into the mounted inline editor — appending behind its back
+            // would be lost on its next debounced flush.
+            MarkdownEditorView.insertDroppedImageFile(url, for: note)
+            return
+        }
+        guard let note = noteStore.notes.first(where: { $0.id == noteID }) else { return }
+
+        guard let data = try? Data(contentsOf: url),
+              let result = try? FileStorage.saveImage(
+                  data: data,
+                  ext: url.pathExtension.lowercased(),
+                  forNote: note,
+                  preferredName: url.lastPathComponent,
+              )
+        else { return }
+        let alt = MarkdownEditorView.dropImageAlt(for: url)
+        let markdown = alt.isEmpty
+            ? result.markdown
+            : "![\(alt)](\(result.relativePath))"
+
+        var base = note.content
+        while base.hasSuffix("\n") { base.removeLast() }
+        let newContent = base.isEmpty ? markdown + "\n" : base + "\n\n" + markdown + "\n"
+        noteStore.updateContent(for: note.id, content: newContent)
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            droppedFlashID = note.id
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1.0))
+            withAnimation(.easeInOut(duration: 0.4)) {
+                if droppedFlashID == note.id { droppedFlashID = nil }
+            }
+        }
     }
 
     /// Tabs layout: subfolder chips (inside a folder), then the note grid.
@@ -589,6 +648,7 @@ struct NoteBoardView: View {
             isEditing: noteStore.inlineEditingNoteID == note.id,
             isDragging: dragSession.noteID == note.id,
             hoverEnabled: dragSession.noteID == nil,
+            isDropped: droppedFlashID == note.id,
             layout: cardLayout,
             onTap: { flags in handleCardTap(note, flags: flags, visible: visible) },
             onTitleAreaTap: { flags in handleTitleAreaTap(note, flags: flags, visible: visible) },

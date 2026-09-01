@@ -17,6 +17,10 @@ struct CardPreviewBlock: Identifiable {
         case bullet(text: AttributedString)
         case quote(text: AttributedString)
         case code(text: AttributedString)
+        /// Standalone `![alt](path)` line — rendered as a thumbnail by the
+        /// card. Carries the note-relative path; the view resolves it against
+        /// the note's folder. Counts against the block quota like any block.
+        case image(path: String)
         case text(AttributedString)
     }
 
@@ -28,8 +32,9 @@ struct CardPreviewBlock: Identifiable {
 
 /// Lightweight markdown block parser for note card previews. Renders the
 /// visual subset that reads at card size — heading levels, bullets, task
-/// items, quotes, fences (collapsed), inline bold/italic/code/links — and
-/// strips everything else (images, raw HTML, tables) to plain text.
+/// items, quotes, fences (collapsed), standalone images (thumbnails), inline
+/// bold/italic/code/links — and strips everything else (inline images, raw
+/// HTML, tables) to plain text.
 ///
 /// Results are cached per note (id + modifiedAt + size), so scrolling the
 /// board does not re-parse content.
@@ -123,6 +128,10 @@ enum NoteThumbnailRenderer {
                 blocks.append(CardPreviewBlock(id: blocks.count, kind: .text(inline(orderedBody) ?? AttributedString(""))))
                 continue
             }
+            if let imagePath = standaloneImagePath(line) {
+                blocks.append(CardPreviewBlock(id: blocks.count, kind: .image(path: imagePath)))
+                continue
+            }
             if line.hasPrefix("---") || line.hasPrefix("!") || line.hasPrefix("|") {
                 continue
             }
@@ -143,6 +152,22 @@ enum NoteThumbnailRenderer {
     private static func isTaskLine(_ line: String) -> Bool {
         line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") || line.hasPrefix("- [X] ")
             || line.hasPrefix("* [ ] ") || line.hasPrefix("* [x] ") || line.hasPrefix("* [X] ")
+    }
+
+    /// `![alt](path)` occupying the whole line (surrounding whitespace ok) —
+    /// the shape the card renders as a thumbnail. Remote and absolute-path
+    /// references return nil (no fetches from the board); inline images in
+    /// prose stay stripped by ``inline(_:)``.
+    private static func standaloneImagePath(_ line: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"^\s*!\[[^\]]*\]\(([^)]+)\)\s*$"#),
+              let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length))
+        else { return nil }
+        let path = (line as NSString).substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty,
+              !path.hasPrefix("http://"), !path.hasPrefix("https://"),
+              !path.hasPrefix("/")
+        else { return nil }
+        return path
     }
 
     private static func taskBlock(_ line: String, lineIndex: Int, blockIndex: Int) -> CardPreviewBlock {

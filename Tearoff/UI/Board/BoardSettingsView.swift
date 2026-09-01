@@ -429,7 +429,8 @@ struct BoardSettingsView: View {
     // MARK: - Storage
 
     private var storageSection: some View {
-        SettingsSection(
+        @Bindable var settings = appSettings
+        return SettingsSection(
             title: l10n["settings.general.storage"],
             icon: "folder",
             trailing: {
@@ -444,6 +445,17 @@ struct BoardSettingsView: View {
                 .help(l10n["settings.general.addLocation"])
             },
         ) {
+            Picker(l10n["settings.storage.imageLocation"], selection: $settings.imageStorageMode) {
+                ForEach(AppSettings.ImageStorageMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName(l10n)).tag(mode)
+                }
+            }
+            Text(l10n["settings.storage.images.hint"])
+                .font(DesignToken.Typography.caption)
+                .foregroundStyle(DesignToken.mutedSoft)
+
+            Divider()
+
             ForEach(roots) { root in
                 storageRootRow(root)
             }
