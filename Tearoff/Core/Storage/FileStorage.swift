@@ -202,6 +202,24 @@ enum FileStorage {
         return base.appendingPathComponent(path)
     }
 
+    /// All note-relative image paths referenced by a markdown body — both
+    /// dialects the app has ever written (`assets/…` and legacy `.Note/…`).
+    /// Remote and absolute-path references are excluded (nothing to prefetch).
+    static func imageReferences(in body: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)\s]+)\)"#)
+        else { return [] }
+        let ns = body as NSString
+        var result: [String] = []
+        for match in regex.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+            let path = ns.substring(with: match.range(at: 1))
+            guard !path.hasPrefix("http://"), !path.hasPrefix("https://"),
+                  !path.hasPrefix("/"), !path.isEmpty
+            else { continue }
+            result.append(path)
+        }
+        return result
+    }
+
     /// True when any note markdown in `folder` OTHER than the note named
     /// `excludingNoteTitle` references `path`. Disk-based (reads the folder's
     /// .md files) so editor menus can gate file deletion without NoteStore

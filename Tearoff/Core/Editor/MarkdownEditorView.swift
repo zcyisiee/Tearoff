@@ -326,6 +326,17 @@ struct MarkdownEditorView: View {
         .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
             outline?.update(body: text, hiddenHeading: hiddenHeadingLine)
+            // Warm the decode cache off-main so the first style pass (and
+            // first scroll to an image) hits cache instead of decoding on the
+            // main thread. Capped — a note can reference far more images than
+            // its opening screen can show.
+            let warmupURLs = FileStorage.imageReferences(in: text)
+                .prefix(40)
+                .map { FileStorage.imageURL(forRelativePath: $0, folder: noteFolder) }
+            ImageDecodingCache.shared.prefetch(
+                urls: warmupURLs,
+                maxDimension: ImageDecodingCache.editorMaxDimension
+            )
             noteNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
                 // Markdown formatting shortcuts — route through the engine's bus so the
                 // didMarkdown* actions run (with word-boundary auto-wrap when no selection).

@@ -8,6 +8,10 @@ import ImageIO
 /// drawn at 650pt — and keys entries by path + mtime so edits on disk
 /// invalidate naturally.
 ///
+/// Costs are charged from the decoded bitmap's real `bytesPerRow × height`
+/// (a 2600px-side decode is ~20MB, not the ~5MB its point size suggests), so
+/// the byte budget below reflects actual footprint.
+///
 /// Animated files (GIF/HEVC-sequence) decode to their static first frame;
 /// editors don't animate embeds.
 final class ImageDecodingCache {
@@ -35,9 +39,9 @@ final class ImageDecodingCache {
         guard let mtime = modificationDate(at: url) else { return nil }
         let key = cacheKey(url: url, mtime: mtime, maxDimension: maxDimension)
         if let hit = cache.object(forKey: key) { return hit }
-        guard let image = decode(url: url, maxDimension: maxDimension) else { return nil }
-        cache.setObject(image, forKey: key, cost: estimatedBytes(image))
-        return image
+        guard let decoded = decode(url: url, maxDimension: maxDimension) else { return nil }
+        cache.setObject(decoded.image, forKey: key, cost: decoded.byteCost)
+        return decoded.image
     }
 
     /// `image(at:)` off the main thread — same cache keys, so a miss here
@@ -62,17 +66,23 @@ final class ImageDecodingCache {
                 guard let mtime = modificationDate(at: url) else { continue }
                 let key = cacheKey(url: url, mtime: mtime, maxDimension: maxDimension)
                 guard cache.object(forKey: key) == nil else { continue }
-                guard let image = decode(url: url, maxDimension: maxDimension) else { continue }
-                cache.setObject(image, forKey: key, cost: estimatedBytes(image))
+                guard let decoded = decode(url: url, maxDimension: maxDimension) else { continue }
+                cache.setObject(decoded.image, forKey: key, cost: decoded.byteCost)
             }
         }
     }
 
     // MARK: - Decoding
 
+    private struct DecodedImage {
+        let image: NSImage
+        /// Actual bitmap bytes — the NSCache cost charge.
+        let byteCost: Int
+    }
+
     /// CGImageSource thumbnail decode: one-shot downsample to the longest side
     /// of `maxDimension * 2` (2x screen). First frame only for sequences.
-    private func decode(url: URL, maxDimension: CGFloat) -> NSImage? {
+    private func decode(url: URL, maxDimension: CGFloat) -> DecodedImage? {
         let options: [CFString: Any] = [
             kCGImageSourceShouldCache: false,
         ]
@@ -89,7 +99,7 @@ final class ImageDecodingCache {
         // Report points, not pixels, so the engine's width math stays in pt.
         let scale = 2.0
         image.size = NSSize(width: CGFloat(cg.width) / scale, height: CGFloat(cg.height) / scale)
-        return image
+        return DecodedImage(image: image, byteCost: cg.bytesPerRow * cg.height)
     }
 
     private func modificationDate(at url: URL) -> Date? {
@@ -98,12 +108,5 @@ final class ImageDecodingCache {
 
     private func cacheKey(url: URL, mtime: Date, maxDimension: CGFloat) -> NSString {
         "\(url.path)|\(mtime.timeIntervalSince1970)|\(Int(maxDimension))" as NSString
-    }
-
-    private func estimatedBytes(_ image: NSImage) -> Int {
-        if let rep = image.representations.first as? NSBitmapImageRep {
-            return rep.bytesPerPlane
-        }
-        return Int(image.size.width * image.size.height * 4)
     }
 }
