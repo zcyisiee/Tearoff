@@ -66,3 +66,9 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 .DS_Store
 .zcode/
+
+# archify 生成的架构图与视觉校验产物
+docs/archify/
+
+# xcodebuild derived data（本地与 CI 均输出到仓库根目录）
+build_*/
