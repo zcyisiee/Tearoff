@@ -45,6 +45,14 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     public typealias Coordinator = NativeTextViewCoordinator
     public typealias NSViewType = NSScrollView
 
+    /// Public forwarding of the paste pipeline's HTML block-structure
+    /// predicate, so embedders running `onPasteText` can apply the same rule
+    /// the engine's own HTML branch uses (e.g. to recover an inline-only
+    /// hyperlink's URL instead of losing it to the plain-text fallback).
+    public static func htmlHasBlockStructure(_ html: String) -> Bool {
+        NativeTextView.htmlHasBlockStructure(html)
+    }
+
     /// Two-way binding to the document text in storage form
     /// (`[[Name|<id>]]` for wiki-links). The engine keeps display and
     /// storage forms in sync internally.

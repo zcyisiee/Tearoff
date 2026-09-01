@@ -226,6 +226,23 @@ struct MarkdownEditorView: View {
                         data: data, ext: ext, forNote: note, preferredName: preferredName
                     ))?.markdown
                 },
+                onPasteText: { pasteboard, raw, selectedText in
+                    // Typora-style link paste: a bare URL becomes a markdown
+                    // link with the caret on the (empty or selected) name.
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if Self.isWebURL(trimmed) {
+                        pendingCaretIntent = .caretAtName
+                        return "[\(selectedText ?? "")](\(trimmed))"
+                    }
+                    // Browser-copied hyperlink text: `.string` is just the
+                    // label and the URL rides only in an inline-only HTML
+                    // flavor the engine's own converter skips — recover it.
+                    if let anchor = Self.inlineHTMLLink(pasteboard: pasteboard, plainText: trimmed) {
+                        pendingCaretIntent = .caretAtName
+                        return "[\(anchor.text)](\(anchor.url))"
+                    }
+                    return nil
+                },
                 onPasteCompleted: { tv, insertedRange in
                     guard let intent = pendingCaretIntent else { return }
                     pendingCaretIntent = nil
@@ -392,6 +409,63 @@ struct MarkdownEditorView: View {
     private static func resolvedFontFamily(from postscriptName: String?) -> String? {
         guard let name = postscriptName, let font = NSFont(name: name, size: 16) else { return nil }
         return font.familyName
+    }
+
+    // MARK: Link paste conversion
+
+    /// Single-line absolute http(s) URL — the shape worth auto-linking.
+    private static func isWebURL(_ s: String) -> Bool {
+        guard !s.isEmpty, !s.contains(where: \.isNewline),
+              let url = URL(string: s), let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    /// An inline-only HTML flavor whose first hyperlink's visible text matches
+    /// `plainText` — the "copied a link's text off a webpage" clipboard, where
+    /// the URL exists only in the HTML. nil for anything else (no HTML, block
+    /// structure, mismatched text, non-web href).
+    private static func inlineHTMLLink(pasteboard: NSPasteboard, plainText: String) -> (text: String, url: String)? {
+        guard !plainText.isEmpty,
+              let html = pasteboard.string(forType: .html),
+              !NativeTextViewWrapper.htmlHasBlockStructure(html),
+              let anchor = firstHTMLAnchor(html),
+              isWebURL(anchor.href),
+              collapsedWhitespace(anchor.text) == collapsedWhitespace(plainText)
+        else { return nil }
+        return (text: plainText, url: anchor.href)
+    }
+
+    /// First `<a href="…">label</a>` in `html`, inner tags stripped.
+    private static func firstHTMLAnchor(_ html: String) -> (text: String, href: String)? {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"<a\s[^>]*?href="([^"]*)"[^>]*>(.*?)</a>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ), let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: (html as NSString).length))
+        else { return nil }
+        let ns = html as NSString
+        let href = decodeHTMLEntities(ns.substring(with: match.range(at: 1)))
+        let inner = ns.substring(with: match.range(at: 2))
+        let text = decodeHTMLEntities(
+            inner.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        )
+        return (text: text, href: href)
+    }
+
+    /// The handful of entities browsers actually emit in copied HTML.
+    /// `&amp;` decodes last so pre-escaped sequences survive one round only.
+    private static func decodeHTMLEntities(_ s: String) -> String {
+        s.replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+    }
+
+    private static func collapsedWhitespace(_ s: String) -> String {
+        s.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     /// Alt text for a dragged-in image: the file's display name. Dropped when

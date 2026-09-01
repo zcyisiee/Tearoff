@@ -185,7 +185,9 @@ extension NativeTextView {
     /// enough: converting it would mangle VS Code's per-line <div> code or turn
     /// a casually copied bold word / link into stray markdown, so those pastes
     /// should fall through to the clean plain-text flavor instead.
-    static func htmlHasBlockStructure(_ html: String) -> Bool {
+    /// Public so embedders can run the same predicate from `onPasteText`
+    /// (e.g. to recover an inline-only hyperlink's URL).
+    public static func htmlHasBlockStructure(_ html: String) -> Bool {
         // "li" included bare: Chromium serializes a within-list selection as
         // naked <li> elements without the ul/ol wrapper (Claude/ChatGPT copies).
         let blockTags = ["ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6",
