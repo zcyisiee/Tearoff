@@ -27,8 +27,9 @@ enum DesignToken {
     /// Near-opaque card fill — the SideNotes-style solid card floating on the
     /// desktop. There is no shared window backdrop: the wallpaper shows through
     /// only in the gaps between cards, so each card carries ~96% of its own
-    /// surface color. Used by board cards, the header pill, editor, and
-    /// settings sections alike.
+    /// surface color. Used by board cards, the header pill, and settings
+    /// sections. The expanded editor uses `surfaceCard` instead (fully opaque)
+    /// so cards underneath cannot show through.
     static let solidCard = dynamicAlpha(light: 0xFFFFFF, dark: 0x2E2E2C, lightAlpha: 0.96, darkAlpha: 0.97)
     /// Frosted inset fill — inputs and wells on solid surfaces.
     static let glassInset = dynamicAlpha(light: 0x8A7A55, dark: 0x000000, lightAlpha: 0.08, darkAlpha: 0.22)

@@ -354,51 +354,76 @@ struct NoteBoardView: View {
                 }
 
                 ForEach(allFolders) { folder in
-                    tabButton(
-                        title: (folder.name as NSString).lastPathComponent,
-                        icon: "folder.fill",
-                        isActive: noteStore.selectedFolder?.name == folder.name,
-                    ) {
-                        noteStore.navigateToFolder(folder)
-                    }
-                    .nsContextMenu {
-                        NoteListMenus.folderMenu(
-                            folder: folder,
-                            noteStore: noteStore,
-                            l10n: l10n,
-                            onRename: { startRenamingFolder(folder.name) },
-                            onDelete: {
-                                deletingFolderName = folder.name
-                                showDeleteFolderConfirm = true
-                            },
+                    if folderRename.renamingFolderName == folder.name {
+                        let isActive = noteStore.selectedFolder?.name == folder.name
+                        tabFolderEditor(
+                            iconColor: isActive
+                                ? DesignToken.onAccent
+                                : (folder.color?.color ?? DesignToken.muted),
+                            fill: isActive
+                                ? (folder.color?.color ?? DesignToken.accent)
+                                : DesignToken.surfaceInset,
+                            labelColor: isActive ? DesignToken.onAccent : DesignToken.bodyText,
                         )
+                    } else {
+                        tabButton(
+                            title: (folder.name as NSString).lastPathComponent,
+                            icon: "folder.fill",
+                            isActive: noteStore.selectedFolder?.name == folder.name,
+                            iconColor: folder.color?.color,
+                        ) {
+                            noteStore.navigateToFolder(folder)
+                        }
+                        .nsContextMenu {
+                            NoteListMenus.folderMenu(
+                                folder: folder,
+                                noteStore: noteStore,
+                                l10n: l10n,
+                                onRename: { startRenamingFolder(folder.name) },
+                                onDelete: {
+                                    deletingFolderName = folder.name
+                                    showDeleteFolderConfirm = true
+                                },
+                            )
+                        }
                     }
                 }
 
-                if folderRename.isCreating || folderRename.renamingFolderName != nil {
-                    inlineFolderEditor
-                        .frame(width: 150)
+                if folderRename.isCreating {
+                    tabFolderEditor(
+                        iconColor: DesignToken.accent,
+                        fill: DesignToken.surfaceInset,
+                        labelColor: DesignToken.bodyText,
+                    )
                 }
             }
             .padding(.vertical, 1)
         }
     }
 
-    private func tabButton(title: String, icon: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func tabButton(
+        title: String,
+        icon: String,
+        isActive: Bool,
+        iconColor: Color? = nil,
+        action: @escaping () -> Void,
+    ) -> some View {
+        let fill = isActive ? (iconColor ?? DesignToken.accent) : DesignToken.ink.opacity(0)
+        let labelColor = isActive ? DesignToken.onAccent : DesignToken.muted
+        let glyphColor = isActive ? DesignToken.onAccent : (iconColor ?? DesignToken.muted)
+        return Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(glyphColor)
                 Text(title)
                     .font(DesignToken.Typography.callout)
                     .lineLimit(1)
+                    .foregroundStyle(labelColor)
             }
-            .foregroundStyle(isActive ? DesignToken.onAccent : DesignToken.muted)
             .padding(.horizontal, DesignToken.Space.sm + 2)
             .padding(.vertical, 4)
-            .background(
-                Capsule().fill(isActive ? DesignToken.accent : DesignToken.ink.opacity(0)),
-            )
+            .background(Capsule().fill(fill))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -437,13 +462,9 @@ struct NoteBoardView: View {
         }
     }
 
-    /// Tabs layout: subfolder chips (inside a folder), inline folder editor, then the note grid.
+    /// Tabs layout: subfolder chips (inside a folder), then the note grid.
     private var tabsBoard: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.sm) {
-            if folderRename.isCreating && noteStore.selectedFolder == nil {
-                inlineFolderEditor
-            }
-
             if !childFolders.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: DesignToken.Space.xs) {
@@ -483,10 +504,6 @@ struct NoteBoardView: View {
                         }
                     }
                 }
-            }
-
-            if folderRename.renamingFolderName != nil {
-                inlineFolderEditor
             }
 
             if isEmpty {
@@ -1058,39 +1075,80 @@ struct NoteBoardView: View {
         noteStore.folders.filter(\.isTopLevel)
     }
 
-    private var inlineFolderEditor: some View {
-        InlineRenameEditor(
-            icon: "folder.fill",
-            iconColor: DesignToken.accent,
-            placeholder: l10n["common.folderNamePlaceholder"],
-            text: folderRename.renamingFolderName != nil ? $folderRename.renameText : $folderRename.creationText,
-            isFocused: $isFolderFieldFocused,
-            isConflicting: folderRename.renamingFolderName != nil
-                ? folderRename.isRenameConflicting(siblings: allFolders)
-                : folderRename.isCreateConflicting(siblings: topLevelFolders),
-            iconWidth: 20,
-            onCommit: {
-                if let name = folderRename.renamingFolderName {
-                    folderRename.commitRename(name, noteStore: noteStore, siblings: allFolders)
-                } else {
-                    folderRename.commitCreate(parent: noteStore.selectedFolder?.name ?? "", noteStore: noteStore, siblings: topLevelFolders)
+    /// Compact tab-shaped field used for in-place rename and new-folder create
+    /// in the header strip — same height as a folder tab, not a list row.
+    private func tabFolderEditor(iconColor: Color, fill: Color, labelColor: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(iconColor)
+            TextField(l10n["common.folderNamePlaceholder"], text: folderEditorText)
+                .textFieldStyle(.plain)
+                .font(DesignToken.Typography.callout)
+                .foregroundStyle(labelColor)
+                .focused($isFolderFieldFocused)
+                .onSubmit(commitFolderEditor)
+                .frame(minWidth: 56, maxWidth: 140)
+                .overlay(alignment: .trailing) {
+                    Text(l10n["common.nameTaken"])
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(DesignToken.error)
+                        .opacity(folderEditorIsConflicting ? 1 : 0)
                 }
-            },
-            onCancel: {
-                if folderRename.renamingFolderName != nil {
-                    folderRename.cancelRename()
-                } else {
-                    folderRename.cancelCreate()
-                }
-            },
-            onFocusLost: {
-                if let name = folderRename.renamingFolderName {
-                    folderRename.commitOrCancelRename(name, noteStore: noteStore, siblings: allFolders)
-                } else {
-                    folderRename.commitOrCancelCreate(parent: noteStore.selectedFolder?.name ?? "", noteStore: noteStore, siblings: topLevelFolders)
-                }
-            },
-        )
+        }
+        .padding(.horizontal, DesignToken.Space.sm + 2)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(fill))
+        .onExitCommand(perform: cancelFolderEditor)
+        .onChange(of: isFolderFieldFocused) { _, focused in
+            if !focused {
+                focusLostFolderEditor()
+            }
+        }
+    }
+
+    private var folderEditorText: Binding<String> {
+        folderRename.renamingFolderName != nil
+            ? $folderRename.renameText
+            : $folderRename.creationText
+    }
+
+    private var folderEditorIsConflicting: Bool {
+        folderRename.renamingFolderName != nil
+            ? folderRename.isRenameConflicting(siblings: allFolders)
+            : folderRename.isCreateConflicting(siblings: topLevelFolders)
+    }
+
+    private func commitFolderEditor() {
+        if let name = folderRename.renamingFolderName {
+            folderRename.commitRename(name, noteStore: noteStore, siblings: allFolders)
+        } else {
+            folderRename.commitCreate(
+                parent: noteStore.selectedFolder?.name ?? "",
+                noteStore: noteStore,
+                siblings: topLevelFolders,
+            )
+        }
+    }
+
+    private func cancelFolderEditor() {
+        if folderRename.renamingFolderName != nil {
+            folderRename.cancelRename()
+        } else {
+            folderRename.cancelCreate()
+        }
+    }
+
+    private func focusLostFolderEditor() {
+        if let name = folderRename.renamingFolderName {
+            folderRename.commitOrCancelRename(name, noteStore: noteStore, siblings: allFolders)
+        } else {
+            folderRename.commitOrCancelCreate(
+                parent: noteStore.selectedFolder?.name ?? "",
+                noteStore: noteStore,
+                siblings: topLevelFolders,
+            )
+        }
     }
 
     // MARK: - Actions

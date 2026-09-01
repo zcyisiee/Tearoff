@@ -51,14 +51,15 @@ struct ExpandedNoteEditor: View {
             }
             .frame(maxHeight: .infinity)
         }
-        // The editor is one enlarged solid card floating on the desktop,
-        // matching the board-card language (SideNotes-style single surface).
+        // Fully opaque so the board cards underneath cannot show through.
+        // Board cards keep `solidCard` (~96%) so wallpaper still peeks
+        // through the gaps between them.
         .padding(.horizontal, DesignToken.Space.lg)
         .padding(.top, DesignToken.Space.sm)
         .padding(.bottom, DesignToken.Space.md)
         .background {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                .fill(DesignToken.solidCard)
+                .fill(DesignToken.surfaceCard)
         }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
@@ -134,6 +135,8 @@ struct ExpandedNoteEditor: View {
                 DeleteIconButton {
                     showDeleteConfirm = true
                 }
+
+                PinButton()
             }
 
             HStack(spacing: DesignToken.Space.md) {
