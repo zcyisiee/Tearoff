@@ -313,5 +313,9 @@
   "editor.toggleRawSource": "Toggle Raw Markdown Source",
   "settings.board.fontSize": "Board font size",
   "panel.lock": "Lock panel (no auto-hide)",
-  "panel.unlock": "Unlock and hide"
+  "panel.unlock": "Unlock and hide",
+  "settings.storage.imageLocation": "Image storage location",
+  "settings.storage.images.shared": "Shared assets folder (Typora-style)",
+  "settings.storage.images.hidden": "Hidden folder per note",
+  "settings.storage.images.hint": "Shared mode saves images into an assets/ folder next to your notes, visible in Finder. Hidden mode keeps the legacy .NoteName/ folder per note. Existing notes keep working in both modes."
 }

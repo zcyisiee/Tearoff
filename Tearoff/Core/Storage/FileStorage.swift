@@ -113,7 +113,10 @@ enum FileStorage {
                 let fullPath = url.path
                 if fullPath.count > rootPath.count, fullPath.hasPrefix(rootPath) {
                     let relative = String(fullPath.dropFirst(rootPath.count + 1))
-                    if !relative.isEmpty {
+                    // Shared image dirs (at any depth) are storage, not note folders.
+                    if !relative.isEmpty,
+                       !relative.split(separator: "/").contains(Substring(sharedAssetsDirName))
+                    {
                         folders.append(relative)
                     }
                 }
@@ -161,6 +164,10 @@ enum FileStorage {
 
     // MARK: - Asset Directory
 
+    /// Shared per-folder image directory name (Typora-style `assets/`).
+    /// Reserved: directories with this name are never listed as note folders.
+    static let sharedAssetsDirName = "assets"
+
     /// Hidden dot-prefix asset directory co-located with a note file.
     /// e.g. "My-Note.md" → ".My-Note/" in the same parent directory.
     /// stem = sanitized filename WITHOUT the .md extension.
@@ -174,23 +181,139 @@ enum FileStorage {
         return base.appendingPathComponent(dirName, isDirectory: true)
     }
 
-    /// Save image data to the note's asset directory.
-    /// Returns both the on-disk storage markdown `![](path)` and the embed syntax `![[path]]`
-    /// used by the editor's display layer.
-    static func saveImage(data: Data, ext: String, forNote note: Note) throws -> (markdown: String, embedMarkdown: String, src: String) {
-        let stem = sanitizeForFilename(note.title)
-        let assetDir = assetDirURL(stem: stem, folder: note.folder)
-        try FileManager.default.createDirectory(at: assetDir, withIntermediateDirectories: true)
-        let imageFilename = "IMG-\(UUID().uuidString).\(ext)"
-        let destURL = assetDir.appendingPathComponent(imageFilename)
-        try data.write(to: destURL, options: .atomic)
-        Log.storage.info("[Image] saved \(imageFilename, privacy: .public) (\(data.count) bytes) for '\(note.title, privacy: .public)'")
-        let path = "." + stem + "/" + imageFilename
-        return (
-            markdown: "![](\(path))",
-            embedMarkdown: "![[\(path)]]",
-            src: destURL.absoluteString,
-        )
+    /// Shared `assets/` directory inside `folder` (root of the vault when empty).
+    static func sharedAssetsDirURL(folder: String) -> URL {
+        let base = rootURL
+        if !folder.isEmpty {
+            return base.appendingPathComponent(folder, isDirectory: true)
+                .appendingPathComponent(sharedAssetsDirName, isDirectory: true)
+        }
+        return base.appendingPathComponent(sharedAssetsDirName, isDirectory: true)
+    }
+
+    /// Result of saving a pasted/dropped image into note storage.
+    struct SavedImage {
+        /// Standard markdown reference, e.g. `![](assets/IMG_20260901_143025.png)`.
+        let markdown: String
+        /// Relative path stored between the parentheses, e.g. `assets/IMG_….png`.
+        let relativePath: String
+        /// Absolute file URL of the written image.
+        let fileURL: URL
+    }
+
+    /// Save image data for `note`, honoring the image-storage setting:
+    /// - `.sharedAssets` (Typora-style): writes into the folder's shared
+    ///   `assets/` dir. Keeps `preferredName` (dragged file) or a timestamp
+    ///   name (clipboard), deduplicating with a `-N` suffix on collision.
+    /// - `.hiddenDirectory` (legacy): hidden `.<NoteName>/` dir with a
+    ///   UUID filename, as before.
+    static func saveImage(data: Data, ext: String, forNote note: Note, preferredName: String? = nil) throws -> SavedImage {
+        switch AppSettings.shared.imageStorageMode {
+        case .sharedAssets:
+            let dir = sharedAssetsDirURL(folder: note.folder)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let baseName: String
+            if let preferredName, !preferredName.isEmpty {
+                baseName = sanitizeForFilename(String((preferredName as NSString).deletingPathExtension))
+            } else {
+                baseName = "IMG_" + imageTimestampFormatter.string(from: Date())
+            }
+            let safeExt = ext.isEmpty ? "png" : ext.lowercased()
+            let fileName = dedupeFileName(baseName, ext: safeExt, in: dir)
+            let destURL = dir.appendingPathComponent(fileName)
+            try data.write(to: destURL, options: .atomic)
+            Log.storage.info("[Image] saved \(fileName, privacy: .public) (\(data.count) bytes) to shared assets for '\(note.title, privacy: .public)'")
+            let path = "\(sharedAssetsDirName)/\(fileName)"
+            return SavedImage(markdown: "![](\(path))", relativePath: path, fileURL: destURL)
+        case .hiddenDirectory:
+            let stem = sanitizeForFilename(note.title)
+            let assetDir = assetDirURL(stem: stem, folder: note.folder)
+            try FileManager.default.createDirectory(at: assetDir, withIntermediateDirectories: true)
+            let imageFilename = "IMG-\(UUID().uuidString).\(ext)"
+            let destURL = assetDir.appendingPathComponent(imageFilename)
+            try data.write(to: destURL, options: .atomic)
+            Log.storage.info("[Image] saved \(imageFilename, privacy: .public) (\(data.count) bytes) for '\(note.title, privacy: .public)'")
+            let path = "." + stem + "/" + imageFilename
+            return SavedImage(markdown: "![](\(path))", relativePath: path, fileURL: destURL)
+        }
+    }
+
+    private static let imageTimestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd_HHmmss"
+        return f
+    }()
+
+    /// `name.ext`, `name-1.ext`, `name-2.ext`, … — first candidate that doesn't
+    /// exist in `dir`.
+    private static func dedupeFileName(_ name: String, ext: String, in dir: URL) -> String {
+        let fm = FileManager.default
+        var candidate = "\(name).\(ext)"
+        var counter = 1
+        while fm.fileExists(atPath: dir.appendingPathComponent(candidate).path) {
+            candidate = "\(name)-\(counter).\(ext)"
+            counter += 1
+        }
+        return candidate
+    }
+
+    /// All `assets/…` image paths referenced by a markdown body (shared mode).
+    static func sharedAssetReferences(in body: String) -> [String] {
+        guard body.contains("](\(sharedAssetsDirName)/") else { return [] }
+        guard let regex = try? NSRegularExpression(pattern: "\\]\\((\(sharedAssetsDirName)/[^)\\s]+)\\)") else { return [] }
+        let ns = body as NSString
+        return regex.matches(in: body, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 1)) }
+    }
+
+    /// Copy every `assets/…` image referenced by `note.content` from `from`
+    /// into `to`'s shared assets dir. Returns the rewritten body when any path
+    /// changed (dedupe rename), nil when the body can stay as-is.
+    private static func copySharedAssets(of note: Note, from: String, to: String) -> String? {
+        let refs = sharedAssetReferences(in: note.content)
+        guard !refs.isEmpty else { return nil }
+        let fm = FileManager.default
+        let srcDir = sharedAssetsDirURL(folder: from)
+        let dstDir = sharedAssetsDirURL(folder: to)
+        guard srcDir.path != dstDir.path else { return nil }
+
+        var rewritten = note.content
+        var didRewrite = false
+        for ref in Set(refs) {
+            let fileName = (ref as NSString).lastPathComponent
+            let srcURL = srcDir.appendingPathComponent(fileName)
+            guard fm.fileExists(atPath: srcURL.path) else { continue }
+            let dstURL = dstDir.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: dstURL.path) {
+                // Same name at the destination: identical bytes → reuse the
+                // existing file (path unchanged); otherwise dedupe + rewrite.
+                guard let srcData = try? Data(contentsOf: srcURL, options: .mappedIfSafe),
+                      let dstData = try? Data(contentsOf: dstURL, options: .mappedIfSafe),
+                      srcData != dstData
+                else { continue }
+                let stem = (fileName as NSString).deletingPathExtension
+                let ext = (fileName as NSString).pathExtension
+                let copyName = dedupeFileName(stem, ext: ext.isEmpty ? "png" : ext, in: dstDir)
+                let copyURL = dstDir.appendingPathComponent(copyName)
+                do {
+                    try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+                    try fm.copyItem(at: srcURL, to: copyURL)
+                    rewritten = rewritten.replacingOccurrences(of: "(\(ref))", with: "(\(sharedAssetsDirName)/\(copyName))")
+                    didRewrite = true
+                } catch {
+                    Log.storage.error("[Image] failed copying \(fileName, privacy: .public): \(error)")
+                }
+            } else {
+                do {
+                    try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+                    try fm.copyItem(at: srcURL, to: dstURL)
+                } catch {
+                    Log.storage.error("[Image] failed copying \(fileName, privacy: .public): \(error)")
+                }
+            }
+        }
+        return didRewrite ? rewritten : nil
     }
 
     /// Remove image files in the asset dir that are no longer referenced in the note body.
@@ -431,6 +554,20 @@ enum FileStorage {
         if FileManager.default.fileExists(atPath: srcAsset.path) {
             try? FileManager.default.moveItem(at: srcAsset, to: dstAsset)
             Log.storage.debug("[Image] moved asset dir for '\(note.title, privacy: .public)' to folder '\(toFolder, privacy: .public)'")
+        }
+
+        // Shared assets mode: `assets/…` paths are folder-relative, so crossing
+        // folders must carry the referenced image files along (copy, not move —
+        // siblings in the source folder may reference the same files). A name
+        // clash at the destination is deduplicated and the body rewritten.
+        if note.folder != toFolder,
+           AppSettings.shared.imageStorageMode == .sharedAssets,
+           !note.content.isEmpty
+        {
+            if let rewritten = copySharedAssets(of: note, from: note.folder, to: toFolder) {
+                try? Data(rewritten.utf8).write(to: newURL, options: .atomic)
+                Log.storage.info("[Image] copied shared assets for '\(note.title, privacy: .public)' → '\(toFolder, privacy: .public)'")
+            }
         }
 
         // Update path and savedAt in sidecar — moveItem advances mtime

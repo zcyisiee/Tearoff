@@ -1602,8 +1602,11 @@ final class NoteStore {
                     selectedNote?.savedFilename = result.filename
                     selectedNote?.savedAt = result.savedAt
                 }
-                // Clean up orphaned images (deleted from body but file still on disk)
-                FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
+                // Clean up orphaned images (deleted from body but file still on disk).
+                // Shared-assets mode keeps files until explicitly deleted (Typora-like).
+                if AppSettings.shared.imageStorageMode == .hiddenDirectory {
+                    FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
+                }
             } catch {
                 Log.storage.error("[NoteStore] saveDirtyNotes failed for \(noteID) — \(error)")
             }

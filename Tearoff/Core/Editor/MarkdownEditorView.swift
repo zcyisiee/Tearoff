@@ -136,9 +136,9 @@ struct MarkdownEditorView: View {
                 onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
                     guard let (data, ext) = Self.imageData(from: pasteboard) else { return nil }
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    // Return embed syntax — gets inserted into the display-layer text.
-                    // onChange converts it back to standard ![](path) markdown before saving.
-                    return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.embedMarkdown
+                    // Standard `![](path)` markdown — the engine renders it inline
+                    // (styleImageLinks routes the path through TearoffImageProvider).
+                    return (try? FileStorage.saveImage(data: data, ext: ext, forNote: note))?.markdown
                 },
                 onSpellCheckingPolicyChanged: { policy in
                     // Persist context-menu spelling/grammar/autocorrect toggles back to settings
@@ -216,7 +216,7 @@ struct MarkdownEditorView: View {
                         ?? findEditorTextView(in: window?.contentView)
                     guard let tv else { return }
                     window?.makeFirstResponder(tv)
-                    tv.insertText(result.embedMarkdown, replacementRange: tv.selectedRange())
+                    tv.insertText(result.markdown, replacementRange: tv.selectedRange())
                 },
             )
 

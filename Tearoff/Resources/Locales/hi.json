@@ -313,5 +313,9 @@
   "editor.toggleRawSource": "रॉ मार्कडाउन सोर्स टॉगल करें",
   "settings.board.fontSize": "बोर्ड फ़ॉन्ट आकार",
   "panel.lock": "पैनल लॉक करें (स्वतः छिपाएं नहीं)",
-  "panel.unlock": "अनलॉक करें और छिपाएँ"
+  "panel.unlock": "अनलॉक करें और छिपाएँ",
+  "settings.storage.imageLocation": "छवि संग्रहण स्थान",
+  "settings.storage.images.shared": "साझा assets फ़ोल्डर (Typora-शैली)",
+  "settings.storage.images.hidden": "प्रति नोट छिपा फ़ोल्डर",
+  "settings.storage.images.hint": "साझा मोड छवियों को नोट्स के बगल के assets/ फ़ोल्डर में सहेजता है, जो Finder में दिखता है। छिपा मोड पुराने प्रति-नोट .नोटनाम/ फ़ोल्डर को बनाए रखता है। मौजूदा नोट्स दोनों मोड में काम करते हैं।"
 }

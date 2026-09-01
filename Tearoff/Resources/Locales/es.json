@@ -313,5 +313,9 @@
   "editor.toggleRawSource": "Alternar fuente Markdown",
   "settings.board.fontSize": "Tamaño de letra del tablero",
   "panel.lock": "Fijar panel (sin ocultar automáticamente)",
-  "panel.unlock": "Quitar fijado y ocultar"
+  "panel.unlock": "Quitar fijado y ocultar",
+  "settings.storage.imageLocation": "Ubicación de las imágenes",
+  "settings.storage.images.shared": "Carpeta assets compartida (estilo Typora)",
+  "settings.storage.images.hidden": "Carpeta oculta por nota",
+  "settings.storage.images.hint": "El modo compartido guarda las imágenes en la carpeta assets/ junto a las notas, visible en el Finder. El modo oculto mantiene la carpeta .NombreDeNota/ por nota de la versión anterior. Las notas existentes funcionan en ambos modos."
 }

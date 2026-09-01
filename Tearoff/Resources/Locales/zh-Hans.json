@@ -313,5 +313,9 @@
   "editor.toggleRawSource": "切换 Markdown 源码视图",
   "settings.board.fontSize": "主界面字号",
   "panel.lock": "锁定面板（不自动隐藏）",
-  "panel.unlock": "解锁并收起"
+  "panel.unlock": "解锁并收起",
+  "settings.storage.imageLocation": "图片存储位置",
+  "settings.storage.images.shared": "共享 assets 文件夹（类 Typora）",
+  "settings.storage.images.hidden": "每笔记隐藏文件夹",
+  "settings.storage.images.hint": "共享模式将图片存入笔记所在文件夹的 assets/ 子目录，可在 Finder 中查看；隐藏模式沿用旧版每笔记的 .笔记名/ 目录。两种模式下已有笔记均可正常显示。"
 }
