@@ -100,6 +100,9 @@ struct BoardNoteCard: View {
     /// False while any drag is in flight — the pointer sweeps neighbors that
     /// shouldn't light up with hover effects mid-drag.
     var hoverEnabled: Bool = true
+    /// Brief acknowledgment after an image was dropped onto this card — the
+    /// border pulses in the accent color so the append is discoverable.
+    var isDropped: Bool = false
     /// Board-wide frame registry the drag hit-test reads.
     var layout: BoardCardLayout?
     /// Plain single click (modifiers included for ⌘/⇧ multi-select routing).
@@ -190,7 +193,7 @@ struct BoardNoteCard: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
-                .strokeBorder(borderColor, lineWidth: isSelected || isDragging ? 1.5 : 1)
+                .strokeBorder(borderColor, lineWidth: isSelected || isDragging || isDropped ? 1.5 : 1)
         }
         // Depth is constant across hover/selection: on the translucent panel
         // a boosted shadow reads as a misaligned frosted ring around the card
@@ -449,6 +452,9 @@ struct BoardNoteCard: View {
     // MARK: Fill / border
 
     private var borderColor: Color {
+        if isDropped {
+            return accentColor
+        }
         if isSelected || isDragging {
             return accentColor
         }

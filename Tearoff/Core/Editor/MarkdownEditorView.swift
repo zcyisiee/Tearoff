@@ -305,27 +305,8 @@ struct MarkdownEditorView: View {
             }
             .overlay(
                 ImageDropOverlay { [noteID, noteTitle, noteFolder] url in
-                    guard let data = try? Data(contentsOf: url) else { return }
-                    let ext = url.pathExtension.lowercased()
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
-                    // Dragged-in files keep their original name (Typora-style).
-                    guard let result = try? FileStorage.saveImage(
-                        data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent
-                    ) else { return }
-                    // After a drag completes the text view may have lost first responder.
-                    // Fall back to walking the window hierarchy to find it.
-                    let window = NSApp.keyWindow
-                    let tv = (window?.firstResponder as? NSTextView)
-                        ?? findEditorTextView(in: window?.contentView)
-                    guard let tv else { return }
-                    window?.makeFirstResponder(tv)
-                    // Prefill the alt with the dropped file's name so it reads as
-                    // a caption; the caret selects it for immediate retyping.
-                    let alt = Self.dropImageAlt(for: url)
-                    let markdown = alt.isEmpty
-                        ? result.markdown
-                        : "![\(alt)](\(result.relativePath))"
-                    Self.insertImageMarkdown(markdown, selectingName: !alt.isEmpty, in: tv)
+                    Self.insertDroppedImageFile(url, for: note)
                 },
             )
 
@@ -464,10 +445,33 @@ struct MarkdownEditorView: View {
             .joined(separator: " ")
     }
 
+    /// Shared drag-in path for editor drop overlays: save the file into note
+    /// storage (original name kept), focus the live text view (falling back
+    /// to a hierarchy walk — a finished drag may have dropped first
+    /// responder), insert the reference on its own line, and land the caret
+    /// on the name.
+    static func insertDroppedImageFile(_ url: URL, for note: Note) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        let ext = url.pathExtension.lowercased()
+        guard let result = try? FileStorage.saveImage(
+            data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent
+        ) else { return }
+        let window = NSApp.keyWindow
+        let tv = (window?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: window?.contentView)
+        guard let tv else { return }
+        window?.makeFirstResponder(tv)
+        let alt = dropImageAlt(for: url)
+        let markdown = alt.isEmpty
+            ? result.markdown
+            : "![\(alt)](\(result.relativePath))"
+        insertImageMarkdown(markdown, selectingName: !alt.isEmpty, in: tv)
+    }
+
     /// Alt text for a dragged-in image: the file's display name. Dropped when
     /// the legacy hidden-dir mode is on (it writes opaque UUID filenames) or
     /// the name would break the link syntax.
-    private static func dropImageAlt(for url: URL) -> String {
+    static func dropImageAlt(for url: URL) -> String {
         guard AppSettings.shared.imageStorageMode == .sharedAssets else { return "" }
         let stem = url.deletingPathExtension().lastPathComponent
         guard !stem.isEmpty, !stem.contains(where: { "[]()".contains($0) || $0.isNewline }) else {
@@ -479,7 +483,7 @@ struct MarkdownEditorView: View {
     /// Insert `![…](…)` as its own line with undo fencing (one Cmd+Z reverts
     /// the whole insertion), then land the caret: select a prefilled name so
     /// typing replaces it, or park between empty brackets.
-    private static func insertImageMarkdown(_ markdown: String, selectingName: Bool, in tv: NSTextView) {
+    static func insertImageMarkdown(_ markdown: String, selectingName: Bool, in tv: NSTextView) {
         let sel = tv.selectedRange()
         let nsText = tv.string as NSString
         var prefix = ""
