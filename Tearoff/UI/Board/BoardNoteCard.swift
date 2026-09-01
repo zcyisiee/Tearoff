@@ -43,7 +43,7 @@ final class BoardDragSession {
     private(set) var note: Note?
     /// Where inside the card the pointer grabbed, in `BoardCardSpace`.
     private(set) var grabOffset: CGSize = .zero
-    /// Captured card width — keeps the replica at the source card's footprint.
+    /// Captured card size — keeps the replica at the source card's footprint.
     private(set) var size: CGSize = .zero
     /// Current pointer position in `BoardCardSpace`.
     private(set) var pointer: CGPoint?
@@ -144,8 +144,8 @@ struct BoardNoteCard: View {
     }
 
     /// Shared visuals: title / preview / meta row on the tinted card, pin
-    /// chrome, border, shadow. Used verbatim by the list card and the drag
-    /// replica.
+    /// chrome, border. Used verbatim by the list card and the drag replica;
+    /// depth (rest shadow / drag lift) is layered on by each consumer.
     private var cardFace: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.xs + 2) {
             HStack(spacing: 0) {
@@ -156,6 +156,12 @@ struct BoardNoteCard: View {
 
                 titleEditToggleArea
             }
+            // Hug the title's height. The drag replica is laid out by a
+            // board-content overlay that proposes the full content height,
+            // and the vertically flexible Color in `titleEditToggleArea`
+            // would otherwise absorb it, inflating the replica to the whole
+            // board's height.
+            .fixedSize(horizontal: false, vertical: true)
 
             if isEditing {
                 inlineEditor
@@ -195,16 +201,6 @@ struct BoardNoteCard: View {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
                 .strokeBorder(borderColor, lineWidth: isSelected || isDragging || isDropped ? 1.5 : 1)
         }
-        // Depth is constant across hover/selection: on the translucent panel
-        // a boosted shadow reads as a misaligned frosted ring around the card
-        // (top-hugging, sagging at the bottom). The border alone carries
-        // hover/selected feedback; only dragging lifts the card.
-        .shadow(
-            color: DesignToken.ink.opacity(isDragging ? 0.20 : 0.08),
-            radius: isDragging ? 14 : 6,
-            y: isDragging ? 6 : 2,
-        )
-        .scaleEffect(isDragging ? 1.015 : 1)
     }
 
     private var interactiveBody: some View {
@@ -220,6 +216,12 @@ struct BoardNoteCard: View {
                         }
                 }
             }
+            // Rest-tier depth, constant across hover/selection: on the
+            // translucent panel a boosted shadow reads as a misaligned
+            // frosted ring around the card (top-hugging, sagging at the
+            // bottom). The border alone carries hover/selected feedback;
+            // the drag lift lives on the replica.
+            .shadow(color: DesignToken.ink.opacity(0.08), radius: 6, y: 2)
             // Hidden in-slot while the replica carries the visuals; the
             // reserved frame keeps the layout stable for live reorders.
             .opacity(isDragging ? 0 : 1)
@@ -538,7 +540,22 @@ struct BoardDragReplica: View {
                 isReplica: true,
                 onTap: { _ in },
             )
-            .frame(width: session.size.width, alignment: .topLeading)
+            // Pin to the captured source footprint. The board-content
+            // overlay proposes its full height to the replica, and the
+            // replica's natural height can also diverge from the slot (an
+            // in-place editing card swaps its 280pt editor for the
+            // preview), so the ghost must be capped and its content
+            // clipped to the card.
+            .frame(
+                width: session.size.width,
+                height: session.size.height,
+                alignment: .topLeading,
+            )
+            .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+            // Drag lift, applied outside the clip so the soft shadow keeps
+            // its edges.
+            .shadow(color: DesignToken.ink.opacity(0.20), radius: 14, y: 6)
+            .scaleEffect(1.015)
             .offset(
                 x: pointer.x - session.grabOffset.width,
                 y: pointer.y - session.grabOffset.height,
