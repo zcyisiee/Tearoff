@@ -6,19 +6,27 @@ import SwiftUI
 
 // MARK: - Image provider
 
-/// Loads Tearoff asset-dir images for the `![[.STEM/IMG-uuid.ext]]` embed syntax
-/// used by the editor's display layer. The on-disk format stays as standard
-/// `![](path)` markdown; MarkdownEditorView converts between the two transparently.
+/// Resolves markdown image references (`![alt](path)`) for the engine's
+/// `styleImageLinks` renderer. Accepts both path dialects the app has ever
+/// written — shared `assets/…` (Typora-style) and legacy hidden
+/// `.NoteName/IMG-uuid.ext` — resolving them relative to the note's folder.
+/// Decoding is downsampled and cached by `ImageDecodingCache` (path + mtime),
+/// so restyles never re-read image bytes.
 struct TearoffImageProvider: EmbeddedImageProvider {
     let noteFolder: String
 
     func image(for request: EmbeddedImageRequest) -> NSImage? {
-        // request.name is the relative path, e.g. ".My-Note/IMG-uuid.png"
+        // request.name is the relative path, e.g. "assets/IMG_….png"
+        // or legacy ".My-Note/IMG-uuid.png".
+        guard !request.name.isEmpty, !request.name.hasPrefix("/") else { return nil }
         var base = FileStorage.rootURL
         if !noteFolder.isEmpty {
             base = base.appendingPathComponent(noteFolder, isDirectory: true)
         }
-        return NSImage(contentsOf: base.appendingPathComponent(request.name))
+        return ImageDecodingCache.shared.image(
+            at: base.appendingPathComponent(request.name),
+            maxDimension: ImageDecodingCache.editorMaxDimension,
+        )
     }
 
     func fingerprint() -> AnyHashable {
@@ -85,7 +93,7 @@ struct MarkdownEditorView: View {
         self.onNavigatePrevious = onNavigatePrevious
         self.outline = outline
         let (heading, body) = Self.splitHeading(initialContent)
-        _text = State(initialValue: Self.imagesToEmbeds(body))
+        _text = State(initialValue: body)
         _hiddenHeadingLine = State(initialValue: heading)
         _stableNoteID = State(initialValue: noteID)
     }
@@ -160,20 +168,18 @@ struct MarkdownEditorView: View {
             .id(appSettings.taskCheckboxPreset)
             .onChange(of: isRawSource) { _, raw in
                 // Mode flip: re-express the same document without saving a mid-state.
-                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`) and image
-                // embeds converted; raw shows the complete on-disk file verbatim.
-                // Always cancel the pending debounce first so the swap can't flush a
-                // half-converted representation.
+                // WYSIWYG keeps the heading split out (`hiddenHeadingLine`); raw shows
+                // the complete on-disk file verbatim. Always cancel the pending
+                // debounce first so the swap can't flush a half-converted state.
                 saveDebouncer.cancel()
                 if raw {
-                    let body = Self.embedsToImages(text)
                     let heading = hiddenHeadingLine
                     hiddenHeadingLine = ""
-                    text = heading.isEmpty ? body : heading + "\n\n" + body
+                    text = heading.isEmpty ? text : heading + "\n\n" + text
                 } else {
                     let (heading, body) = Self.splitHeading(text)
                     hiddenHeadingLine = heading
-                    text = Self.imagesToEmbeds(body)
+                    text = body
                 }
             }
             .onChange(of: text) { _, newText in
@@ -183,9 +189,7 @@ struct MarkdownEditorView: View {
                 let heading = hiddenHeadingLine
                 let noteIDSnapshot = stableNoteID
                 saveDebouncer.call { [onContentChanged] in
-                    // Convert display-layer ![[path]] embeds back to on-disk ![]( path) before saving.
-                    let storage = Self.embedsToImages(newText)
-                    let full = heading.isEmpty ? storage : heading + "\n\n" + storage
+                    let full = heading.isEmpty ? newText : heading + "\n\n" + newText
                     onContentChanged(noteIDSnapshot, full)
                 }
             }
@@ -199,7 +203,7 @@ struct MarkdownEditorView: View {
                 } else {
                     let (heading, body) = Self.splitHeading(newContent)
                     hiddenHeadingLine = heading
-                    text = Self.imagesToEmbeds(body)
+                    text = body
                 }
                 pendingReload = nil
             }
@@ -272,8 +276,7 @@ struct MarkdownEditorView: View {
             // always holds the note that was active when this view was first inserted.
             let capturedID = stableNoteID
             saveDebouncer.cancel()
-            let storage = Self.embedsToImages(text)
-            let full = hiddenHeadingLine.isEmpty ? storage : hiddenHeadingLine + "\n\n" + storage
+            let full = hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
             onContentChanged(capturedID, full)
             slashHandler.dismiss()
             if let m = noteNavMonitor {
@@ -297,37 +300,6 @@ struct MarkdownEditorView: View {
     private static func resolvedFontFamily(from postscriptName: String?) -> String? {
         guard let name = postscriptName, let font = NSFont(name: name, size: 16) else { return nil }
         return font.familyName
-    }
-
-    /// Convert on-disk `![](. STEM/IMG-uuid.ext)` references to editor embed `![[.STEM/IMG-uuid.ext]]`.
-    /// Only converts Tearoff-format images (path starts with `.`, filename starts with `IMG-`).
-    static func imagesToEmbeds(_ text: String) -> String {
-        guard text.contains("![") else { return text }
-        let pattern = #"!\[[^\]]*\]\((\.[^/)][^)]+/IMG-[A-Za-z0-9\-]+\.[A-Za-z0-9]+)\)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed()
-        let result = NSMutableString(string: text)
-        for match in matches {
-            let path = ns.substring(with: match.range(at: 1))
-            result.replaceCharacters(in: match.range, with: "![[\(path)]]")
-        }
-        return result as String
-    }
-
-    /// Convert editor embed `![[.STEM/IMG-uuid.ext]]` back to on-disk `![](path)`.
-    static func embedsToImages(_ text: String) -> String {
-        guard text.contains("![[") else { return text }
-        let pattern = #"!\[\[(\.[^/)][^\]]+/IMG-[A-Za-z0-9\-]+\.[A-Za-z0-9]+)\]\]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed()
-        let result = NSMutableString(string: text)
-        for match in matches {
-            let path = ns.substring(with: match.range(at: 1))
-            result.replaceCharacters(in: match.range, with: "![](\(path))")
-        }
-        return result as String
     }
 
     private static func imageData(from pasteboard: NSPasteboard) -> (Data, String)? {

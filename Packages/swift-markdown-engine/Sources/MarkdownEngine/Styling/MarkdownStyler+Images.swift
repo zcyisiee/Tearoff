@@ -57,7 +57,15 @@ extension MarkdownStyler {
 
             let minWidth = imageEmbedConfig.minimumWidth
             let imageSize = image.size
-            let targetWidth = min(max(imageSize.width, minWidth), maxWidth)
+            // Alt width suffix — `![alt|300](url)` — an explicit width wins over
+            // the intrinsic size, clamped the same way embed widths are.
+            let altText = ctx.nsText.substring(with: altRange(of: token))
+            let targetWidth: CGFloat
+            if let requested = requestedWidthInAlt(altText), requested > 0 {
+                targetWidth = min(max(requested, minWidth), maxWidth)
+            } else {
+                targetWidth = min(max(imageSize.width, minWidth), maxWidth)
+            }
             let scale = imageSize.width > 0 ? targetWidth / imageSize.width : 1
             let displayWidth = imageSize.width * scale
             let displayHeight = imageSize.height * scale
@@ -108,6 +116,28 @@ extension MarkdownStyler {
             }
         }
         return attrs
+    }
+
+    /// Range of an image link's alt text — between the `![` and `]` markers.
+    private static func altRange(of token: MarkdownToken) -> NSRange {
+        guard token.markerRanges.count >= 2 else {
+            return NSRange(location: NSMaxRange(token.range), length: 0)
+        }
+        let start = NSMaxRange(token.markerRanges[0])
+        let end = token.markerRanges[1].location
+        guard end > start else { return NSRange(location: start, length: 0) }
+        return NSRange(location: start, length: end - start)
+    }
+
+    /// `![alt|300](url)` — the alt may carry a trailing `|<number>` width
+    /// suffix (Obsidian-style). Returns the width in points, or `nil` when the
+    /// alt has no parsable suffix (including plain `|` separators that aren't
+    /// followed by a positive number).
+    static func requestedWidthInAlt(_ alt: String) -> CGFloat? {
+        guard let pipeRange = alt.range(of: "|", options: .backwards) else { return nil }
+        let raw = alt[pipeRange.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard let width = Double(raw), width > 0, width.isFinite else { return nil }
+        return width
     }
 
     // MARK: Image Embeds ![[Name]]
