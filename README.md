@@ -2,12 +2,12 @@
 
 <b><font>Tearoff</font></b>
 
- A native macOS side-panel Markdown notes app. Always one edge away.
+ 一款随手记录的便签。
 
 <br clear="all" />
 
 <p align="center">
-  <b>English</b> · <a href="README-zh-Hans.md">简体中文</a> · <a href="README-hi.md">हिन्दी</a> · <a href="README-ES.md">Español</a> · <a href="README-de.md">Deutsch</a>
+  <b>简体中文</b> · <a href="README-en.md">English</a>
 </p>
 
 <p align="center">
@@ -19,25 +19,19 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**Why Tearoff exists:** [SideNotes](https://www.apptorium.com/sidenotes) nailed the interaction — a notes panel that slides in from the screen edge, always one gesture away. But it's closed-source and paid, with no way to contribute, customize, or verify what it does with your data.
+**Tearoff** 的目标：找到传统纸媒‘随手记录’的感觉。Tearoff 最大的优势是便捷性，只需将鼠标滑到屏幕边缘即可唤出 Tearoff。每一张卡片都对应一个 markdown 文件，单击即可就地编辑，双击则进入编辑器进行深入编辑。
 
-Tearoff is the open-source alternative: **lightweight, Markdown-first**, and yours to inspect, modify, and extend. Your notes are plain `.md` files on disk — open them in any editor, sync with any service, back them up however you want.
+你可以将卡片作为日程表、备忘录、日记本或随笔使用。我对日程表场景进行了优化，在卡片内点击待办(`- [ ]`)即可打勾或取消勾选。
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset=".github/assets/screenshot-light.png" />
-    <img alt="Tearoff Screenshots" src=".github/assets/screenshot-light.png" />
-  </picture>
+  <img alt="Tearoff Card View" src=".github/assets/screenshot-cards.png" width="800" />
 </p>
 
-# Install
+---
 
-```bash
-brew install --cask zcyisiee/tap/tearoff
-```
+## 安装
 
-Or download the latest `.dmg` from [Releases](https://github.com/zcyisiee/Tearoff/releases), install it, and then run this command in Terminal:
+在 [Releases](https://github.com/zcyisiee/Tearoff/releases) 下载最新的 `.dmg`，拖入「应用程序」即可。应用未经签名，首次启动前需要在终端执行：
 
 ```bash
 xattr -cr /Applications/Tearoff.app
@@ -45,108 +39,78 @@ xattr -cr /Applications/Tearoff.app
 
 ---
 
-# Features
+## 为什么做 Tearoff
 
-🪟 **Side Panel**
+在转行搞计算机前，我手边总是堆满了书和纸。有想法了，随手撕一张纸下来就写。这种做法不会干扰我正在做的事，让我觉得很自由。
 
-- 🔲 Borderless floating panel, full-height, always on top
-- 🖥️ Works on every virtual Desktop and alongside fullscreen apps
-- ✨ Smooth slide-in/out or fade animation (configurable) with edge activation — move mouse to screen edge to reveal
-- 🖱️ Click outside, Escape, or auto-hide dismissal
-- 📌 Pin to keep the panel open — survives focus changes, mouse exit, and Space switches (great for copy-pasting back and forth)
-- 🔘 Edge-toggle mode — touch the edge to open and keep the panel open while you copy text back and forth, touch again to close (no ⌘P needed); Auto-hide stays the default
-- 📐 Multi-monitor support with configurable left or right edge — only the outer screen edge triggers, so moving between displays won't pop it by accident
-- ↔️ Adjustable width — drag the inner edge to resize, saved across restarts
-- 🪟 Panel style — toggle between Translucent and Opaque panel backgrounds
-- 🎨 Panel tint — pick from a curated palette (System, Graphite, Slate, Sand, Sage, Rose)
+到了电脑上，想临时记点东西，得打开 APP、新建文件、选路径、起名字。Typora、Obsidian 这些编辑器本身很成熟，但它们太‘正式’了——每次打开都会抢占工作区，迫使我切换到另一个界面。对需要随手记录、随时查看的场景，这种侵入式的交互并不友好。
 
-✍️ **Markdown Editing**
-
-- 👁️ Native TextKit 2 WYSIWYG editor — powered by [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine), no JavaScript or WebKit involved
-- 📝 Full Markdown: headings, bold, italic, code, lists, task lists, blockquotes, links, tables, wiki-links
-- 🖼️ Inline images — paste (`⌘V`) or drag to embed; stored as co-located asset files alongside the note
-- ✅ Checked task items are automatically struck through; uncheck to restore
-- ▫️ Custom task-list checkbox symbols — pick the shape for `- [ ]`/`- [x]` items (Square, Circle, Diamond, Shield, Triangle, Star, Hexagon, Heart); display-only, notes stay standard Markdown
-- 📋 One-click Copy button on fenced code blocks
-- 🔴 Native spell check, grammar check, and autocorrect (macOS system dictionary)
-- ⚡ Slash commands (`/h1`, `/todo`, `/code`, `/quote`, `/table`, `/divider`, and more)
-- ⌨️ Formatting shortcuts: `⌘B` bold, `⌘I` italic, `⌘E` inline code, `⌘K` link, `⇧⌘X` strikethrough
-- 🔗 Click a rendered link to open it in the browser
-- 🔍 Find & Replace (`⌘F`)
-- 🔤 Customizable editor font and size — pick any installed font via the system font panel with live preview
-- 🧮 LaTeX rendering — block (`$$...$$`) and inline (`$...$`) via SwiftMath
-
-🗂️ **Notes & Storage**
-
-- 📄 Plain `.md` files with no injected headers — open in any editor, sync with any service; metadata lives in a hidden `.tearoff/meta.json` sidecar
-- 📁 Folder-based organization with drag-and-drop
-- 🎨 Custom folder colors — tint any folder's icon with a palette color via right-click → Folder Color
-- 📂 Multiple storage locations — switch between separate note folders (e.g. work and personal) from the menu bar (a quick switch that reverts on restart) or Settings; optionally pick one each time the app opens
-- 💾 1-second debounced auto-save
-- 🔍 Search shows all notes sorted by most recently modified when the query is empty — a quick "recent notes" feed
-- 🏷️ Finder-style color tags (Red, Orange, Yellow, Green, Blue, Purple, Gray) with rename-able labels; multi-tag per note
-- 🎯 Tag filter inside search — click tag dots to narrow results, multi-select acts as OR, combines with text search
-- ☑️ Native macOS multi-selection — click / ⇧-click / ⌘-click rows, marquee-drag to box-select, then batch **Move**, **Tag**, or **Trash** from the right-click menu; conflicts in a batch are queued and resolvable
-- 🔄 External file sync — edits from other apps are detected on panel open; prompts when both sides changed
-- 🗑️ Trash with 30-day auto-purge and read-only preview
-- 👁️ Hover-to-peek — hover over a note or folder row to preview its contents in a floating panel alongside the list; note previews render full Markdown with images, folder previews show subfolders and all notes inside
-
-⌨️ **Keyboard & Shortcuts**
-
-- 🌐 Global shortcut: `Ctrl+Shift+Space` toggles from any app (customizable)
-- 🎹 Fully customizable local shortcuts — new note, new folder, search, pin, prev/next note — all rebindable in Settings with conflict detection
-- ⏱️ Configurable activation delay and corner exclusion zones
-- 🔑 Default panel shortcuts: `⌘N` new note, `⇧⌘N` new folder, `⌘F` search, `⌘P` pin/unpin
-- 👁️ `Space` to Quick Look — select a note or folder and press `Space` to preview; `↑↓` to browse, `Space`/`ESC` to dismiss
-- 👆 Two-finger trackpad swipe right on the header to navigate back (configurable toggle and sensitivity)
-- 👆 Two-finger swipe left/right on the editor or `⌘←`/`⌘→` to navigate between notes in the current folder
-
-🔄 **Auto-Update & CI/CD**
-
-- 🔔 In-app update check (GitHub Releases, 24h throttle)
-- 📦 Download with progress bar, SHA256 verification, install & restart
-- ⚙️ GitHub Actions build pipeline (unsigned Release, DMG, SHA256)
-- 🍺 Homebrew Cask installation
-
-🌟 **Quality of Life**
-
-- 🌗 Appearance override: System, Light, or Dark mode
-- 📌 Menu bar resident (no Dock icon)
-- 🚀 Launch at login
-- 📋 Copy as Plain Text, Markdown, or Rich Text — selection-aware in editor with right-click context menu
-- 🎨 SF Symbol icons throughout all context menus
-- 🔀 Smooth directional page transitions
-- 🌍 English + Simplified Chinese + Hindi + Spanish + German (JSON-based, easy to contribute)
+Tearoff 就是想把「撕张纸就能记」的感觉搬到屏幕上。鼠标滑到边缘就能写，点击别处就收起，不打断我手上正在做的任何事。
 
 ---
 
-# Contributing
+## 特点
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture overview, source tree, key patterns, localization guide, and development setup.
-
----
-
-# License
-
-Tearoff is licensed under the [GNU General Public License v3.0](LICENSE).
-
-# Acknowledgments
-
-Tearoff is built on top of these open-source projects:
-
-| Project | License | Description |
-|---------|---------|-------------|
-| [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine) | Apache 2.0 | TextKit 2 / NSTextView WYSIWYG Markdown editor — powers the editing experience. Bundles [HighlighterSwift](https://github.com/smittytone/HighlighterSwift) for code block syntax highlighting and [SwiftMath](https://github.com/mgriebling/SwiftMath) for LaTeX rendering. |
-| [SwiftFormat](https://github.com/nicklockwood/SwiftFormat) | MIT | Code formatting tool used in the build pipeline |
+- **非侵入式**：鼠标滑到屏幕边缘即出，点击别处即走。不打断你手上正在做的事，也不占用 Dock 与桌面空间。
+- **顺手**：从「想记点东西」到「已经写下」，中间不需要新建文件、选择路径、命名这些步骤。
+- **ADHD 友好**：不抢焦点，不弹窗，不要求你离开当前工作区。记完就走，随时回来看。
+- **本地存储**：笔记就是磁盘上的 `.md` 文件，没有专有格式，也没有账号。你可以用任何编辑器打开它，用任何方式同步和备份。
+- **UI 美观**：原生 SwiftUI 界面，配色、动画与手势都经过反复调整，尽量让它看起来像系统自带的一部分。
 
 ---
 
-# Star History
+## 快速使用
 
-<a href="https://star-history.com/#zcyisiee/Tearoff&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
- </picture>
-</a>
+Tearoff 只有两级界面。
+
+**主界面**是卡片列表，每张卡片对应一个 markdown 文件，直接显示内容摘要。
+
+- 单击卡片标题右侧的空白区域，进入**临时编辑**——原地展开输入，适合记一句话。
+- 双击卡片，进入**编辑器**，用于较长的写作。
+- 在卡片区域直接点击待办项即可勾选或取消勾选，不必进入编辑器。这是我对日程表场景的优化。
+
+顶部一行是文件夹标签，右侧依次为搜索、新建文件夹、新建卡片和设置。最右边的**图钉**用来固定面板：默认逻辑是鼠标移开界面 Tearoff 就自动收起，点击图钉后面板会保持展开，方便你从别的窗口来回复制粘贴，再次点击即恢复自动收起。
+
+<p align="center">
+  <img alt="Tearoff Editor" src=".github/assets/screenshot-editor.png" width="800" />
+</p>
+
+---
+
+## TODO
+
+未来的重心是编辑器体验，争取在书写手感上赶上 Typora。具体方向：
+
+- 表格的可视化编辑
+- 图片拖入与预览
+- 更完善的快捷键体系
+- 多窗口 / 多显示器支持
+
+---
+
+## 技术栈
+
+Swift 6.2 + SwiftUI，编辑器基于 TextKit 2，不依赖 WebKit 或 JavaScript。除功能实现之外，相当一部分精力花在了动画曲线、手势响应和过渡效果上——这些细节决定了它是否「顺手」。
+
+架构概览、源码目录树、关键模式与开发环境配置，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+## 致谢
+
+感谢 [EdgeMark](https://github.com/dev-vasu/EdgeMark) 给我带来的灵感，本项目正是在 EdgeMark 的基础上改造而来。也要感谢 [SideNotes](https://www.apptorium.com/sidenotes)，它把边缘唤出的交互做到了极致，可惜是一个闭源且收费的项目。
+
+Tearoff 同时构建于以下开源项目之上：
+
+| 项目 | 许可证 | 说明 |
+| --- | --- | --- |
+| [swift-markdown-engine](https://github.com/nodes-app/swift-markdown-engine) | Apache 2.0 | 基于 TextKit 2 的所见即所得 Markdown 编辑器，支撑整个编辑体验 |
+| [HighlighterSwift](https://github.com/smittytone/HighlighterSwift) | MIT | 代码块语法高亮 |
+| [SwiftMath](https://github.com/mgriebling/SwiftMath) | MIT | LaTeX 公式渲染 |
+| [SwiftFormat](https://github.com/nicklockwood/SwiftFormat) | MIT | 构建流水线中的代码格式化 |
+
+---
+
+## 许可证
+
+本项目基于 [GNU General Public License v3.0](LICENSE) 授权。
