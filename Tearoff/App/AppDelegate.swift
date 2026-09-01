@@ -1,0 +1,491 @@
+import Cocoa
+import OSLog
+import SwiftUI
+import UserNotifications
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Strong single instance set on launch, so SwiftUI views (e.g. GeneralSettingsTab)
+    /// can reach switchRoot without relying on `NSApp.delegate` casts, which can be nil
+    /// inside a SwiftUI `Settings` scene.
+    static var shared: AppDelegate?
+
+    var panelController: SidePanelController?
+    var statusItem: NSStatusItem?
+    private var updateWindowController: UpdateWindowController?
+    private var localeObserver: Any?
+    private var updateTimer: Timer?
+    private var storageSubmenu: NSMenu?
+    private var storageMenuItem: NSMenuItem?
+
+    // MARK: - Updates
+
+    let updateState = UpdateState()
+
+    func applicationDidFinishLaunching(_: Notification) {
+        LegacyDefaults.importIfNeeded()
+        Self.shared = self
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        Log.app.info("[AppDelegate] launched v\(version, privacy: .public) (build \(build, privacy: .public))")
+        AppSettings.shared.applyAppearance()
+        setupMenuBar()
+        panelController = SidePanelController()
+        SidecarMigration.runIfNeeded()
+        try? SidecarStore.shared.load()
+        panelController?.noteStore.loadFromDisk()
+        ShortcutManager.shared.setup(panelController: panelController!)
+
+        // "Choose on launch": if the toggle is on and ≥2 roots are configured, show the
+        // non-blocking storage-root picker as the panel's empty state instead of the
+        // note list. The persistent active root's notes are loaded already; picking a
+        // root in the picker switches to it for the session (temporary override).
+        if StorageSettings.shared.askOnLaunch, StorageSettings.shared.storageRoots.count >= 2 {
+            panelController?.noteStore.awaitingRootChoice = true
+        }
+
+        // Rebuild menu bar when locale changes
+        localeObserver = NotificationCenter.default.addObserver(
+            forName: .localeDidChange,
+            object: nil,
+            queue: .main,
+        ) { [weak self] _ in
+            self?.setupMenuBar()
+        }
+
+        // Auto-check for updates on launch (24h throttle, respects user setting)
+        if AppSettings.shared.autoCheckUpdates {
+            Task {
+                await checkForUpdatesOnLaunch()
+            }
+            scheduleBackgroundUpdateCheck()
+        }
+
+        // Request notification permission for background update alerts
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    func applicationWillTerminate(_: Notification) {
+        Log.app.info("[AppDelegate] terminating")
+        panelController?.noteStore.saveDirtyNotes()
+    }
+
+    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+        panelController?.togglePanel()
+        return true
+    }
+
+    // MARK: - Menu Bar
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        if let button = statusItem?.button {
+            button.image = NSImage(named: "MenuBarIcon")
+            button.image?.isTemplate = true
+        }
+
+        let l10n = L10n.shared
+        let menu = NSMenu()
+
+        menu.addItem(NSMenuItem(
+            title: l10n["menu.toggle"],
+            action: #selector(togglePanel),
+            keyEquivalent: "",
+        ))
+
+        menu.addItem(NSMenuItem.separator())
+
+        let settingsItem = NSMenuItem(
+            title: l10n["menu.settings"],
+            action: #selector(openSettings),
+            keyEquivalent: "",
+        )
+        menu.addItem(settingsItem)
+
+        // Storage Location submenu (temporary switch) — items repopulated in menuWillOpen.
+        let storageItem = NSMenuItem(
+            title: l10n["menu.storageLocation"],
+            action: nil,
+            keyEquivalent: "",
+        )
+        let submenu = NSMenu()
+        storageItem.submenu = submenu
+        storageSubmenu = submenu
+        storageMenuItem = storageItem
+        populateStorageSubmenu()
+        menu.addItem(storageItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        menu.addItem(NSMenuItem(
+            title: l10n["menu.checkUpdates"],
+            action: #selector(checkForUpdates),
+            keyEquivalent: "",
+        ))
+
+        menu.addItem(NSMenuItem.separator())
+
+        menu.addItem(NSMenuItem(
+            title: l10n["menu.quit"],
+            action: #selector(quitApp),
+            keyEquivalent: "q",
+        ))
+
+        menu.delegate = self
+        statusItem?.menu = menu
+    }
+
+    @objc private func togglePanel() {
+        panelController?.togglePanel()
+    }
+
+    /// Rebuild the Storage Location submenu's items from the current roots. Called at
+    /// menu build and on every menuWillOpen so the checkmark + list stay live.
+    private func populateStorageSubmenu() {
+        guard let submenu = storageSubmenu else { return }
+        submenu.removeAllItems()
+        // While the ask-on-launch picker is up, no root has been chosen for the session
+        // yet (sessionRootOverride is nil) — show no checkmark until one is picked.
+        let awaiting = panelController?.noteStore.awaitingRootChoice ?? false
+        let activeID = awaiting ? nil : StorageSettings.shared.activeStorageRoot?.id
+        for root in StorageSettings.shared.storageRoots {
+            let item = NSMenuItem(
+                title: root.displayName,
+                action: #selector(switchToStorageRoot(sender:)),
+                keyEquivalent: "",
+            )
+            item.target = self
+            item.representedObject = root.id as NSString
+            item.state = (root.id == activeID) ? .on : .off
+            submenu.addItem(item)
+        }
+        if !StorageSettings.shared.storageRoots.isEmpty {
+            submenu.addItem(.separator())
+            let hint = NSMenuItem(title: L10n.shared["menu.storageTemporary"], action: nil, keyEquivalent: "")
+            hint.isEnabled = false
+            submenu.addItem(hint)
+        }
+        storageMenuItem?.isHidden = StorageSettings.shared.storageRoots.count < 2
+    }
+
+    @objc private func switchToStorageRoot(sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String,
+              let root = StorageSettings.shared.storageRoots.first(where: { $0.id == id })
+        else { return }
+        switchRoot(to: root, temporary: true)
+    }
+
+    @objc func changeNotesFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = L10n.shared["settings.general.chooseFolderMessage"]
+        panel.prompt = L10n.shared["common.select"]
+
+        // Pre-select current storage directory
+        panel.directoryURL = StorageSettings.shared.resolvedStorageDirectory
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let newURL = panel.url else { return }
+            let oldURL = StorageSettings.shared.resolvedStorageDirectory
+            guard newURL != oldURL else { return }
+
+            // Save dirty notes to old location first
+            self?.panelController?.noteStore.saveDirtyNotes()
+
+            // Move contents from old directory to new directory
+            Log.app.info("[AppDelegate] migrating storage to \(newURL.path, privacy: .public)")
+            Self.migrateStorageContents(from: oldURL, to: newURL)
+
+            // Update the roots model: the migrated-to dir becomes the active root.
+            var roots = StorageSettings.shared.storageRoots
+            let activeID: String
+            if let existing = roots.first(where: { $0.url == newURL }) {
+                activeID = existing.id
+            } else {
+                let root = StorageRoot(id: UUID().uuidString, url: newURL, label: nil)
+                roots.append(root)
+                activeID = root.id
+            }
+            StorageSettings.shared.storageRoots = roots
+            StorageSettings.shared.activeRootID = activeID
+            StorageSettings.shared.sessionRootOverride = nil
+            // Reload notes AND sidecar from the new location (the old changeNotesFolder
+            // path reloaded notes but not the sidecar — a latent bug fixed here).
+            try? SidecarStore.shared.load()
+            self?.panelController?.noteStore.loadFromDisk()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                self?.panelController?.noteStore.rootSwitchToken &+= 1
+            }
+            Log.app.info("[AppDelegate] migration complete")
+        }
+    }
+
+    /// The single path for switching the active storage root. Used by the menu-bar
+    /// temporary switch (commit 4), the ask-on-launch picker (commit 4), and the
+    /// settings "set as default" action (commit 3). Unloads the current root's notes
+    /// and loads the new root's — NOT an app restart.
+    ///
+    /// - Parameters:
+    ///   - root: the storage root to activate.
+    ///   - temporary: if true, sets an in-memory session override that reverts to the
+    ///     persistent `activeRootID` on restart (menu-bar switch). If false, persists
+    ///     `root.id` as the active root (settings "set as default").
+    func switchRoot(to root: StorageRoot, temporary: Bool, dismissPicker: Bool = true) {
+        // Any switch dismisses the ask-on-launch picker if it's showing — unless the
+        // caller is driving the picker's own grow→crossfade handoff (preload mode),
+        // in which case it manages awaitingRootChoice itself.
+        if dismissPicker {
+            panelController?.noteStore.awaitingRootChoice = false
+        }
+        // Don't no-op-switch to the already-active root.
+        if StorageSettings.shared.activeStorageRoot?.id == root.id {
+            return
+        }
+
+        // Flush unsaved edits in the outgoing root before switching.
+        panelController?.noteStore.saveDirtyNotes()
+
+        if temporary {
+            StorageSettings.shared.sessionRootOverride = root
+        } else {
+            StorageSettings.shared.sessionRootOverride = nil
+            StorageSettings.shared.activeRootID = root.id
+        }
+
+        // Reload sidecar (per-root meta.json) and notes for the new root, inside
+        // withAnimation so the row changes (old root's rows out, new root's in)
+        // animate while the panel chrome stays stable.
+        withAnimation(.easeInOut(duration: 0.2)) {
+            try? SidecarStore.shared.load()
+            panelController?.noteStore.loadFromDisk()
+
+            // Reset selection so stale note/folder references from the old root don't
+            // resolve against the new root's relative paths.
+            panelController?.noteStore.selectedNote = nil
+            panelController?.noteStore.selectedFolder = nil
+
+            // Bump the token so list views that key off it also re-trigger.
+            panelController?.noteStore.rootSwitchToken &+= 1
+        }
+
+        NotificationCenter.default.post(name: .storageRootChanged, object: nil)
+        let name = root.displayName
+        let suffix = temporary ? " (temporary)" : ""
+        Log.app.info("[AppDelegate] switched storage root to \(name, privacy: .public)\(suffix, privacy: .public)")
+    }
+
+    /// Opens the in-panel settings page. The panel slides in first so the
+    /// page appears inside it (the standalone settings window is gone).
+    @objc func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        panelController?.showPanel()
+        panelController?.noteStore.showSettings = true
+    }
+
+    @objc func checkForUpdates() {
+        Task {
+            await performUpdateCheck(source: .manual)
+        }
+    }
+
+    @objc func quitApp() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - Auto-Update
+
+    private func checkForUpdatesOnLaunch() async {
+        let lastCheck = UserDefaults.standard.object(forKey: "lastUpdateCheckDate") as? Date
+        if let lastCheck, Date().timeIntervalSince(lastCheck) < 86400 {
+            Log.updates.debug("[AppDelegate] update check skipped (throttled)")
+            return
+        }
+        await performUpdateCheck(source: .launch)
+    }
+
+    /// Schedule a repeating background update check. Uses a random initial delay (1–6 hours)
+    /// so the check time naturally varies day-to-day for users with fixed routines.
+    private func scheduleBackgroundUpdateCheck() {
+        let initialDelay = Double.random(in: 3600 ... 21600) // 1–6 hours
+        Log.updates.debug("[AppDelegate] background update check scheduled in \(Int(initialDelay / 60))m")
+        updateTimer = Timer.scheduledTimer(withTimeInterval: initialDelay, repeats: false) { [weak self] _ in
+            self?.fireBackgroundCheck()
+            // After first fire, repeat every 24 hours
+            self?.updateTimer = Timer.scheduledTimer(withTimeInterval: 86400, repeats: true) { [weak self] _ in
+                self?.fireBackgroundCheck()
+            }
+        }
+    }
+
+    private func fireBackgroundCheck() {
+        guard AppSettings.shared.autoCheckUpdates else { return }
+        Task {
+            await updateState.check(source: .launch)
+            if case let .available(release) = updateState.status {
+                sendUpdateNotification(version: release.version)
+            }
+        }
+    }
+
+    private func sendUpdateNotification(version: String) {
+        let content = UNMutableNotificationContent()
+        content.title = L10n.shared["updates.available.title"]
+        content.body = L10n.shared.t("updates.available.notification", version)
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: "tearoff-update", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    func performUpdateCheck(source: UpdateState.Source) async {
+        await updateState.check(source: source)
+
+        switch source {
+        case .manual:
+            showUpdateResult()
+        case .launch:
+            if case .available = updateState.status {
+                showUpdateWindow()
+            }
+        case .settings:
+            if case .available = updateState.status {
+                showUpdateWindow()
+            }
+        }
+    }
+
+    private func showUpdateResult() {
+        switch updateState.status {
+        case .available:
+            showUpdateWindow()
+
+        case .upToDate:
+            let alert = NSAlert()
+            let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            alert.messageText = L10n.shared["updates.upToDate.title"]
+            alert.informativeText = L10n.shared.t("updates.upToDate.message", currentVersion)
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: L10n.shared["common.ok"])
+            alert.runModal()
+
+        case let .error(error):
+            let alert = NSAlert()
+            alert.messageText = L10n.shared["updates.checkFailed"]
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L10n.shared["common.ok"])
+            alert.runModal()
+
+        default:
+            break
+        }
+    }
+
+    private func showUpdateWindow() {
+        guard case .available = updateState.status else { return }
+        updateWindowController?.window?.close()
+        updateWindowController = UpdateWindowController(updateState: updateState)
+        updateWindowController?.show()
+    }
+
+    // MARK: - Storage Migration
+
+    /// Move all files and folders from the old storage directory into the new one.
+    private static func migrateStorageContents(from oldURL: URL, to newURL: URL) {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: newURL, withIntermediateDirectories: true)
+            let contents = try fm.contentsOfDirectory(
+                at: oldURL,
+                includingPropertiesForKeys: nil,
+                options: [],
+            )
+            for item in contents {
+                let name = item.lastPathComponent
+                // Skip macOS metadata — but keep .trash/ and other app-managed hidden dirs
+                if name == ".DS_Store" || name == ".localized" {
+                    continue
+                }
+                let destination = newURL.appendingPathComponent(name)
+                // Skip if an item with the same name already exists at the destination
+                if fm.fileExists(atPath: destination.path) {
+                    continue
+                }
+                try fm.moveItem(at: item, to: destination)
+            }
+        } catch {
+            let msg = error.localizedDescription
+            Log.storage.error("Failed to migrate storage: \(msg)")
+        }
+    }
+
+    // MARK: - Footer Menu Actions (reached via responder chain)
+
+    @objc func showTrash() {
+        panelController?.noteStore.openTrash()
+    }
+
+    @objc func setSortByName() {
+        panelController?.appSettings.sortBy = .name
+    }
+
+    @objc func setSortByDateModified() {
+        panelController?.appSettings.sortBy = .dateModified
+    }
+
+    @objc func setSortByDateCreated() {
+        panelController?.appSettings.sortBy = .dateCreated
+    }
+
+    @objc func setSortByManual() {
+        panelController?.appSettings.sortBy = .manual
+    }
+
+    @objc func toggleSortDirection() {
+        panelController?.appSettings.sortAscending.toggle()
+    }
+}
+
+// MARK: - Menu Delegate
+
+extension AppDelegate: NSMenuDelegate {
+    /// Pause edge detection while the status menu is open so the global mouseMoved
+    /// monitor doesn't compete with menu hover events on slower hardware.
+    func menuWillOpen(_: NSMenu) {
+        Log.app.debug("[MenuBar] menu opened — pausing edge detector")
+        populateStorageSubmenu()
+        panelController?.edgeDetector.menuWillOpen()
+    }
+
+    func menuDidClose(_: NSMenu) {
+        Log.app.debug("[MenuBar] menu closed — resuming edge detector")
+        panelController?.edgeDetector.menuDidClose()
+    }
+}
+
+// MARK: - Notification Delegate
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    /// Show notification even when app is in foreground (menu bar app is always "foreground").
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        willPresent _: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void,
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    /// User tapped the notification — open the update window.
+    func userNotificationCenter(
+        _: UNUserNotificationCenter,
+        didReceive _: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void,
+    ) {
+        showUpdateWindow()
+        completionHandler()
+    }
+}

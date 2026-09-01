@@ -15,7 +15,7 @@ jobs:
         run: command -v swiftformat || brew install swiftformat
 
       - name: Lint
-        run: swiftformat --lint EdgeMark/
+        run: swiftformat --lint Tearoff/
 
   check-version:
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
           HEAD="${{ github.event.pull_request.head.sha }}"
 
           extract() {
-            git show "$1:EdgeMark.xcodeproj/project.pbxproj" \
+            git show "$1:Tearoff.xcodeproj/project.pbxproj" \
               | grep "$2" | head -1 | sed 's/.*= \(.*\);/\1/' | tr -d ' '
           }
 
@@ -62,5 +62,5 @@ jobs:
 
       - name: Build
         run: |
-          xcodebuild -project EdgeMark.xcodeproj -scheme EdgeMark -configuration Release \
+          xcodebuild -project Tearoff.xcodeproj -scheme Tearoff -configuration Release \
             -derivedDataPath build CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build

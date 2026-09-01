@@ -1,6 +1,6 @@
-<img src=".github/assets/EdgeMark.svg" alt="EdgeMark" width="128" align="left" />
+<img src=".github/assets/Tearoff.svg" alt="Tearoff" width="128" align="left" />
 
-<b><font>EdgeMark</font></b>
+<b><font>Tearoff</font></b>
 
  一款原生 macOS 侧边栏 Markdown 笔记应用。离你永远只有一次边缘滑动之遥。
 
@@ -11,36 +11,36 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/v/release/Ender-Wang/EdgeMark?label=Latest%20Release&color=green" alt="Latest Release" /></a>
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/downloads/Ender-Wang/EdgeMark/total?color=green" alt="Total Downloads" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/v/release/zcyisiee/Tearoff?label=Latest%20Release&color=green" alt="Latest Release" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/downloads/zcyisiee/Tearoff/total?color=green" alt="Total Downloads" /></a>
   <br />
   <img src="https://img.shields.io/badge/Swift-6.2-orange?logo=swift" alt="Swift" />
   <img src="https://img.shields.io/badge/macOS-15.7+-black?logo=apple" alt="macOS" />
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Ender-Wang/EdgeMark?color=blue" alt="License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**EdgeMark 的由来：** [SideNotes](https://www.apptorium.com/sidenotes) 把交互做到了极致——一个从屏幕边缘滑出的笔记面板，永远只需一次手势。但它是闭源且付费的，无法贡献、定制，也无法核实它如何处理你的数据。
+**Tearoff 的由来：** [SideNotes](https://www.apptorium.com/sidenotes) 把交互做到了极致——一个从屏幕边缘滑出的笔记面板，永远只需一次手势。但它是闭源且付费的，无法贡献、定制，也无法核实它如何处理你的数据。
 
-EdgeMark 是开源替代方案：**轻量、Markdown 优先**，供你审查、修改和扩展。你的笔记是磁盘上的纯 `.md` 文件——可在任何编辑器中打开，用任何服务同步，按你喜欢的方式备份。
+Tearoff 是开源替代方案：**轻量、Markdown 优先**，供你审查、修改和扩展。你的笔记是磁盘上的纯 `.md` 文件——可在任何编辑器中打开，用任何服务同步，按你喜欢的方式备份。
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/screenshot-light.png" />
-    <img alt="EdgeMark Screenshots" src=".github/assets/screenshot-light.png" />
+    <img alt="Tearoff Screenshots" src=".github/assets/screenshot-light.png" />
   </picture>
 </p>
 
 # 安装
 
 ```bash
-brew install --cask ender-wang/tap/edgemark
+brew install --cask zcyisiee/tap/tearoff
 ```
 
-或从 [Releases](https://github.com/Ender-Wang/EdgeMark/releases) 下载最新 `.dmg`，安装后在终端运行：
+或从 [Releases](https://github.com/zcyisiee/Tearoff/releases) 下载最新 `.dmg`，安装后在终端运行：
 
 ```bash
-xattr -cr /Applications/EdgeMark.app
+xattr -cr /Applications/Tearoff.app
 ```
 
 ---
@@ -78,7 +78,7 @@ xattr -cr /Applications/EdgeMark.app
 
 🗂️ **笔记与存储**
 
-- 📄 纯 `.md` 文件，无注入头部——可在任何编辑器打开，用任何服务同步；元数据存放在隐藏的 `.edgemark/meta.json` 附属文件中
+- 📄 纯 `.md` 文件，无注入头部——可在任何编辑器打开，用任何服务同步；元数据存放在隐藏的 `.tearoff/meta.json` 附属文件中
 - 📁 基于文件夹的组织，支持拖放
 - 🎨 自定义文件夹颜色——右键 → 文件夹颜色，用配色为任意文件夹图标着色
 - 📂 多个存储位置——可从菜单栏（临时切换，重启后恢复）或设置中切换不同的笔记目录（如工作与个人）；可选在每次打开应用时选择使用哪一个
@@ -128,11 +128,11 @@ xattr -cr /Applications/EdgeMark.app
 
 # 许可证
 
-EdgeMark 基于 [GNU General Public License v3.0](LICENSE) 授权。
+Tearoff 基于 [GNU General Public License v3.0](LICENSE) 授权。
 
 # 致谢
 
-EdgeMark 构建于以下开源项目之上：
+Tearoff 构建于以下开源项目之上：
 
 | 项目 | 许可证 | 说明 |
 |---------|---------|-------------|
@@ -143,10 +143,10 @@ EdgeMark 构建于以下开源项目之上：
 
 # Star 历史
 
-<a href="https://star-history.com/#Ender-Wang/EdgeMark&Date">
+<a href="https://star-history.com/#zcyisiee/Tearoff&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
  </picture>
 </a>

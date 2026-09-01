@@ -1,4 +1,4 @@
-# Contributing to EdgeMark
+# Contributing to Tearoff
 
 **Requirements:** macOS 15.7+, Xcode 16.2+, [Homebrew](https://brew.sh)
 
@@ -22,8 +22,8 @@ graph TD
 
     SUI -->|"observe"| NS["NoteStore (@Observable)"]
     NS -->|"read / write"| FS["FileStorage"]
-    FS -->|".md files"| Disk[("~/Documents/EdgeMark/")]
-    FS -->|"metadata"| SC["SidecarStore<br/>(.edgemark/meta.json)"]
+    FS -->|".md files"| Disk[("~/Documents/Tearoff/")]
+    FS -->|"metadata"| SC["SidecarStore<br/>(.tearoff/meta.json)"]
 
     SUI -->|"observe"| AS["AppSettings (@Observable)"]
     AS -->|"persist"| UD["UserDefaults"]
@@ -45,9 +45,9 @@ graph TD
 ## Source Tree
 
 ```
-EdgeMark/
+Tearoff/
 ├── App/                            # Entry point + global state
-│   ├── EdgeMarkApp.swift           #   @main, menu bar utility (LSUIElement)
+│   ├── TearoffApp.swift           #   @main, menu bar utility (LSUIElement)
 │   ├── AppDelegate.swift           #   Lifecycle, sidecar migration, shortcut setup, switchRoot + menu-bar storage submenu
 │   └── ContentView.swift           #   Navigation shell (folders → notes → editor)
 │
@@ -75,7 +75,7 @@ EdgeMark/
 │   ├── Storage/
 │   │   ├── NoteStore.swift         #   @Observable — note CRUD, trash, folders, tag filter, multi-selection + batch ops, move-conflict queue
 │   │   ├── FileStorage.swift       #   Plain .md file I/O (no YAML); asset dir management
-│   │   ├── SidecarStore.swift      #   In-memory .edgemark/meta.json store + persistence
+│   │   ├── SidecarStore.swift      #   In-memory .tearoff/meta.json store + persistence
 │   │   ├── SidecarMigration.swift  #   One-time migration: strips YAML, restores timestamps
 │   │   ├── Note.swift              #   Note model (id, title, body, timestamps, tags, savedAt)
 │   │   ├── Folder.swift            #   Folder model
@@ -148,14 +148,14 @@ EdgeMark/
 | **@Observable** | `NoteStore`, `AppSettings`, and `UpdateState` use the `@Observable` macro — views read properties directly, no `@Published` needed |
 | **MainActor by default** | `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`. All types are `@MainActor` unless explicitly opted out |
 | **AppKit + SwiftUI hybrid** | `NSHostingView` embeds SwiftUI inside a borderless `NSWindow`. Panel lifecycle managed by `SidePanelController` (AppKit), UI rendered by SwiftUI |
-| **Native editor (swift-markdown-engine)** | `MarkdownEditorView` wraps `NativeTextViewWrapper` (NSViewRepresentable from swift-markdown-engine). Text flows via `@Binding<String>`. Heading stripping, image display-layer conversion (`![](path)` ↔ `![[path]]`), and save debouncing are handled in `MarkdownEditorView`. Both editors build their `MarkdownEditorConfiguration` via `EditorConfigFactory.makeEdgeMarkConfig` (shared insets, highlight/strikethrough extensions, task-checkbox symbols from `AppSettings.taskCheckboxPreset`, and image/syntax/latex services) — so previews match the editor. Changing the checkbox preset rebuilds the view via `.id()` because the engine's `updateNSView` doesn't sync `taskCheckbox` live. |
-| **Sidecar metadata** | Notes are plain `.md` files with no headers. Metadata (UUID, timestamps, tags, trash state) lives in `.edgemark/meta.json` keyed by UUID. `SidecarMigration` strips YAML on first launch and restores original file timestamps. `savedAt` (last EdgeMark write) is the external-change sentinel; `modifiedAt` only advances on real content edits. |
+| **Native editor (swift-markdown-engine)** | `MarkdownEditorView` wraps `NativeTextViewWrapper` (NSViewRepresentable from swift-markdown-engine). Text flows via `@Binding<String>`. Heading stripping, image display-layer conversion (`![](path)` ↔ `![[path]]`), and save debouncing are handled in `MarkdownEditorView`. Both editors build their `MarkdownEditorConfiguration` via `EditorConfigFactory.makeTearoffConfig` (shared insets, highlight/strikethrough extensions, task-checkbox symbols from `AppSettings.taskCheckboxPreset`, and image/syntax/latex services) — so previews match the editor. Changing the checkbox preset rebuilds the view via `.id()` because the engine's `updateNSView` doesn't sync `taskCheckbox` live. |
+| **Sidecar metadata** | Notes are plain `.md` files with no headers. Metadata (UUID, timestamps, tags, trash state) lives in `.tearoff/meta.json` keyed by UUID. `SidecarMigration` strips YAML on first launch and restores original file timestamps. `savedAt` (last Tearoff write) is the external-change sentinel; `modifiedAt` only advances on real content edits. |
 | **Image asset co-location** | Images are stored in a hidden dot-prefix directory next to the note (`.NoteTitle/IMG-uuid.png`). Paths in `.md` files are standard `![](path)` — relative, readable in any external editor. The editor display layer converts them to `![[path]]` for rendering via `EmbeddedImageProvider`. `FileStorage` handles create/rename/move/trash/delete of asset dirs alongside their note. |
 | **Carbon hotkeys** | Global shortcut uses `RegisterEventHotKey` (Carbon API) since `NSEvent.addGlobalMonitorForEvents` can't intercept key events |
 | **Multiple storage locations** | `StorageSettings` owns a list of `StorageRoot`s + an `activeRootID` (persistent default) + an in-memory `sessionRootOverride` (menu-bar temporary switch, reverts on restart). `resolvedStorageDirectory` resolves session-override → active root → legacy → default. All storage (`FileStorage.rootURL`, `SidecarStore`, `.trash/`) reads the active root live, so flipping it re-points the whole layer — but in-memory `NoteStore`/`SidecarStore` must be reloaded (`AppDelegate.switchRoot(to:temporary:dismissPicker:)` is the single path: save dirty → set override/activeID → `SidecarStore.load` → `noteStore.loadFromDisk`, wrapped in `withAnimation` for a row crossfade). Per-root isolation: each root has its own sidecar, trash, and external-edit scope. |
 | **Local shortcut monitor** | `SidePanelController` installs an `NSEvent.addLocalMonitorForEvents` that checks all six configurable local shortcuts at event time. Settings changes take effect immediately without re-registration. |
 | **JSON i18n** | `L10n` loads locale JSON at runtime. Access: `l10n["key"]` or `l10n.t("key", arg1, arg2)` for interpolation |
-| **OSLog diagnostics** | 6 categorized loggers (app, storage, window, shortcuts, navigation, updates). View in Console.app with `subsystem:io.github.ender-wang.EdgeMark` |
+| **OSLog diagnostics** | 6 categorized loggers (app, storage, window, shortcuts, navigation, updates). View in Console.app with `subsystem:io.github.zcyisiee.Tearoff` |
 | **Move conflict queue** | Name-conflict pre-flight uses filesystem-aware helpers (`noteFilenameWouldCollide`, `folderWouldCollide`) that check both in-memory state and the destination on disk. Conflicts are queued, not singletons — `MoveConflictAlerts` reads the queue head and surfaces batch buttons (Keep Both All / Replace All / Skip / Cancel) when more than one is pending. Resolver branches handle orphan files / directories at the destination. |
 | **DMG auto-update** | `UpdateChecker` queries GitHub Releases API. `UpdateInstaller`: mount DMG → verify bundle ID → copy → replace → restart |
 
@@ -163,19 +163,19 @@ EdgeMark/
 
 # Localization
 
-EdgeMark uses a custom JSON-based i18n system. Currently supported:
+Tearoff uses a custom JSON-based i18n system. Currently supported:
 
 | Language | File | Status |
 |----------|------|--------|
-| English | `EdgeMark/Resources/Locales/en.json` | ✅ |
-| Simplified Chinese | `EdgeMark/Resources/Locales/zh-Hans.json` | ✅ |
-| Hindi | `EdgeMark/Resources/Locales/hi.json` | ✅ |
-| Spanish | `EdgeMark/Resources/Locales/es.json` | ✅ |
-| German | `EdgeMark/Resources/Locales/de.json` | ✅ |
+| English | `Tearoff/Resources/Locales/en.json` | ✅ |
+| Simplified Chinese | `Tearoff/Resources/Locales/zh-Hans.json` | ✅ |
+| Hindi | `Tearoff/Resources/Locales/hi.json` | ✅ |
+| Spanish | `Tearoff/Resources/Locales/es.json` | ✅ |
+| German | `Tearoff/Resources/Locales/de.json` | ✅ |
 
 ## Contributing a Translation
 
-1. Copy `EdgeMark/Resources/Locales/en.json`
+1. Copy `Tearoff/Resources/Locales/en.json`
 2. Rename to your [BCP-47 language code](https://en.wikipedia.org/wiki/IETF_language_tag) (e.g. `ja.json`, `ko.json`, `fr.json`, `de.json`, `pt-BR.json`)
 3. Translate the values — keep the JSON keys unchanged
 4. (Optional but appreciated) Add a translated `README-<code>.md` (e.g. `README-ja.md`) modeled on `README.md`, and add your language to the switcher row at the top of every `README*.md` (`English · 简体中文 · हिन्दी · Español · Deutsch · …`), bolding the current language in each file.
@@ -195,5 +195,5 @@ No code, project, or build-phase changes are needed. The Xcode project uses Xcod
 # Submitting a Pull Request
 
 - Target the `main` branch.
-- Run `swiftformat EdgeMark/` before pushing — CI fails on lint errors.
-- **Do not modify** `MARKETING_VERSION` or `CURRENT_PROJECT_VERSION` in `EdgeMark.xcodeproj/project.pbxproj`. Releases are cut by the maintainer from `main`/`develop`; PRs that bump these values will fail the `check-version` CI step.
+- Run `swiftformat Tearoff/` before pushing — CI fails on lint errors.
+- **Do not modify** `MARKETING_VERSION` or `CURRENT_PROJECT_VERSION` in `Tearoff.xcodeproj/project.pbxproj`. Releases are cut by the maintainer from `main`/`develop`; PRs that bump these values will fail the `check-version` CI step.

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Tearoff">
+  <defs>
+    <linearGradient id="th-bg" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0%" stop-color="#3B2F24"/>
+      <stop offset="100%" stop-color="#15110D"/>
+    </linearGradient>
+    <linearGradient id="th-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="th-paper" x1="0.1" y1="0" x2="0.85" y2="1">
+      <stop offset="0%" stop-color="#FFFDF8"/>
+      <stop offset="100%" stop-color="#EFE2CD"/>
+    </linearGradient>
+    <linearGradient id="th-curl" x1="0" y1="0" x2="0.2" y2="0">
+      <stop offset="0%" stop-color="#4A3A28" stop-opacity="0.17"/>
+      <stop offset="100%" stop-color="#4A3A28" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="th-stub" x1="0" y1="0" x2="1" y2="0.25">
+      <stop offset="0%" stop-color="#E3D2B4"/>
+      <stop offset="100%" stop-color="#AB9270"/>
+    </linearGradient>
+    <filter id="th-lift" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="10" dy="26" stdDeviation="22" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="th-lift-soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="230" fill="url(#th-bg)"/>
+  <rect width="1024" height="1024" rx="230" fill="url(#th-sheen)"/>
+
+  <!-- the stub still bound in the pad, torn along its right edge -->
+  <g filter="url(#th-lift-soft)">
+    <path fill="url(#th-stub)" d="M322 200 L302 242 L326 286 L308 330 L332 372 L310 418
+      L328 462 L300 508 L324 552 L306 596 L330 640 L309 686 L327 730 L303 776 L321 824
+      L212 824 Q168 824 168 780 L168 244 Q168 200 212 200 Z"/>
+    <g fill="#15110D" opacity="0.42">
+      <circle cx="238" cy="336" r="14"/>
+      <circle cx="238" cy="424" r="14"/>
+      <circle cx="238" cy="512" r="14"/>
+      <circle cx="238" cy="600" r="14"/>
+      <circle cx="238" cy="688" r="14"/>
+    </g>
+  </g>
+
+  <!-- the page just torn off, swinging away to the right -->
+  <g transform="translate(-16 0) rotate(3.5 620 512)" filter="url(#th-lift)">
+    <path fill="url(#th-paper)" d="M394 200 L812 200 Q856 200 856 244 L856 780 Q856 824 812 824
+      L393 824 L375 776 L399 730 L381 686 L402 640 L378 596 L396 552 L372 508
+      L400 462 L382 418 L404 372 L380 330 L398 286 L374 242 Z"/>
+    <path fill="url(#th-curl)" d="M394 200 L812 200 Q856 200 856 244 L856 780 Q856 824 812 824
+      L393 824 L375 776 L399 730 L381 686 L402 640 L378 596 L396 552 L372 508
+      L400 462 L382 418 L404 372 L380 330 L398 286 L374 242 Z"/>
+    <g fill="none" stroke="#463829" stroke-linecap="round" stroke-width="36">
+      <path d="M462 420h330"/>
+      <path d="M462 512h258"/>
+    </g>
+    <path d="M462 604h142" fill="none" stroke="#E8A13B" stroke-linecap="round" stroke-width="36"/>
+  </g>
+</svg>

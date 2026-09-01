@@ -1,6 +1,6 @@
-<img src=".github/assets/EdgeMark.svg" alt="EdgeMark" width="128" align="left" />
+<img src=".github/assets/Tearoff.svg" alt="Tearoff" width="128" align="left" />
 
-<b><font>EdgeMark</font></b>
+<b><font>Tearoff</font></b>
 
  एक नेटिव macOS साइड-पैनल Markdown नोट्स ऐप। हमेशा एक किनारे की दूरी पर।
 
@@ -11,36 +11,36 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/v/release/Ender-Wang/EdgeMark?label=Latest%20Release&color=green" alt="Latest Release" /></a>
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/downloads/Ender-Wang/EdgeMark/total?color=green" alt="Total Downloads" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/v/release/zcyisiee/Tearoff?label=Latest%20Release&color=green" alt="Latest Release" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/downloads/zcyisiee/Tearoff/total?color=green" alt="Total Downloads" /></a>
   <br />
   <img src="https://img.shields.io/badge/Swift-6.2-orange?logo=swift" alt="Swift" />
   <img src="https://img.shields.io/badge/macOS-15.7+-black?logo=apple" alt="macOS" />
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Ender-Wang/EdgeMark?color=blue" alt="License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**EdgeMark क्यों बनाया गया:** [SideNotes](https://www.apptorium.com/sidenotes) ने इंटरैक्शन को सही अंदाज़ में पकड़ा — एक नोट्स पैनल जो स्क्रीन के किनारे से स्लाइड होकर आता है, हमेशा एक जेस्चर दूर। लेकिन यह क्लोज्ड-सोर्स और पेड है — योगदान, कस्टमाइज़ या जाँच का कोई तरीका नहीं कि यह आपके डेटा के साथ क्या करता है।
+**Tearoff क्यों बनाया गया:** [SideNotes](https://www.apptorium.com/sidenotes) ने इंटरैक्शन को सही अंदाज़ में पकड़ा — एक नोट्स पैनल जो स्क्रीन के किनारे से स्लाइड होकर आता है, हमेशा एक जेस्चर दूर। लेकिन यह क्लोज्ड-सोर्स और पेड है — योगदान, कस्टमाइज़ या जाँच का कोई तरीका नहीं कि यह आपके डेटा के साथ क्या करता है।
 
-EdgeMark ओपन-सोर्स विकल्प है: **हल्का, Markdown-फर्स्ट**, और आपके जाँचने, संशोधित करने और बढ़ाने के लिए। आपके नोट्स डिस्क पर सादे `.md` फ़ाइलें हैं — किसी भी एडिटर में खोलें, किसी भी सेवा से सिंक करें, जैसे चाहें बैकअप लें।
+Tearoff ओपन-सोर्स विकल्प है: **हल्का, Markdown-फर्स्ट**, और आपके जाँचने, संशोधित करने और बढ़ाने के लिए। आपके नोट्स डिस्क पर सादे `.md` फ़ाइलें हैं — किसी भी एडिटर में खोलें, किसी भी सेवा से सिंक करें, जैसे चाहें बैकअप लें।
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/screenshot-light.png" />
-    <img alt="EdgeMark Screenshots" src=".github/assets/screenshot-light.png" />
+    <img alt="Tearoff Screenshots" src=".github/assets/screenshot-light.png" />
   </picture>
 </p>
 
 # इंस्टॉल
 
 ```bash
-brew install --cask ender-wang/tap/edgemark
+brew install --cask zcyisiee/tap/tearoff
 ```
 
-या [Releases](https://github.com/Ender-Wang/EdgeMark/releases) से नवीनतम `.dmg` डाउनलोड करें, इंस्टॉल करें, फिर टर्मिनल में यह रन करें:
+या [Releases](https://github.com/zcyisiee/Tearoff/releases) से नवीनतम `.dmg` डाउनलोड करें, इंस्टॉल करें, फिर टर्मिनल में यह रन करें:
 
 ```bash
-xattr -cr /Applications/EdgeMark.app
+xattr -cr /Applications/Tearoff.app
 ```
 
 ---
@@ -78,7 +78,7 @@ xattr -cr /Applications/EdgeMark.app
 
 🗂️ **नोट्स और स्टोरेज**
 
-- 📄 सादे `.md` फ़ाइलें, कोई इंजेक्टेड हेडर नहीं — किसी भी एडिटर में खोलें, किसी भी सेवा से सिंक करें; मेटाडेटा हिडन `.edgemark/meta.json` साइडकार में रहता है
+- 📄 सादे `.md` फ़ाइलें, कोई इंजेक्टेड हेडर नहीं — किसी भी एडिटर में खोलें, किसी भी सेवा से सिंक करें; मेटाडेटा हिडन `.tearoff/meta.json` साइडकार में रहता है
 - 📁 फ़ोल्डर-आधारित ऑर्गनाइज़ेशन, ड्रैग-और-ड्रॉप के साथ
 - 🎨 कस्टम फ़ोल्डर रंग — राइट-क्लिक → फ़ोल्डर रंग से किसी भी फ़ोल्डर के आइकन को पैलेट रंग में टिंट करें
 - 📂 कई स्टोरेज स्थान — अलग-अलग नोट फ़ोल्डर (जैसे काम और निजी) के बीच मेन्यू बार (रीस्टार्ट पर वापस होने वाला त्वरित स्विच) या सेटिंग्स से स्विच करें; हर बार ऐप खुलने पर एक चुनने का विकल्प भी
@@ -128,11 +128,11 @@ xattr -cr /Applications/EdgeMark.app
 
 # लाइसेंस
 
-EdgeMark [GNU General Public License v3.0](LICENSE) के तहत लाइसेंस्ड है।
+Tearoff [GNU General Public License v3.0](LICENSE) के तहत लाइसेंस्ड है।
 
 # अभिस्वीकृतियाँ
 
-EdgeMark इन ओपन-सोर्स प्रोजेक्ट्स के ऊपर बना है:
+Tearoff इन ओपन-सोर्स प्रोजेक्ट्स के ऊपर बना है:
 
 | प्रोजेक्ट | लाइसेंस | विवरण |
 |---------|---------|-------------|
@@ -143,10 +143,10 @@ EdgeMark इन ओपन-सोर्स प्रोजेक्ट्स क�
 
 # Star हिस्ट्री
 
-<a href="https://star-history.com/#Ender-Wang/EdgeMark&Date">
+<a href="https://star-history.com/#zcyisiee/Tearoff&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
  </picture>
 </a>

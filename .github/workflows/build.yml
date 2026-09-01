@@ -6,7 +6,7 @@ on:
       - main
       - develop
     paths:
-      - "EdgeMark.xcodeproj/project.pbxproj"
+      - "Tearoff.xcodeproj/project.pbxproj"
   workflow_dispatch:
 
 jobs:
@@ -27,8 +27,8 @@ jobs:
       - name: Check version
         id: check
         run: |
-          VERSION=$(grep 'MARKETING_VERSION' EdgeMark.xcodeproj/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/' | tr -d ' ')
-          BUILD=$(grep 'CURRENT_PROJECT_VERSION' EdgeMark.xcodeproj/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/' | tr -d ' ')
+          VERSION=$(grep 'MARKETING_VERSION' Tearoff.xcodeproj/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/' | tr -d ' ')
+          BUILD=$(grep 'CURRENT_PROJECT_VERSION' Tearoff.xcodeproj/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/' | tr -d ' ')
           COMMIT_MSG=$(git log -1 --pretty=%B | tail -n +2 | tail -n +2)
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -83,11 +83,11 @@ jobs:
       - name: Build (arm64 + x86_64)
         run: |
           for ARCH in arm64 x86_64; do
-            xcodebuild -project EdgeMark.xcodeproj -scheme EdgeMark -configuration Release \
+            xcodebuild -project Tearoff.xcodeproj -scheme Tearoff -configuration Release \
               -derivedDataPath "build_${ARCH}" \
               ARCHS="${ARCH}" ONLY_ACTIVE_ARCH=NO \
               CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
-            strip "build_${ARCH}/Build/Products/Release/EdgeMark.app/Contents/MacOS/EdgeMark" || true
+            strip "build_${ARCH}/Build/Products/Release/Tearoff.app/Contents/MacOS/Tearoff" || true
           done
 
       - name: Create DMGs
@@ -95,10 +95,10 @@ jobs:
           TAG="${{ needs.check-version.outputs.tag }}"
           for ARCH in arm64 x86_64; do
             mkdir -p "dmg_${ARCH}"
-            cp -R "build_${ARCH}/Build/Products/Release/EdgeMark.app" "dmg_${ARCH}/"
+            cp -R "build_${ARCH}/Build/Products/Release/Tearoff.app" "dmg_${ARCH}/"
             ln -s /Applications "dmg_${ARCH}/Applications"
-            DMG="EdgeMark-${TAG}-${ARCH}.dmg"
-            hdiutil create -volname "EdgeMark" -srcfolder "dmg_${ARCH}" -ov -format UDZO "$DMG"
+            DMG="Tearoff-${TAG}-${ARCH}.dmg"
+            hdiutil create -volname "Tearoff" -srcfolder "dmg_${ARCH}" -ov -format UDZO "$DMG"
             shasum -a 256 "$DMG" > "${DMG}.sha256"
           done
 
@@ -110,10 +110,10 @@ jobs:
           body: ${{ needs.check-version.outputs.commit_message }}
           prerelease: ${{ needs.check-version.outputs.prerelease == 'true' }}
           files: |
-            EdgeMark-${{ needs.check-version.outputs.tag }}-arm64.dmg
-            EdgeMark-${{ needs.check-version.outputs.tag }}-arm64.dmg.sha256
-            EdgeMark-${{ needs.check-version.outputs.tag }}-x86_64.dmg
-            EdgeMark-${{ needs.check-version.outputs.tag }}-x86_64.dmg.sha256
+            Tearoff-${{ needs.check-version.outputs.tag }}-arm64.dmg
+            Tearoff-${{ needs.check-version.outputs.tag }}-arm64.dmg.sha256
+            Tearoff-${{ needs.check-version.outputs.tag }}-x86_64.dmg
+            Tearoff-${{ needs.check-version.outputs.tag }}-x86_64.dmg.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -127,10 +127,10 @@ jobs:
         run: |
           TAG="${{ needs.check-version.outputs.tag }}"
           for ARCH in arm64 x86_64; do
-            gh release download "$TAG" --pattern "EdgeMark-${TAG}-${ARCH}.dmg.sha256" --repo "${{ github.repository }}"
+            gh release download "$TAG" --pattern "Tearoff-${TAG}-${ARCH}.dmg.sha256" --repo "${{ github.repository }}"
           done
-          echo "arm64=$(awk '{print $1}' EdgeMark-${TAG}-arm64.dmg.sha256)" >> $GITHUB_OUTPUT
-          echo "x86_64=$(awk '{print $1}' EdgeMark-${TAG}-x86_64.dmg.sha256)" >> $GITHUB_OUTPUT
+          echo "arm64=$(awk '{print $1}' Tearoff-${TAG}-arm64.dmg.sha256)" >> $GITHUB_OUTPUT
+          echo "x86_64=$(awk '{print $1}' Tearoff-${TAG}-x86_64.dmg.sha256)" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -140,40 +140,40 @@ jobs:
           SHA_ARM64="${{ steps.sha.outputs.arm64 }}"
           SHA_X86_64="${{ steps.sha.outputs.x86_64 }}"
 
-          git clone https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/Ender-Wang/homebrew-tap.git tap
+          git clone https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/zcyisiee/homebrew-tap.git tap
           cd tap
 
           mkdir -p Casks
-          cat > Casks/edgemark.rb <<CASK
-          cask "edgemark" do
+          cat > Casks/tearoff.rb <<CASK
+          cask "tearoff" do
             version "$VERSION"
 
             on_arm do
               sha256 "$SHA_ARM64"
-              url "https://github.com/Ender-Wang/EdgeMark/releases/download/v#{version}/EdgeMark-v#{version}-arm64.dmg"
+              url "https://github.com/zcyisiee/Tearoff/releases/download/v#{version}/Tearoff-v#{version}-arm64.dmg"
             end
 
             on_intel do
               sha256 "$SHA_X86_64"
-              url "https://github.com/Ender-Wang/EdgeMark/releases/download/v#{version}/EdgeMark-v#{version}-x86_64.dmg"
+              url "https://github.com/zcyisiee/Tearoff/releases/download/v#{version}/Tearoff-v#{version}-x86_64.dmg"
             end
 
-            name "EdgeMark"
+            name "Tearoff"
             desc "Native macOS side-panel Markdown notes app"
-            homepage "https://github.com/Ender-Wang/EdgeMark"
+            homepage "https://github.com/zcyisiee/Tearoff"
 
             depends_on macos: :sequoia
 
-            app "EdgeMark.app"
+            app "Tearoff.app"
 
             postflight do
-              system_command "/usr/bin/xattr", args: ["-cr", "#{appdir}/EdgeMark.app"]
+              system_command "/usr/bin/xattr", args: ["-cr", "#{appdir}/Tearoff.app"]
             end
           end
           CASK
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/edgemark.rb
-          git commit -m "Update EdgeMark to v$VERSION"
+          git add Casks/tearoff.rb
+          git commit -m "Update Tearoff to v$VERSION"
           git push

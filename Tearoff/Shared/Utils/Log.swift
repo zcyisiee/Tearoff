@@ -1,0 +1,11 @@
+import OSLog
+
+nonisolated enum Log {
+    static let app = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "app")
+    static let storage = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "storage")
+    static let window = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "window")
+    static let shortcuts = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "shortcuts")
+    static let navigation = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "navigation")
+    static let updates = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "updates")
+    static let peek = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "peek")
+}

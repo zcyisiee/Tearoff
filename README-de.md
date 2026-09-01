@@ -1,6 +1,6 @@
-<img src=".github/assets/EdgeMark.svg" alt="EdgeMark" width="128" align="left" />
+<img src=".github/assets/Tearoff.svg" alt="Tearoff" width="128" align="left" />
 
-<b><font>EdgeMark</font></b>
+<b><font>Tearoff</font></b>
 
  Eine native macOS-Seitenleisten-App für Markdown-Notizen. Immer eine Kante entfernt.
 
@@ -11,36 +11,36 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/v/release/Ender-Wang/EdgeMark?label=Latest%20Release&color=green" alt="Latest Release" /></a>
-  <a href="https://github.com/Ender-Wang/EdgeMark/releases"><img src="https://img.shields.io/github/downloads/Ender-Wang/EdgeMark/total?color=green" alt="Total Downloads" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/v/release/zcyisiee/Tearoff?label=Latest%20Release&color=green" alt="Latest Release" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/downloads/zcyisiee/Tearoff/total?color=green" alt="Total Downloads" /></a>
   <br />
   <img src="https://img.shields.io/badge/Swift-6.2-orange?logo=swift" alt="Swift" />
   <img src="https://img.shields.io/badge/macOS-15.7+-black?logo=apple" alt="macOS" />
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Ender-Wang/EdgeMark?color=blue" alt="License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**Warum es EdgeMark gibt:** [SideNotes](https://www.apptorium.com/sidenotes) hat die Interaktion perfekt hingekriegt — ein Notizen-Panel, das von der Bildschirmkante hereinfliegt, immer eine Geste entfernt. Aber es ist Closed-Source und kostenpflichtig — ohne Möglichkeit beizutragen, anzupassen oder zu prüfen, was es mit deinen Daten macht.
+**Warum es Tearoff gibt:** [SideNotes](https://www.apptorium.com/sidenotes) hat die Interaktion perfekt hingekriegt — ein Notizen-Panel, das von der Bildschirmkante hereinfliegt, immer eine Geste entfernt. Aber es ist Closed-Source und kostenpflichtig — ohne Möglichkeit beizutragen, anzupassen oder zu prüfen, was es mit deinen Daten macht.
 
-EdgeMark ist die Open-Source-Alternative: **leichtgewichtig, Markdown-first**, und zum Inspectieren, Modifizieren und Erweitern deins. Deine Notizen sind einfache `.md`-Dateien auf der Platte — öffne sie in jedem Editor, synchronisiere sie mit jedem Dienst, sichere sie, wie du willst.
+Tearoff ist die Open-Source-Alternative: **leichtgewichtig, Markdown-first**, und zum Inspectieren, Modifizieren und Erweitern deins. Deine Notizen sind einfache `.md`-Dateien auf der Platte — öffne sie in jedem Editor, synchronisiere sie mit jedem Dienst, sichere sie, wie du willst.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screenshot-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/screenshot-light.png" />
-    <img alt="EdgeMark Screenshots" src=".github/assets/screenshot-light.png" />
+    <img alt="Tearoff Screenshots" src=".github/assets/screenshot-light.png" />
   </picture>
 </p>
 
 # Installation
 
 ```bash
-brew install --cask ender-wang/tap/edgemark
+brew install --cask zcyisiee/tap/tearoff
 ```
 
-Oder lade das neueste `.dmg` von [Releases](https://github.com/Ender-Wang/EdgeMark/releases) herunter, installiere es und führe danach diesen Befehl im Terminal aus:
+Oder lade das neueste `.dmg` von [Releases](https://github.com/zcyisiee/Tearoff/releases) herunter, installiere es und führe danach diesen Befehl im Terminal aus:
 
 ```bash
-xattr -cr /Applications/EdgeMark.app
+xattr -cr /Applications/Tearoff.app
 ```
 
 ---
@@ -78,7 +78,7 @@ xattr -cr /Applications/EdgeMark.app
 
 🗂️ **Notizen & Speicher**
 
-- 📄 Einfache `.md`-Dateien ohne eingefügte Header — in jedem Editor öffnen, mit jedem Dienst synchronisieren; Metadaten leben in einer versteckten `.edgemark/meta.json`-Sidecar-Datei
+- 📄 Einfache `.md`-Dateien ohne eingefügte Header — in jedem Editor öffnen, mit jedem Dienst synchronisieren; Metadaten leben in einer versteckten `.tearoff/meta.json`-Sidecar-Datei
 - 📁 Ordnerbasierte Organisation mit Drag-and-Drop
 - 🎨 Eigene Ordnerfarben — jedes Ordner-Icon über Rechtsklick → Ordnerfarbe mit einer Palettenfarbe tönen
 - 📂 Mehrere Speicherorte — wechsle zwischen separaten Notizordnern (z. B. Arbeit und Privat) über die Menüleiste (ein schneller Wechsel, der beim Neustart zurückgesetzt wird) oder die Einstellungen; optional bei jedem App-Start einen wählen
@@ -128,11 +128,11 @@ Architektur-Übersicht, Quell-Baum, wichtige Patterns, Lokalisierungs-Leitfaden 
 
 # Lizenz
 
-EdgeMark ist unter der [GNU General Public License v3.0](LICENSE) lizenziert.
+Tearoff ist unter der [GNU General Public License v3.0](LICENSE) lizenziert.
 
 # Danksagung
 
-EdgeMark baut auf diesen Open-Source-Projekten auf:
+Tearoff baut auf diesen Open-Source-Projekten auf:
 
 | Projekt | Lizenz | Beschreibung |
 |---------|---------|-------------|
@@ -143,10 +143,10 @@ EdgeMark baut auf diesen Open-Source-Projekten auf:
 
 # Star-Historie
 
-<a href="https://star-history.com/#Ender-Wang/EdgeMark&Date">
+<a href="https://star-history.com/#zcyisiee/Tearoff&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Ender-Wang/EdgeMark&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=zcyisiee/Tearoff&type=Date" />
  </picture>
 </a>
