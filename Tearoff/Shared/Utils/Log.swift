@@ -8,4 +8,5 @@ nonisolated enum Log {
     static let navigation = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "navigation")
     static let updates = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "updates")
     static let peek = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "peek")
+    static let finder = Logger(subsystem: "io.github.zcyisiee.Tearoff", category: "finder")
 }
