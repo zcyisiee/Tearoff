@@ -328,10 +328,9 @@ struct NoteBoardView: View {
             }
             .onExitCommand { dismissSearch() }
         } else {
-            HStack(spacing: DesignToken.Space.sm) {
+            HStack(alignment: .top, spacing: DesignToken.Space.sm) {
                 tabBar
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    .clipped()
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
                 HStack(spacing: DesignToken.Space.sm) {
                     HeaderIconButton(systemName: "magnifyingglass", help: l10n["common.search"]) {
                         isSearching = true
@@ -362,78 +361,66 @@ struct NoteBoardView: View {
                 }
                 .layoutPriority(1)
             }
+            .animation(.easeInOut(duration: 0.22), value: topLevelFolders.count)
+            .animation(.easeInOut(duration: 0.22), value: folderRename.isCreating)
         }
     }
 
-    /// Folder tab strip + trash. Top-level folders only — nested folders get
-    /// their own chip row inside the board, and rendering every path here
-    /// wasted tab width. Current tab is accent-tinted.
+    /// Folder tabs. Top-level only — nested folders have a chip row on the
+    /// board. Tabs wrap onto new lines as they fill the pill; the header grows
+    /// instead of hiding extras behind a horizontal scroll.
     private var tabBar: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DesignToken.Space.xs) {
-                    tabButton(
-                        title: l10n["home.title"],
-                        icon: "tray.full",
-                        isActive: noteStore.selectedFolder == nil,
-                    ) {
-                        noteStore.navigateToHome()
-                    }
-
-                    ForEach(topLevelFolders) { folder in
-                        if folderRename.renamingFolderName == folder.name {
-                            let isActive = noteStore.selectedFolder?.name == folder.name
-                            tabFolderEditor(
-                                iconColor: isActive
-                                    ? DesignToken.onAccent
-                                    : (folder.color?.color ?? DesignToken.muted),
-                                fill: isActive
-                                    ? (folder.color?.color ?? DesignToken.accent)
-                                    : DesignToken.surfaceInset,
-                                labelColor: isActive ? DesignToken.onAccent : DesignToken.bodyText,
-                            )
-                        } else {
-                            tabButton(
-                                title: (folder.name as NSString).lastPathComponent,
-                                icon: "folder.fill",
-                                isActive: noteStore.selectedFolder?.name == folder.name,
-                                iconColor: folder.color?.color,
-                            ) {
-                                noteStore.navigateToFolder(folder)
-                            }
-                            .nsContextMenu {
-                                NoteListMenus.folderMenu(
-                                    folder: folder,
-                                    noteStore: noteStore,
-                                    l10n: l10n,
-                                    onRename: { startRenamingFolder(folder.name) },
-                                    onDelete: { requestDeleteFolder(folder) },
-                                )
-                            }
-                        }
-                    }
-
-                    // Header strip hosts the editor on home, and in sections
-                    // layout (no chip row). Nested creates in tabs live in the
-                    // chip row instead.
-                    if showsHeaderCreateEditor {
-                        tabFolderEditor(
-                            iconColor: DesignToken.accent,
-                            fill: DesignToken.surfaceInset,
-                            labelColor: DesignToken.bodyText,
-                        )
-                        .id(Self.folderCreateEditorID)
-                    }
-                }
-                .padding(.vertical, 1)
+        FlowLayout(spacing: DesignToken.Space.xs, lineSpacing: 6, minRowHeight: 28) {
+            tabButton(
+                title: l10n["home.title"],
+                icon: "tray.full",
+                isActive: noteStore.selectedFolder == nil,
+            ) {
+                noteStore.navigateToHome()
             }
-            .onChange(of: folderRename.isCreating) { _, isCreating in
-                guard isCreating, showsHeaderCreateEditor else { return }
-                // The new field sits at the strip's trailing edge — pull it
-                // into view so the user actually sees it.
-                DispatchQueue.main.async {
-                    proxy.scrollTo(Self.folderCreateEditorID, anchor: .trailing)
+
+            ForEach(topLevelFolders) { folder in
+                if folderRename.renamingFolderName == folder.name {
+                    let isActive = noteStore.selectedFolder?.name == folder.name
+                    tabFolderEditor(
+                        iconColor: isActive
+                            ? DesignToken.onAccent
+                            : (folder.color?.color ?? DesignToken.muted),
+                        fill: isActive
+                            ? (folder.color?.color ?? DesignToken.accent)
+                            : DesignToken.surfaceInset,
+                        labelColor: isActive ? DesignToken.onAccent : DesignToken.bodyText,
+                    )
+                } else {
+                    tabButton(
+                        title: (folder.name as NSString).lastPathComponent,
+                        icon: "folder.fill",
+                        isActive: noteStore.selectedFolder?.name == folder.name,
+                        iconColor: folder.color?.color,
+                    ) {
+                        noteStore.navigateToFolder(folder)
+                    }
+                    .nsContextMenu {
+                        NoteListMenus.folderMenu(
+                            folder: folder,
+                            noteStore: noteStore,
+                            l10n: l10n,
+                            onRename: { startRenamingFolder(folder.name) },
+                            onDelete: { requestDeleteFolder(folder) },
+                        )
+                    }
                 }
+            }
+
+            // Header strip hosts the editor on home, and in sections
+            // layout (no chip row). Nested creates in tabs live in the
+            // chip row instead.
+            if showsHeaderCreateEditor {
+                tabFolderEditor(
+                    iconColor: DesignToken.accent,
+                    fill: DesignToken.surfaceInset,
+                    labelColor: DesignToken.bodyText,
+                )
             }
         }
     }
@@ -456,6 +443,7 @@ struct NoteBoardView: View {
                 Text(title)
                     .font(DesignToken.Typography.callout)
                     .lineLimit(1)
+                    .truncationMode(.tail)
                     .foregroundStyle(labelColor)
             }
             .padding(.horizontal, DesignToken.Space.sm + 2)
@@ -592,69 +580,62 @@ struct NoteBoardView: View {
         }
     }
 
-    /// Subfolder chip strip inside a folder — also hosts the inline editor
-    /// for renaming a child folder and creating a child folder here.
+    /// Subfolder chips inside a folder — wrap with the board width instead of
+    /// scrolling sideways. Also hosts the nested create/rename editor.
     private var childFolderChipRow: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DesignToken.Space.xs) {
-                    ForEach(childFolders) { folder in
-                        if folderRename.renamingFolderName == folder.name {
-                            tabFolderEditor(
-                                iconColor: folder.color?.color ?? DesignToken.accent,
-                                fill: DesignToken.surfaceInset,
-                                labelColor: DesignToken.bodyText,
-                            )
-                        } else {
-                            Button {
-                                noteStore.navigateToSubfolder(folder)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "folder.fill")
-                                        .font(.system(size: 9, weight: .medium))
-                                        .foregroundStyle(folder.color?.color ?? DesignToken.accent)
-                                    Text(folder.displayName)
-                                        .font(DesignToken.Typography.caption)
-                                        .foregroundStyle(DesignToken.bodyText)
-                                    Text("\(folder.noteCount)")
-                                        .font(DesignToken.Typography.caption)
-                                        .foregroundStyle(DesignToken.mutedSoft)
-                                }
-                                .padding(.horizontal, DesignToken.Space.sm)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(DesignToken.surfaceInset))
-                                .contentShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .nsContextMenu {
-                                NoteListMenus.folderMenu(
-                                    folder: folder,
-                                    noteStore: noteStore,
-                                    l10n: l10n,
-                                    onRename: { startRenamingFolder(folder.name) },
-                                    onDelete: { requestDeleteFolder(folder) },
-                                )
-                            }
+        FlowLayout(spacing: DesignToken.Space.xs, lineSpacing: 6) {
+            ForEach(childFolders) { folder in
+                if folderRename.renamingFolderName == folder.name {
+                    tabFolderEditor(
+                        iconColor: folder.color?.color ?? DesignToken.accent,
+                        fill: DesignToken.surfaceInset,
+                        labelColor: DesignToken.bodyText,
+                    )
+                } else {
+                    Button {
+                        noteStore.navigateToSubfolder(folder)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(folder.color?.color ?? DesignToken.accent)
+                            Text(folder.displayName)
+                                .font(DesignToken.Typography.caption)
+                                .foregroundStyle(DesignToken.bodyText)
+                                .lineLimit(1)
+                            Text("\(folder.noteCount)")
+                                .font(DesignToken.Typography.caption)
+                                .foregroundStyle(DesignToken.mutedSoft)
                         }
+                        .padding(.horizontal, DesignToken.Space.sm)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(DesignToken.surfaceInset))
+                        .contentShape(Capsule())
                     }
-
-                    if showsChipCreateEditor {
-                        tabFolderEditor(
-                            iconColor: DesignToken.accent,
-                            fill: DesignToken.surfaceInset,
-                            labelColor: DesignToken.bodyText,
+                    .buttonStyle(.plain)
+                    .nsContextMenu {
+                        NoteListMenus.folderMenu(
+                            folder: folder,
+                            noteStore: noteStore,
+                            l10n: l10n,
+                            onRename: { startRenamingFolder(folder.name) },
+                            onDelete: { requestDeleteFolder(folder) },
                         )
-                        .id(Self.folderCreateEditorID)
                     }
                 }
             }
-            .onChange(of: folderRename.isCreating) { _, isCreating in
-                guard isCreating, showsChipCreateEditor else { return }
-                DispatchQueue.main.async {
-                    proxy.scrollTo(Self.folderCreateEditorID, anchor: .trailing)
-                }
+
+            if showsChipCreateEditor {
+                tabFolderEditor(
+                    iconColor: DesignToken.accent,
+                    fill: DesignToken.surfaceInset,
+                    labelColor: DesignToken.bodyText,
+                )
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.22), value: childFolders.count)
+        .animation(.easeInOut(duration: 0.22), value: folderRename.isCreating)
     }
 
     /// Sections layout: every folder as a collapsible header over its note cards.
@@ -1223,10 +1204,6 @@ struct NoteBoardView: View {
     private var showsChipCreateEditor: Bool {
         folderRename.isCreating && noteStore.selectedFolder != nil && appSettings.boardLayout == .tabs
     }
-
-    /// Identifier of the inline new-folder field — ScrollViewReaders pull it
-    /// into view the moment it mounts at a strip's trailing edge.
-    private static let folderCreateEditorID = "folder-create-editor"
 
     /// Folders the new folder's name must not clash with — those sharing its
     /// parent: top-level on home, the current folder's children when nested.
