@@ -23,6 +23,11 @@ final class SidePanelController: NSWindowController {
     private var isAnimating = false
     private var animationGeneration = 0
     private var hideTimer: Timer?
+    /// While a Finder card drags files out of the panel, the pointer legitimately
+    /// leaves the window and the drop may land in another app. Every dismissal
+    /// path (mouse-exit timer, click-outside, timer firing) stays parked until the
+    /// drag session ends.
+    private(set) var isAutoHideSuspended = false
     private var dummyWindow: NSWindow?
     private var trackingArea: NSTrackingArea?
     private var previousApp: NSRunningApplication?
@@ -145,6 +150,9 @@ final class SidePanelController: NSWindowController {
         // Click-outside dismissal
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self, isShown, !self.isMouseInPanel(),
+                  // A Finder-card drag session in flight owns the pointer;
+                  // its click-through must not dismiss the panel.
+                  !self.isAutoHideSuspended,
                   PanelSettings.shared.hideOnClickOutside,
                   PanelSettings.shared.dismissalMode == .auto,
                   !PanelSettings.shared.isPanelPinned,
@@ -163,6 +171,13 @@ final class SidePanelController: NSWindowController {
             if event.keyCode == 53, self?.isShown == true {
                 if let fr = self?.window?.firstResponder as? NSTextView, fr.isFieldEditor {
                     return event
+                }
+                // A focused Finder card's file list clears its selection first.
+                if let store = self?.noteStore,
+                   let id = store.focusedFinderCardID,
+                   FinderBrowserRegistry.shared.clearSelection(for: id)
+                {
+                    return nil
                 }
                 // Settings page closes first, then an active selection clears,
                 // then the full editor shrinks back into its card, then
@@ -201,7 +216,12 @@ final class SidePanelController: NSWindowController {
                 return event
             }
             if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings
-                || noteStore.inlineEditingNoteID != nil {
+                || noteStore.inlineEditingNoteID != nil
+            {
+                return event
+            }
+            // A focused Finder card's file list owns ↑/↓/Return while focused.
+            if noteStore.focusedFinderCardID != nil {
                 return event
             }
             let shift = event.modifierFlags.contains(.shift)
@@ -266,6 +286,14 @@ final class SidePanelController: NSWindowController {
                 return nil
             }
             if s.newFolderShortcut?.matches(event) == true {
+                // A focused Finder card creates its folder in place.
+                if let id = noteStore.focusedFinderCardID {
+                    FinderBrowserRegistry.shared.createFolder(
+                        in: id,
+                        defaultName: L10n.shared["finder.untitledFolder"],
+                    )
+                    return nil
+                }
                 // Only trigger when a list view is mounted. Editor and Trash both have
                 // selectedNote == nil but no consumer, so pending would get stuck.
                 guard noteStore.selectedNote == nil, !noteStore.showTrash else { return event }
@@ -450,7 +478,7 @@ final class SidePanelController: NSWindowController {
     }
 
     override func mouseExited(with _: NSEvent) {
-        guard isShown, !isAnimating, !isEditorFocused,
+        guard isShown, !isAnimating, !isEditorFocused, !isAutoHideSuspended,
               PanelSettings.shared.autoHideOnMouseExit,
               PanelSettings.shared.dismissalMode == .auto,
               !PanelSettings.shared.isPanelPinned,
@@ -482,6 +510,7 @@ final class SidePanelController: NSWindowController {
 
         // Check for external file changes every time the panel becomes visible
         noteStore.checkForExternalChanges()
+        FinderBrowserRegistry.shared.resumeAllWatching()
 
         isShown = true
         let gen = animationGeneration &+ 1
@@ -552,6 +581,8 @@ final class SidePanelController: NSWindowController {
         // Leaving the panel ends an in-place card edit session (flushes its save).
         noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
+        noteStore.saveSidecar()
+        FinderBrowserRegistry.shared.suspendAllWatching()
         isShown = false
         let gen = animationGeneration &+ 1
         animationGeneration = gen
@@ -738,10 +769,28 @@ final class SidePanelController: NSWindowController {
         return false
     }
 
+    /// Park every dismissal path while a Finder card drag session is in flight.
+    func suspendAutoHide() {
+        isAutoHideSuspended = true
+        cancelHideTimer()
+    }
+
+    /// `treatAsMouseExit`: after a drop the pointer is usually outside — run the normal
+    /// hide-delay path once so the panel tidies itself away exactly as if the user had left.
+    func resumeAutoHide(treatAsMouseExit: Bool) {
+        isAutoHideSuspended = false
+        guard treatAsMouseExit, isShown, !isMouseInPanel(),
+              !PanelSettings.shared.isPanelPinned,
+              PanelSettings.shared.autoHideOnMouseExit,
+              PanelSettings.shared.dismissalMode == .auto
+        else { return }
+        startHideTimer(delay: PanelSettings.shared.hideDelay)
+    }
+
     private func startHideTimer(delay: Double) {
         cancelHideTimer()
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self, isShown, !isMouseInPanel() else { return }
+            guard let self, isShown, !isMouseInPanel(), !isAutoHideSuspended else { return }
             // A context menu opened after the exit began — the user is picking
             // an item; let the interaction finish instead of yanking the panel.
             guard !isMenuWindowOpen else { return }
@@ -800,7 +849,10 @@ final class SidePanelController: NSWindowController {
 private final class ResizeHandleView: NSView {
     /// Matches the board's horizontal card padding, so the whole visual
     /// gutter left of the cards is the resize zone.
-    static var handleWidth: CGFloat { DesignToken.Space.lg }
+    static var handleWidth: CGFloat {
+        DesignToken.Space.lg
+    }
+
     static let minWidth: CGFloat = 400
 
     var side: EdgeSide = .right
