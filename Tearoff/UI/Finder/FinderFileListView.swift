@@ -108,6 +108,7 @@ struct FinderFileListView: NSViewRepresentable {
         scrollView.documentView = table
         table.sizeLastColumnToFit()
 
+        context.coordinator.attach(table: table)
         context.coordinator.registerCommands()
         context.coordinator.sync()
         return scrollView
@@ -166,6 +167,13 @@ extension FinderFileListView {
         }
 
         // MARK: Lifecycle
+
+        /// Hands the table to the coordinator. Called once from `makeNSView`
+        /// before the first `sync()`; without it every `guard let table`
+        /// early-returns and the list never renders.
+        func attach(table: FinderTableView) {
+            self.table = table
+        }
 
         func registerCommands() {
             parent.commands.beginRename = { [weak self] entry in
@@ -379,6 +387,14 @@ extension FinderFileListView {
             }
             guard !toActivate.isEmpty else { return }
             parent.actions.onActivate(toActivate)
+        }
+
+        // MARK: NSTableViewDataSource
+
+        /// Without this the table probes `respondsToSelector`, finds nothing,
+        /// and renders zero rows no matter how many entries the browser has.
+        func numberOfRows(in _: NSTableView) -> Int {
+            entries.count
         }
 
         // MARK: NSTableViewDelegate
