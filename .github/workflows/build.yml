@@ -138,12 +138,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Homebrew tap
+        env:
+          TAP_SSH_KEY: ${{ secrets.TAP_SSH_KEY }}
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
           SHA_ARM64="${{ steps.sha.outputs.arm64 }}"
           SHA_X86_64="${{ steps.sha.outputs.x86_64 }}"
 
-          git clone https://x-access-token:${{ secrets.TAP_GITHUB_TOKEN }}@github.com/zcyisiee/homebrew-tap.git tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_SSH_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          git clone git@github.com:zcyisiee/homebrew-tap.git tap
           cd tap
 
           mkdir -p Casks
@@ -178,5 +186,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/tearoff.rb
-          git commit -m "Update Tearoff to v$VERSION"
-          git push
+          if git diff --staged --quiet; then
+            echo "Cask already at v$VERSION, nothing to push"
+          else
+            git commit -m "Update Tearoff to v$VERSION"
+            git push
+          fi
