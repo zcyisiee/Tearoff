@@ -340,11 +340,20 @@
   "finder.file.copyName": "拷贝名称",
   "finder.file.duplicate": "复制",
   "finder.file.moveToTrash": "移到废纸篓",
-  "finder.empty.noFavorites": "把文件夹拖到这里，或点 + 添加常用目录",
+  "finder.empty.noFavorites": "尚未选择文件夹",
   "finder.empty.selectFavorite": "先在上方选择一个常用目录",
   "finder.empty.folder": "空文件夹",
   "finder.error.notFound": "找不到该文件夹",
   "finder.error.notReadable": "没有读取该文件夹的权限",
   "finder.viewMode.icon": "图标视图",
-  "finder.viewMode.list": "列表视图"
+  "finder.viewMode.list": "列表视图",
+  "finder.empty.chooseFolder": "选取文件夹…",
+  "finder.empty.desktop": "桌面",
+  "finder.empty.documents": "文稿",
+  "finder.empty.downloads": "下载",
+  "finder.empty.home": "主目录",
+  "finder.header.menu": "卡片菜单",
+  "finder.header.favorites": "常用",
+  "finder.header.noFavorites": "暂无常用",
+  "finder.favorite.select": "选择"
 }

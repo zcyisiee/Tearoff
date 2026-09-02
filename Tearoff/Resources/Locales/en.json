@@ -340,11 +340,20 @@
   "finder.file.copyName": "Copy Name",
   "finder.file.duplicate": "Duplicate",
   "finder.file.moveToTrash": "Move to Trash",
-  "finder.empty.noFavorites": "Drop a folder here or press + to add a favorite",
+  "finder.empty.noFavorites": "No folder selected",
   "finder.empty.selectFavorite": "Pick a favorite folder above",
   "finder.empty.folder": "Empty folder",
   "finder.error.notFound": "Folder not found",
   "finder.error.notReadable": "No permission to read this folder",
   "finder.viewMode.icon": "Icon view",
-  "finder.viewMode.list": "List view"
+  "finder.viewMode.list": "List view",
+  "finder.empty.chooseFolder": "Choose Folder…",
+  "finder.empty.desktop": "Desktop",
+  "finder.empty.documents": "Documents",
+  "finder.empty.downloads": "Downloads",
+  "finder.empty.home": "Home",
+  "finder.header.menu": "Card menu",
+  "finder.header.favorites": "Favorites",
+  "finder.header.noFavorites": "No favorites yet",
+  "finder.favorite.select": "Select"
 }

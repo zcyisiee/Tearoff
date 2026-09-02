@@ -261,6 +261,124 @@ enum FinderCardMenus {
         return menu
     }
 
+    // MARK: - Header Menu
+
+    /// The card's "⋯" header menu: a Favorites submenu, Add Folder…, and the
+    /// current-directory actions (reveal / copy path). Built the same way as
+    /// the other Finder menus — NSMenu so SF Symbol icons render reliably.
+    static func headerMenu(
+        card: FinderCard,
+        noteStore: NoteStore,
+        browser: FinderCardBrowser,
+        l10n: L10n,
+    ) -> NSMenu {
+        let menu = NSMenu()
+
+        // Favorites submenu — one entry per favourite; each expands to
+        // select / reveal / remove, reusing the chip menu's actions.
+        let favoritesItem = NSMenuItem(title: l10n["finder.header.favorites"], action: nil, keyEquivalent: "")
+        favoritesItem.image = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
+        favoritesItem.submenu = favoritesSubmenu(card: card, noteStore: noteStore, l10n: l10n)
+        menu.addItem(favoritesItem)
+
+        menu.addActionItem(title: l10n["finder.favorite.add"], icon: "folder.badge.plus") {
+            presentFolderPicker(
+                card: card,
+                noteStore: noteStore,
+                directoryURL: browser.currentURL,
+                allowsMultipleSelection: true,
+            )
+        }
+
+        menu.addItem(.separator())
+
+        // Reveal the browsed directory / copy its path. Prefer the live
+        // browser location (the browsed directory on screen); fall back to the
+        // store's canonical home when the browser has no location yet.
+        if let url = browser.currentURL ?? card.currentURL {
+            menu.addActionItem(title: l10n["finder.file.reveal"], icon: "folder") {
+                FinderCardBrowser.revealInFinder([url])
+            }
+            menu.addActionItem(title: l10n["finder.file.copyPath"], icon: "link") {
+                FinderCardBrowser.copyPaths([url])
+            }
+        }
+
+        return menu
+    }
+
+    /// The Favorites submenu for the header "⋯" menu. Each favourite is a
+    /// submenu parent carrying select / reveal / remove — AppKit menu parents
+    /// don't fire a click action alongside a submenu, so the select action
+    /// lives as its first child alongside the reusable reveal / remove items.
+    private static func favoritesSubmenu(
+        card: FinderCard,
+        noteStore: NoteStore,
+        l10n: L10n,
+    ) -> NSMenu {
+        let menu = NSMenu()
+
+        if card.favorites.isEmpty {
+            let empty = NSMenuItem(title: l10n["finder.header.noFavorites"], action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return menu
+        }
+
+        for favorite in card.favorites {
+            let parent = NSMenuItem(title: favorite.displayName, action: nil, keyEquivalent: "")
+            parent.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+            if favorite.id == card.selectedFavoriteID {
+                parent.state = .on
+            }
+
+            let submenu = NSMenu()
+            submenu.addActionItem(title: l10n["finder.favorite.select"], icon: "checkmark.circle") {
+                noteStore.selectFavorite(id: favorite.id, in: card)
+            }
+            submenu.addItem(.separator())
+            submenu.addActionItem(title: l10n["finder.file.reveal"], icon: "folder") {
+                FinderCardBrowser.revealInFinder([favorite.url])
+            }
+            submenu.addActionItem(title: l10n["finder.favorite.remove"], icon: "minus.circle") {
+                guard let current = noteStore.finderCards.first(where: { $0.id == card.id }) else { return }
+                noteStore.removeFavorite(id: favorite.id, from: current)
+            }
+
+            parent.submenu = submenu
+            menu.addItem(parent)
+        }
+
+        return menu
+    }
+
+    /// Presents an NSOpenPanel for choosing folder(s) to add as favourites.
+    /// Suspends the panel's auto-hide while the open panel is up (the same
+    /// mechanism as the board's file drag session) so the panel window can't
+    /// vanish underneath a modal folder picker.
+    static func presentFolderPicker(
+        card: FinderCard,
+        noteStore: NoteStore,
+        directoryURL: URL?,
+        allowsMultipleSelection: Bool,
+    ) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = allowsMultipleSelection
+        panel.directoryURL = directoryURL
+
+        AppDelegate.shared?.panelController?.suspendAutoHide()
+        panel.begin { response in
+            AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+            guard response == .OK else { return }
+            for url in panel.urls {
+                _ = noteStore.addFavorite(url, to: card)
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Small filled circle swatch; selected color gets a ring.

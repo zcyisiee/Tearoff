@@ -93,12 +93,13 @@ struct FinderCardView: View {
     private var interactiveBody: some View {
         cardFace {
             titleRow
-            favouritesBar
-            fileList
-            if browser.currentURL != nil {
+            if card.currentURL == nil {
+                emptyStateContent
+            } else {
+                fileList
                 FinderPathBar(browser: browser) { handleError($0) }
+                footerRow
             }
-            footerRow
         }
         .background {
             // Frame feedback into the board-wide registry. Plain class
@@ -232,7 +233,7 @@ struct FinderCardView: View {
                 titleEditToggleArea
             }
 
-            viewModeToggle
+            headerControls
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -267,6 +268,44 @@ struct FinderCardView: View {
         .help(card.viewMode == .icon ? l10n["finder.viewMode.list"] : l10n["finder.viewMode.icon"])
     }
 
+    /// Trailing header controls: the F2 view toggle and the "⋯" menu. The sort
+    /// control lands here in a later task, so this group is the single slot to
+    /// extend — no placeholder button is added yet.
+    private var headerControls: some View {
+        HStack(spacing: DesignToken.Space.xs) {
+            viewModeToggle
+            headerMenuButton
+        }
+    }
+
+    /// The header's "⋯" button — pops the card's header menu at the cursor.
+    private var headerMenuButton: some View {
+        Button {
+            showHeaderMenu()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DesignToken.muted)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(l10n["finder.header.menu"])
+    }
+
+    private func showHeaderMenu() {
+        let menu = FinderCardMenus.headerMenu(
+            card: card,
+            noteStore: noteStore,
+            browser: browser,
+            l10n: l10n,
+        )
+        NSContextMenuModifier.isShowingMenu = true
+        menu.popUpAtScreenPoint(NSEvent.mouseLocation)
+        NSContextMenuModifier.isShowingMenu = false
+        NSContextMenuModifier.lastMenuDismissAt = Date()
+    }
+
     // MARK: - Pin chrome
 
     @ViewBuilder
@@ -293,53 +332,10 @@ struct FinderCardView: View {
         }
     }
 
-    // MARK: - Favourites bar
+    // MARK: - Favourites chip (drag replica)
 
-    private var favouritesBar: some View {
-        HStack(spacing: DesignToken.Space.xs) {
-            if card.favorites.isEmpty {
-                favoritesEmptyHint
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: DesignToken.Space.xs) {
-                        ForEach(card.favorites) { favorite in
-                            favoriteChip(favorite)
-                        }
-                    }
-                }
-                addFavoriteButton
-            }
-        }
-        // The bar's empty trailing area doubles as the "add favourite" drop
-        // target (⌘-drops anywhere add directories); chips handle their own
-        // transfer drops (inner targets win).
-        .dropDestination(for: URL.self) { urls, _ in
-            addFavoriteDrops(urls)
-            return true
-        }
-    }
-
-    private func favoriteChip(_ favorite: FinderFavorite) -> some View {
-        Button {
-            noteStore.selectFavorite(id: favorite.id, in: card)
-        } label: {
-            chipLabel(favorite, isSelected: favorite.id == card.selectedFavoriteID)
-        }
-        .buttonStyle(.plain)
-        .nsContextMenu {
-            FinderCardMenus.favoriteMenu(
-                favorite: favorite,
-                card: card,
-                noteStore: noteStore,
-                l10n: l10n,
-            )
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            handleChipDrop(urls, into: favorite)
-            return true
-        }
-    }
-
+    /// Chip visuals shared by the drag replica. The favourites bar itself is
+    /// gone — the card header now uses the "⋯" menu for favourites.
     private func chipLabel(_ favorite: FinderFavorite, isSelected: Bool) -> some View {
         HStack(spacing: DesignToken.Space.xs) {
             Image(systemName: "folder")
@@ -359,81 +355,124 @@ struct FinderCardView: View {
         .contentShape(Capsule())
     }
 
-    private var favoritesEmptyHint: some View {
-        HStack(spacing: DesignToken.Space.xs) {
-            Image(systemName: "folder.badge.plus")
-                .font(.system(size: 11))
+    // MARK: - Empty state
+
+    /// Guided empty state shown when the card has no current directory yet
+    /// (no favourite selected): a primary "Choose Folder…" button and a row
+    /// of common quick-access folders. Replaces the usual file list so a
+    /// fresh card invites its first folder instead of showing an empty grid.
+    private var emptyStateContent: some View {
+        VStack(spacing: DesignToken.Space.md) {
+            Spacer(minLength: 0)
+
+            Image(systemName: "folder.badge.questionmark")
+                .font(.system(size: 28))
                 .foregroundStyle(DesignToken.mutedSoft)
 
             Text(l10n["finder.empty.noFavorites"])
                 .font(DesignToken.Typography.caption)
                 .foregroundStyle(DesignToken.mutedSoft)
-                .lineLimit(1)
+
+            Button {
+                presentFolderPicker()
+            } label: {
+                Label(l10n["finder.empty.chooseFolder"], systemImage: "folder.badge.plus")
+                    .font(DesignToken.Typography.caption)
+                    .foregroundStyle(DesignToken.onAccent)
+                    .padding(.horizontal, DesignToken.Space.md)
+                    .padding(.vertical, DesignToken.Space.sm)
+                    .background(Capsule().fill(accentColor))
+            }
+            .buttonStyle(.plain)
+
+            quickAccessRow
 
             Spacer(minLength: 0)
-
-            addFavoriteButton
         }
         .frame(maxWidth: .infinity)
+        .frame(height: card.listHeight ?? 240)
+        .background(DesignToken.surfaceInset.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
     }
 
-    private var addFavoriteButton: some View {
-        Button {
-            showAddFavoritePanel()
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(DesignToken.muted)
-                .frame(width: 18, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(l10n["finder.favorite.add"])
-    }
+    /// A row of one-tap folder shortcuts (Desktop / Documents / Downloads /
+    /// Home). Each adds and selects the folder as a favourite, same as the
+    /// picker.
+    private var quickAccessRow: some View {
+        HStack(spacing: DesignToken.Space.sm) {
+            ForEach(quickAccessLocations) { location in
+                Button {
+                    addFavoriteAndSelect(location.url)
+                } label: {
+                    VStack(spacing: DesignToken.Space.xs) {
+                        Image(systemName: location.icon)
+                            .font(.system(size: 15))
+                            .foregroundStyle(accentColor)
 
-    private func showAddFavoritePanel() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.canCreateDirectories = true
-        panel.directoryURL = browser.currentURL
-        panel.begin { response in
-            guard response == .OK else { return }
-            for url in panel.urls {
-                _ = noteStore.addFavorite(url, to: card)
+                        Text(location.title)
+                            .font(DesignToken.Typography.caption)
+                            .foregroundStyle(DesignToken.bodyText)
+                            .lineLimit(1)
+                    }
+                    .frame(minWidth: 54)
+                    .padding(.vertical, DesignToken.Space.sm)
+                    .background {
+                        RoundedRectangle(cornerRadius: DesignToken.Radius.md)
+                            .fill(DesignToken.surfaceInset.opacity(0.7))
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
+                }
+                .buttonStyle(.plain)
+                .help(location.title)
             }
         }
     }
 
-    private func addFavoriteDrops(_ urls: [URL]) {
-        for url in urls where Self.isDirectory(url) {
-            _ = noteStore.addFavorite(url, to: card)
+    /// Common folders offered in the empty state. Resolved via the user's
+    /// search paths; directories that don't exist yet are filtered out.
+    private var quickAccessLocations: [QuickAccessLocation] {
+        let fileManager = FileManager.default
+        let candidates: [(icon: String, titleKey: String, url: URL?)] = [
+            ("desktopcomputer", "finder.empty.desktop", fileManager.urls(for: .desktopDirectory, in: .userDomainMask).first),
+            ("doc.on.doc", "finder.empty.documents", fileManager.urls(for: .documentDirectory, in: .userDomainMask).first),
+            ("arrow.down.circle", "finder.empty.downloads", fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first),
+            ("house", "finder.empty.home", fileManager.homeDirectoryForCurrentUser),
+        ]
+        return candidates.compactMap { candidate in
+            guard let url = candidate.url, fileManager.fileExists(atPath: url.path) else { return nil }
+            return QuickAccessLocation(icon: candidate.icon, title: l10n[candidate.titleKey], url: url)
         }
     }
 
-    /// Chip drop: ⌘ adds the dropped folders as favourites, otherwise the
-    /// items transfer into the favourite's directory (⌥ copies, plain moves).
-    private func handleChipDrop(_ urls: [URL], into favorite: FinderFavorite) {
-        if NSEvent.modifierFlags.contains(.command) {
-            for url in urls where Self.isDirectory(url) {
-                _ = noteStore.addFavorite(url, to: card)
-            }
-            return
-        }
-        do {
-            if NSEvent.modifierFlags.contains(.option) {
-                try browser.copy(urls, into: favorite.url)
-            } else {
-                try browser.move(urls, into: favorite.url)
-            }
-        } catch {
-            handleError(error)
-        }
+    /// Adds a folder as a favourite and selects it — the empty state's entry
+    /// point that clears the placeholder once `currentURL` resolves. Navigates
+    /// the browser directly so the list fills in with no "empty folder" flash.
+    private func addFavoriteAndSelect(_ url: URL) {
+        guard let favorite = noteStore.addFavorite(url, to: card) else { return }
+        noteStore.selectFavorite(id: favorite.id, in: card)
+        browser.navigate(to: favorite.url, recordsHistory: false)
     }
 
-    private static func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? url.hasDirectoryPath
+    /// Presents the folder picker for the empty state's primary button.
+    /// `addFavorite` already selects a newly added (or re-added) favourite, so
+    /// picking a folder immediately shows its contents in the card.
+    private func presentFolderPicker() {
+        FinderCardMenus.presentFolderPicker(
+            card: card,
+            noteStore: noteStore,
+            directoryURL: card.currentURL,
+            allowsMultipleSelection: false,
+        )
+    }
+
+    /// A one-tap folder shortcut shown in the empty state.
+    private struct QuickAccessLocation: Identifiable {
+        let icon: String
+        let title: String
+        let url: URL
+        var id: String {
+            url.path
+        }
     }
 
     // MARK: - File list
@@ -474,13 +513,11 @@ struct FinderCardView: View {
         )
     }
 
-    /// Centered overlay states over the list area: nothing selected, load
-    /// errors, or an empty directory.
+    /// Centered overlay states over the list area: load errors or an empty
+    /// directory. The no-selection case is handled by `emptyStateContent`.
     @ViewBuilder
     private var fileListOverlay: some View {
-        if card.selectedFavorite == nil {
-            overlayState(icon: "folder.badge.plus", text: l10n["finder.empty.selectFavorite"])
-        } else if let loadError = browser.loadError {
+        if let loadError = browser.loadError {
             switch loadError {
             case .notFound:
                 overlayState(icon: "questionmark.folder", text: l10n["finder.error.notFound"])
