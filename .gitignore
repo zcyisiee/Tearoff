@@ -72,3 +72,6 @@ docs/archify/
 
 # xcodebuild derived data（本地与 CI 均输出到仓库根目录）
 build_*/
+
+# Task briefs / agent logs (local only)
+pi-briefs/
