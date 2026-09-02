@@ -38,7 +38,9 @@ final class ImageDecodingCache {
     func image(at url: URL, maxDimension: CGFloat) -> NSImage? {
         guard let mtime = modificationDate(at: url) else { return nil }
         let key = cacheKey(url: url, mtime: mtime, maxDimension: maxDimension)
-        if let hit = cache.object(forKey: key) { return hit }
+        if let hit = cache.object(forKey: key) {
+            return hit
+        }
         guard let decoded = decode(url: url, maxDimension: maxDimension) else { return nil }
         cache.setObject(decoded.image, forKey: key, cost: decoded.byteCost)
         return decoded.image

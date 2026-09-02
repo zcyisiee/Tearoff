@@ -328,49 +328,19 @@ struct NoteBoardView: View {
             }
             .onExitCommand { dismissSearch() }
         } else {
-            HStack(alignment: .top, spacing: DesignToken.Space.sm) {
-                tabBar
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
-                HStack(spacing: DesignToken.Space.sm) {
-                    HeaderIconButton(systemName: "magnifyingglass", help: l10n["common.search"]) {
-                        isSearching = true
-                        isSearchFieldFocused = true
-                    }
-                    HeaderIconButton(systemName: "folder.badge.plus", help: l10n["common.newFolder"]) {
-                        startCreatingFolder()
-                    }
-                    HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
-                        createNote()
-                    }
-                    HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
-                        noteStore.showSettings = true
-                    }
-                    HeaderIconButton(
-                        systemName: isPanelPinned ? "pin.fill" : "pin",
-                        help: isPanelPinned ? l10n["panel.unlock"] : l10n["panel.lock"],
-                        tint: isPanelPinned ? DesignToken.accent : nil,
-                    ) {
-                        let settings = PanelSettings.shared
-                        settings.isPanelPinned.toggle()
-                        if !settings.isPanelPinned {
-                            // Unlock + collapse in one gesture: the lit button is
-                            // the "leave locked mode" affordance.
-                            AppDelegate.shared?.panelController?.hidePanel()
-                        }
-                    }
-                }
-                .layoutPriority(1)
-            }
-            .animation(.easeInOut(duration: 0.22), value: topLevelFolders.count)
-            .animation(.easeInOut(duration: 0.22), value: folderRename.isCreating)
+            tabBar
+                .animation(.easeInOut(duration: 0.22), value: topLevelFolders.count)
+                .animation(.easeInOut(duration: 0.22), value: folderRename.isCreating)
         }
     }
 
     /// Folder tabs. Top-level only — nested folders have a chip row on the
     /// board. Tabs wrap onto new lines as they fill the pill; the header grows
-    /// instead of hiding extras behind a horizontal scroll.
+    /// instead of hiding extras behind a horizontal scroll. The action cluster
+    /// rides the flow as a trailing dock so wrapped rows use the full width
+    /// and the pill keeps a single compact row when everything fits.
     private var tabBar: some View {
-        FlowLayout(spacing: DesignToken.Space.xs, lineSpacing: 6, minRowHeight: 28) {
+        FlowLayout(spacing: DesignToken.Space.xs, lineSpacing: 6, minRowHeight: 28, trailingDock: true) {
             tabButton(
                 title: l10n["home.title"],
                 icon: "tray.full",
@@ -422,7 +392,44 @@ struct NoteBoardView: View {
                     labelColor: DesignToken.bodyText,
                 )
             }
+
+            headerActions
         }
+    }
+
+    /// Trailing action cluster docked to the right edge of the tab flow.
+    /// Leading padding bumps the tab-to-button gap from the flow's item
+    /// spacing (xs) up to the header rhythm (sm).
+    private var headerActions: some View {
+        HStack(spacing: DesignToken.Space.sm) {
+            HeaderIconButton(systemName: "magnifyingglass", help: l10n["common.search"]) {
+                isSearching = true
+                isSearchFieldFocused = true
+            }
+            HeaderIconButton(systemName: "folder.badge.plus", help: l10n["common.newFolder"]) {
+                startCreatingFolder()
+            }
+            HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
+                createNote()
+            }
+            HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
+                noteStore.showSettings = true
+            }
+            HeaderIconButton(
+                systemName: isPanelPinned ? "pin.fill" : "pin",
+                help: isPanelPinned ? l10n["panel.unlock"] : l10n["panel.lock"],
+                tint: isPanelPinned ? DesignToken.accent : nil,
+            ) {
+                let settings = PanelSettings.shared
+                settings.isPanelPinned.toggle()
+                if !settings.isPanelPinned {
+                    // Unlock + collapse in one gesture: the lit button is
+                    // the "leave locked mode" affordance.
+                    AppDelegate.shared?.panelController?.hidePanel()
+                }
+            }
+        }
+        .padding(.leading, DesignToken.Space.xs)
     }
 
     private func tabButton(

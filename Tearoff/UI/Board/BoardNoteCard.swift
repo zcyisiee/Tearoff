@@ -48,7 +48,9 @@ final class BoardDragSession {
     /// Current pointer position in `BoardCardSpace`.
     private(set) var pointer: CGPoint?
 
-    var noteID: UUID? { note?.id }
+    var noteID: UUID? {
+        note?.id
+    }
 
     func begin(note: Note, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
         self.note = note
@@ -251,7 +253,9 @@ struct BoardNoteCard: View {
             )
             .onHover { hovering in
                 guard hoverEnabled, !isDragging else {
-                    if isHovered { isHovered = false }
+                    if isHovered {
+                        isHovered = false
+                    }
                     return
                 }
                 withAnimation(.easeInOut(duration: 0.12)) {
@@ -313,17 +317,17 @@ struct BoardNoteCard: View {
     @ViewBuilder
     private func blockView(_ block: CardPreviewBlock) -> some View {
         switch block.kind {
-        case .heading(let level, let text):
+        case let .heading(level, text):
             Text(text)
                 .font(level == 2 ? appSettings.boardHeadingFont : appSettings.boardSubheadingFont)
                 .foregroundStyle(level == 2 ? accentColor : accentColor.opacity(0.72))
                 .lineLimit(1)
                 .padding(.top, 2)
 
-        case .task(let lineIndex, let isChecked, let text):
+        case let .task(lineIndex, isChecked, text):
             taskRow(lineIndex: lineIndex, isChecked: isChecked, text: text)
 
-        case .bullet(let text):
+        case let .bullet(text):
             HStack(alignment: .top, spacing: 6) {
                 Text("•")
                     .font(appSettings.boardBodyFont)
@@ -333,7 +337,7 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.bodyText)
             }
 
-        case .quote(let text):
+        case let .quote(text):
             HStack(alignment: .top, spacing: 6) {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(DesignToken.hairline)
@@ -343,17 +347,17 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.muted)
             }
 
-        case .code(let text):
+        case let .code(text):
             Text(text)
                 .font(.system(size: appSettings.boardFontSize - 1, design: .monospaced))
                 .foregroundStyle(DesignToken.muted)
 
-        case .image(let path):
+        case let .image(path):
             CardImageThumbnail(
-                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder)
+                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder),
             )
 
-        case .text(let text):
+        case let .text(text):
             Text(text)
                 .font(appSettings.boardBodyFont)
                 .foregroundStyle(DesignToken.bodyText)

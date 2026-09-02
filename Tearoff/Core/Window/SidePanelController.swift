@@ -201,7 +201,8 @@ final class SidePanelController: NSWindowController {
                 return event
             }
             if noteStore.selectedNote != nil || noteStore.showTrash || noteStore.showSettings
-                || noteStore.inlineEditingNoteID != nil {
+                || noteStore.inlineEditingNoteID != nil
+            {
                 return event
             }
             let shift = event.modifierFlags.contains(.shift)
@@ -800,7 +801,10 @@ final class SidePanelController: NSWindowController {
 private final class ResizeHandleView: NSView {
     /// Matches the board's horizontal card padding, so the whole visual
     /// gutter left of the cards is the resize zone.
-    static var handleWidth: CGFloat { DesignToken.Space.lg }
+    static var handleWidth: CGFloat {
+        DesignToken.Space.lg
+    }
+
     static let minWidth: CGFloat = 400
 
     var side: EdgeSide = .right

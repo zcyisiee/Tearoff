@@ -20,7 +20,7 @@ struct ExpandedNoteEditor: View {
     let note: Note
     /// Close path supplied by the board — plays the shrink-into-card morph
     /// before the store closes the note. Falls back to a direct close.
-    var onRequestClose: (() -> Void)? = nil
+    var onRequestClose: (() -> Void)?
 
     private var showsOutlinePanel: Bool {
         appSettings.outlineVisible && appSettings.outlinePosition == .right

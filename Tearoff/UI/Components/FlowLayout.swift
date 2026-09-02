@@ -8,15 +8,21 @@ struct FlowLayout: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
     var minRowHeight: CGFloat
+    /// When true, the last subview is excluded from the left-packed flow and
+    /// docked to the trailing edge of the final line — right-aligned on the
+    /// last row if it fits, otherwise on its own right-aligned row below.
+    var trailingDock: Bool
 
     init(
         spacing: CGFloat = DesignToken.Space.xs,
         lineSpacing: CGFloat = 6,
         minRowHeight: CGFloat = 0,
+        trailingDock: Bool = false,
     ) {
         self.spacing = spacing
         self.lineSpacing = lineSpacing
         self.minRowHeight = minRowHeight
+        self.trailingDock = trailingDock
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
@@ -47,6 +53,7 @@ struct FlowLayout: Layout {
     private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> Arrangement {
         guard !subviews.isEmpty else { return Arrangement(items: [], size: .zero) }
         let limit = proposal.width ?? .infinity
+        let dockIndex = trailingDock ? subviews.count - 1 : nil
 
         var sizes: [CGSize] = []
         sizes.reserveCapacity(subviews.count)
@@ -63,6 +70,7 @@ struct FlowLayout: Layout {
         var x: CGFloat = 0
         var y: CGFloat = 0
         var usedWidth: CGFloat = 0
+        var lastRow: (y: CGFloat, height: CGFloat, endX: CGFloat)?
 
         func commitRow() {
             guard !row.isEmpty else { return }
@@ -75,13 +83,16 @@ struct FlowLayout: Layout {
                     size: entry.size,
                 ))
             }
-            usedWidth = max(usedWidth, row.last.map { $0.x + $0.size.width } ?? 0)
+            let endX = row.last.map { $0.x + $0.size.width } ?? 0
+            usedWidth = max(usedWidth, endX)
+            lastRow = (y, rowHeight, endX)
             y += rowHeight + lineSpacing
             x = 0
             row.removeAll(keepingCapacity: true)
         }
 
         for (index, size) in sizes.enumerated() {
+            guard index != dockIndex else { break }
             if x > 0, x + size.width > limit {
                 commitRow()
             }
@@ -89,6 +100,33 @@ struct FlowLayout: Layout {
             x += size.width + spacing
         }
         commitRow()
+
+        if let dockIndex {
+            let dockSize = sizes[dockIndex]
+            let dockY: CGFloat
+            let dockX: CGFloat
+            if limit.isFinite {
+                dockX = max(0, limit - dockSize.width)
+                if let lastRow, lastRow.endX + spacing <= dockX {
+                    dockY = lastRow.y + (lastRow.height - dockSize.height) / 2
+                } else {
+                    let rowY = lastRow.map { $0.y + $0.height + lineSpacing } ?? 0
+                    let rowHeight = max(minRowHeight, dockSize.height)
+                    dockY = rowY + (rowHeight - dockSize.height) / 2
+                    y = rowY + rowHeight + lineSpacing
+                    lastRow = (rowY, rowHeight, dockSize.width)
+                }
+            } else if let lastRow {
+                // No width budget: keep plain flow order instead of right-aligning.
+                dockX = lastRow.endX + spacing
+                dockY = lastRow.y + (lastRow.height - dockSize.height) / 2
+            } else {
+                dockX = 0
+                dockY = max(0, (minRowHeight - dockSize.height) / 2)
+            }
+            items.append(Item(index: dockIndex, origin: CGPoint(x: dockX, y: dockY), size: dockSize))
+            usedWidth = max(usedWidth, dockX + dockSize.width)
+        }
 
         let height = max(0, y - lineSpacing)
         return Arrangement(items: items, size: CGSize(width: usedWidth, height: height))

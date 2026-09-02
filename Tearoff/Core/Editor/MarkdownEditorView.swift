@@ -59,7 +59,7 @@ enum InsertedLinkCaret {
         guard open.location != NSNotFound else { return nil }
         let nameStart = NSMaxRange(open)
         var i = nameStart
-        let end = NSMaxRange(range) - 1  // "](" needs the char after i too
+        let end = NSMaxRange(range) - 1 // "](" needs the char after i too
         while i < end {
             if text.character(at: i) == 0x5D /* ] */, text.character(at: i + 1) == 0x28 /* ( */ {
                 let length = i - nameStart
@@ -75,11 +75,11 @@ enum InsertedLinkCaret {
     static func apply(_ intent: Intent, in range: NSRange, to textView: NSTextView) {
         guard let resolved = resolve(in: textView.string as NSString, range: range) else { return }
         switch (intent, resolved) {
-        case (_, .insideBrackets(let location)):
+        case let (_, .insideBrackets(location)):
             textView.setSelectedRange(NSRange(location: location, length: 0))
-        case (.selectName, .nameSpan(let span)):
+        case let (.selectName, .nameSpan(span)):
             textView.setSelectedRange(span)
-        case (.caretAtName, .nameSpan(let span)):
+        case let (.caretAtName, .nameSpan(span)):
             textView.setSelectedRange(NSRange(location: NSMaxRange(span), length: 0))
         }
     }
@@ -104,7 +104,7 @@ struct MarkdownEditorView: View {
     var onNavigateNext: (() -> Void)?
     var onNavigatePrevious: (() -> Void)?
     /// Outline state fed from the editor text; nil disables outline tracking.
-    var outline: OutlineState? = nil
+    var outline: OutlineState?
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
@@ -202,7 +202,8 @@ struct MarkdownEditorView: View {
                     // reader (png/tiff/NSImage flavors) as PNG.
                     let data: Data, ext: String, preferredName: String?
                     if let fileURL = PasteboardImageReader.imageFileURL(from: pasteboard),
-                       let bytes = try? Data(contentsOf: fileURL) {
+                       let bytes = try? Data(contentsOf: fileURL)
+                    {
                         data = bytes
                         ext = fileURL.pathExtension.lowercased()
                         preferredName = fileURL.lastPathComponent
@@ -219,7 +220,7 @@ struct MarkdownEditorView: View {
                     // between the brackets via the pending intent.
                     pendingCaretIntent = .caretAtName
                     return (try? FileStorage.saveImage(
-                        data: data, ext: ext, forNote: note, preferredName: preferredName
+                        data: data, ext: ext, forNote: note, preferredName: preferredName,
                     ))?.markdown
                 },
                 onPasteText: { pasteboard, raw, selectedText in
@@ -247,7 +248,7 @@ struct MarkdownEditorView: View {
                 onBuildContextMenu: { menu, _, charIndex in
                     Self.appendImageMenuItems(
                         to: menu, charIndex: charIndex,
-                        noteTitle: noteTitle, noteFolder: noteFolder
+                        noteTitle: noteTitle, noteFolder: noteFolder,
                     )
                     return menu
                 },
@@ -335,7 +336,7 @@ struct MarkdownEditorView: View {
                 .map { FileStorage.imageURL(forRelativePath: $0, folder: noteFolder) }
             ImageDecodingCache.shared.prefetch(
                 urls: warmupURLs,
-                maxDimension: ImageDecodingCache.editorMaxDimension
+                maxDimension: ImageDecodingCache.editorMaxDimension,
             )
             noteNavMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [self] event in
                 // Markdown formatting shortcuts — route through the engine's bus so the
@@ -434,14 +435,14 @@ struct MarkdownEditorView: View {
     private static func firstHTMLAnchor(_ html: String) -> (text: String, href: String)? {
         guard let regex = try? NSRegularExpression(
             pattern: #"<a\s[^>]*?href="([^"]*)"[^>]*>(.*?)</a>"#,
-            options: [.dotMatchesLineSeparators, .caseInsensitive]
+            options: [.dotMatchesLineSeparators, .caseInsensitive],
         ), let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: (html as NSString).length))
         else { return nil }
         let ns = html as NSString
         let href = decodeHTMLEntities(ns.substring(with: match.range(at: 1)))
         let inner = ns.substring(with: match.range(at: 2))
         let text = decodeHTMLEntities(
-            inner.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            inner.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression),
         )
         return (text: text, href: href)
     }
@@ -494,10 +495,10 @@ struct MarkdownEditorView: View {
             tokenRange: tokenRange,
             altRange: NSRange(
                 location: line.location + match.range(at: 1).location,
-                length: match.range(at: 1).length
+                length: match.range(at: 1).length,
             ),
             lineRange: line,
-            path: nsLine.substring(with: match.range(at: 2))
+            path: nsLine.substring(with: match.range(at: 2)),
         )
     }
 
@@ -509,7 +510,7 @@ struct MarkdownEditorView: View {
         to menu: NSMenu,
         charIndex: Int,
         noteTitle: String,
-        noteFolder: String
+        noteFolder: String,
     ) {
         guard let tv = (NSApp.keyWindow?.firstResponder as? NSTextView)
             ?? findEditorTextView(in: NSApp.keyWindow?.contentView),
@@ -583,7 +584,7 @@ struct MarkdownEditorView: View {
             }()
             newAlt = base + "|\(Int((containerWidth * fraction).rounded()))"
         } else {
-            guard base != alt else { return }  // nothing to reset
+            guard base != alt else { return } // nothing to reset
             newAlt = base
         }
         tv.breakUndoCoalescing()
@@ -611,7 +612,7 @@ struct MarkdownEditorView: View {
         guard let data = try? Data(contentsOf: url) else { return }
         let ext = url.pathExtension.lowercased()
         guard let result = try? FileStorage.saveImage(
-            data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent
+            data: data, ext: ext, forNote: note, preferredName: url.lastPathComponent,
         ) else { return }
         let window = NSApp.keyWindow
         let tv = (window?.firstResponder as? NSTextView)

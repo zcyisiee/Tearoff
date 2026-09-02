@@ -230,13 +230,16 @@ enum FileStorage {
             ? rootURL
             : rootURL.appendingPathComponent(folder, isDirectory: true)
         guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: [.isRegularFileKey]
+            at: dir, includingPropertiesForKeys: [.isRegularFileKey],
         ) else { return false }
         let selfFile = excludingNoteTitle + ".md"
         for file in files
-        where file.pathExtension.lowercased() == "md" && file.lastPathComponent != selfFile {
+            where file.pathExtension.lowercased() == "md" && file.lastPathComponent != selfFile
+        {
             guard let content = try? String(contentsOf: file, encoding: .utf8) else { continue }
-            if content.contains("](\(path))") || content.contains("](<\(path)>)") { return true }
+            if content.contains("](\(path))") || content.contains("](<\(path)>)") {
+                return true
+            }
         }
         return false
     }
@@ -262,11 +265,10 @@ enum FileStorage {
         case .sharedAssets:
             let dir = sharedAssetsDirURL(folder: note.folder)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let baseName: String
-            if let preferredName, !preferredName.isEmpty {
-                baseName = sanitizeForFilename(String((preferredName as NSString).deletingPathExtension))
+            let baseName: String = if let preferredName, !preferredName.isEmpty {
+                sanitizeForFilename(String((preferredName as NSString).deletingPathExtension))
             } else {
-                baseName = "IMG_" + imageTimestampFormatter.string(from: Date())
+                "IMG_" + imageTimestampFormatter.string(from: Date())
             }
             let safeExt = ext.isEmpty ? "png" : ext.lowercased()
             let fileName = dedupeFileName(baseName, ext: safeExt, in: dir)

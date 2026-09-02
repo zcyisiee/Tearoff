@@ -8,8 +8,12 @@ struct IconHoverChrome: ViewModifier {
     var isActive: Bool = false
 
     private var foreground: Color {
-        if isActive { return DesignToken.accent }
-        if isHovered { return DesignToken.bodyStrong }
+        if isActive {
+            return DesignToken.accent
+        }
+        if isHovered {
+            return DesignToken.bodyStrong
+        }
         return DesignToken.muted
     }
 

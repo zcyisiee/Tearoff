@@ -171,7 +171,6 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(imageStorageMode.rawValue, forKey: "imageStorageMode") }
     }
 
-
     /// Whether to automatically check for updates on launch (24h throttle).
     var autoCheckUpdates: Bool = true {
         didSet { UserDefaults.standard.set(autoCheckUpdates, forKey: "autoCheckUpdates") }
@@ -370,15 +369,29 @@ extension Notification.Name {
 
 extension AppSettings {
     /// Card title — largest tier, bold, identity-colored.
-    var boardTitleFont: Font { .system(size: boardFontSize + 3.5, weight: .bold) }
+    var boardTitleFont: Font {
+        .system(size: boardFontSize + 3.5, weight: .bold)
+    }
+
     /// Content H2 — a step under the title, semibold, same accent family.
-    var boardHeadingFont: Font { .system(size: boardFontSize + 2, weight: .semibold) }
+    var boardHeadingFont: Font {
+        .system(size: boardFontSize + 2, weight: .semibold)
+    }
+
     /// Content H3 — a step under H2, semibold, slightly softened accent.
-    var boardSubheadingFont: Font { .system(size: boardFontSize + 1, weight: .semibold) }
+    var boardSubheadingFont: Font {
+        .system(size: boardFontSize + 1, weight: .semibold)
+    }
+
     /// Preview body text.
-    var boardBodyFont: Font { .system(size: boardFontSize) }
+    var boardBodyFont: Font {
+        .system(size: boardFontSize)
+    }
+
     /// Folder / date meta row.
-    var boardMetaFont: Font { .system(size: max(boardFontSize - 2, 9)) }
+    var boardMetaFont: Font {
+        .system(size: max(boardFontSize - 2, 9))
+    }
 }
 
 extension AppSettings.BoardLayout {
@@ -407,4 +420,3 @@ extension AppSettings.ImageStorageMode {
         }
     }
 }
-

@@ -91,5 +91,7 @@ struct OutlineBreadcrumbView: View {
 /// Popover anchor — which breadcrumb segment's child list is open.
 private struct BreadcrumbSegment: Identifiable {
     let index: Int
-    var id: Int { index }
+    var id: Int {
+        index
+    }
 }
