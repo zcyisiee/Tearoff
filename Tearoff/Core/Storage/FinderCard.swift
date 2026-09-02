@@ -49,8 +49,10 @@ struct FinderCard: Identifiable, Hashable {
     /// Identity color (SideNotes-style card color). Persisted in the sidecar.
     var color: NoteColor?
 
-    /// Tall card (two-row browser) vs the default height.
-    var isExpanded: Bool
+    /// Height of the embedded file list in points. nil = default (240). The
+    /// user resizes it with the card's bottom-edge drag handle; persisted in
+    /// the sidecar.
+    var listHeight: Double?
 
     var createdAt: Date
     var modifiedAt: Date
@@ -87,7 +89,7 @@ struct FinderCard: Identifiable, Hashable {
         pinned: Bool = false,
         sortOrder: Int? = nil,
         color: NoteColor? = nil,
-        isExpanded: Bool = false,
+        listHeight: Double? = nil,
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
     ) {
@@ -100,7 +102,7 @@ struct FinderCard: Identifiable, Hashable {
         self.pinned = pinned
         self.sortOrder = sortOrder
         self.color = color
-        self.isExpanded = isExpanded
+        self.listHeight = listHeight
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
@@ -116,7 +118,7 @@ struct FinderCard: Identifiable, Hashable {
             && lhs.pinned == rhs.pinned
             && lhs.sortOrder == rhs.sortOrder
             && lhs.color == rhs.color
-            && lhs.isExpanded == rhs.isExpanded
+            && lhs.listHeight == rhs.listHeight
     }
 }
 
@@ -150,7 +152,7 @@ extension FinderCard {
             pinned: entry.pinned ?? false,
             sortOrder: entry.sortOrder,
             color: entry.color.flatMap(NoteColor.init),
-            isExpanded: entry.isExpanded ?? false,
+            listHeight: entry.listHeight ?? (entry.isExpanded == true ? 480 : nil),
             createdAt: entry.createdAt,
             modifiedAt: entry.modifiedAt,
         )
@@ -171,7 +173,8 @@ extension SidecarStore.FinderCardEntry {
             pinned: card.pinned,
             sortOrder: card.sortOrder,
             color: card.color?.rawValue,
-            isExpanded: card.isExpanded,
+            isExpanded: nil,
+            listHeight: card.listHeight,
             createdAt: card.createdAt,
             modifiedAt: card.modifiedAt,
         )

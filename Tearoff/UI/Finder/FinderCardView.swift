@@ -44,6 +44,8 @@ struct FinderCardView: View {
     @State private var browser = FinderCardBrowser()
     @State private var commands = FinderListCommands()
     @State private var isHovered = false
+    @State private var isResizeHovered = false
+    @State private var resizeOriginHeight: CGFloat?
     @State private var titleDraft = ""
     @State private var errorMessage: String?
     @State private var persistDebouncer = Debouncer(delay: 1.0)
@@ -114,6 +116,11 @@ struct FinderCardView: View {
         .shadow(color: DesignToken.ink.opacity(0.08), radius: 6, y: 2)
         .opacity(isDragging ? 0 : 1)
         .contentShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+        .overlay(alignment: .bottom) {
+            if !isDragging {
+                resizeHandle
+            }
+        }
         .onTapGesture {
             onTap(NSApp.currentEvent?.modifierFlags ?? [])
         }
@@ -173,7 +180,7 @@ struct FinderCardView: View {
 
             Rectangle()
                 .fill(DesignToken.surfaceInset.opacity(0.5))
-                .frame(height: card.isExpanded ? 480 : 240)
+                .frame(height: card.listHeight ?? 240)
                 .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
         }
     }
@@ -508,7 +515,7 @@ struct FinderCardView: View {
             actions: makeActions(),
             commands: commands,
         )
-        .frame(height: card.isExpanded ? 480 : 240)
+        .frame(height: card.listHeight ?? 240)
         .frame(maxWidth: .infinity)
         .background(DesignToken.surfaceInset.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
@@ -620,6 +627,65 @@ struct FinderCardView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+
+    // MARK: - Resize handle
+
+    /// Bottom-edge drag handle for resizing the embedded file list. An
+    /// invisible 8pt hot zone with a subtle grabber line that brightens on
+    /// hover (`NSCursor.resizeUpDown`). Live drags update memory only
+    /// (`persist: false`); the 1s debouncer flushes to disk when the gesture
+    /// ends, so the card's own reorder drag (`minimumDistance: 8`) never
+    /// steals the gesture when a drag starts on the handle.
+    private var resizeHandle: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Capsule()
+                .fill(isResizeHovered ? accentColor : DesignToken.hairlineSoft)
+                .frame(width: 36, height: 3)
+                .padding(.bottom, 2.5)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 8)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering, !isResizeHovered {
+                NSCursor.resizeUpDown.push()
+            } else if !hovering, isResizeHovered {
+                NSCursor.pop()
+            }
+            isResizeHovered = hovering
+        }
+        .onDisappear {
+            if isResizeHovered {
+                NSCursor.pop()
+                isResizeHovered = false
+            }
+        }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { value in
+                    if resizeOriginHeight == nil {
+                        resizeOriginHeight = card.listHeight.map { CGFloat($0) } ?? 240
+                    }
+                    let newHeight = max(200, (resizeOriginHeight ?? 240) + value.translation.height)
+                    noteStore.setFinderCardListHeight(Double(newHeight), for: card.id, persist: false)
+                }
+                .onEnded { value in
+                    let origin = resizeOriginHeight ?? (card.listHeight.map { CGFloat($0) } ?? 240)
+                    let newHeight = max(200, origin + value.translation.height)
+                    // Always pin memory to the final height (a fast flick back to
+                    // the origin can leave a stale intermediate value), but only
+                    // flush to disk when there was a net height change.
+                    noteStore.setFinderCardListHeight(Double(newHeight), for: card.id, persist: false)
+                    if abs(newHeight - origin) > 0.5 {
+                        persistDebouncer.call {
+                            noteStore.saveSidecar()
+                        }
+                    }
+                    resizeOriginHeight = nil
+                },
+        )
     }
 
     // MARK: - Browser lifecycle & wiring

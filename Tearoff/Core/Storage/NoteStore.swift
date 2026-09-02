@@ -905,12 +905,18 @@ final class NoteStore {
         try? SidecarStore.shared.save()
     }
 
-    /// Toggle the tall/default browser height on a card.
-    func toggleExpanded(on card: FinderCard) {
-        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return }
-        finderCards[index].isExpanded.toggle()
+    /// Set the card's file-list height in points. The view passes
+    /// `persist: false` during a live resize (cheap, memory-only) and flushes
+    /// via `saveSidecar()` when the drag ends.
+    func setFinderCardListHeight(_ height: Double, for cardID: UUID, persist: Bool = false) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].listHeight != height
+        else { return }
+        finderCards[index].listHeight = height
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        if persist {
+            try? SidecarStore.shared.save()
+        }
     }
 
     /// Add a directory to the card's favourites and select it. Non-directories

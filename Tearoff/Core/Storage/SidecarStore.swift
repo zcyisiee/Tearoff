@@ -48,7 +48,8 @@ final class SidecarStore {
         var pinned: Bool? // v4 — board pin (nil/false = not pinned)
         var sortOrder: Int? // v4 — manual drag order within a visible list
         var color: String? // NoteColor rawValue
-        var isExpanded: Bool? // v4 — tall vs default height (nil = default)
+        var isExpanded: Bool? // v4 — legacy tall/default flag; migrated into `listHeight` (no longer written)
+        var listHeight: Double? // v5 — file list height in points (nil = default 240)
         var createdAt: Date
         var modifiedAt: Date
     }

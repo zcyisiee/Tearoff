@@ -816,17 +816,12 @@ struct NoteBoardView: View {
 
     /// Single click on the Finder card's title row: modifier clicks fall
     /// through to the card body's selection semantics; a quick second plain
-    /// click reveals the card's directory in Finder; a plain click toggles
-    /// the card's tall/default height.
+    /// click reveals the card's directory in Finder.
     private func handleFinderTitleAreaTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
         if !flags.intersection([.command, .shift]).isEmpty {
             handleFinderCardTap(card, flags: flags, visible: visible)
         } else if consumeDoubleClick(on: card.id) {
             revealFinderCard(card)
-        } else {
-            withAnimation(.snappy(duration: 0.22)) {
-                noteStore.toggleExpanded(on: card)
-            }
         }
     }
 
