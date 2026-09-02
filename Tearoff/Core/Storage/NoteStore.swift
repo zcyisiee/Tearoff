@@ -15,6 +15,9 @@ final class NoteStore {
     // MARK: - State
 
     var notes: [Note] = []
+    /// Finder cards share the board stream with notes — same folder tab
+    /// membership, pin-first order, and manual `sortOrder` identity space.
+    var finderCards: [FinderCard] = []
     var trashedNotes: [Note] = []
     var trashedFolders: [TrashedFolder] = []
     var folders: [Folder] = []
@@ -38,9 +41,12 @@ final class NoteStore {
 
     // MARK: - List Selection (multi-select)
 
-    /// Identity for a row in the note list. Notes use UUID; folders use path.
+    /// Identity for a row in the note list. Notes and Finder cards share a UUID
+    /// identity space (the board keys card frames and drag sessions by UUID);
+    /// folders use path.
     enum SelectableID: Hashable {
         case note(UUID)
+        case finderCard(UUID)
         case folder(String)
     }
 
@@ -137,31 +143,52 @@ final class NoteStore {
         }
     }
 
+    /// Finder cards under the same folder filter as `filteredNotes` (unsorted).
+    var filteredFinderCards: [FinderCard] {
+        if let folder = selectedFolder {
+            finderCards.filter { $0.folder == folder.name }
+        } else {
+            finderCards
+        }
+    }
+
+    /// The Finder card whose embedded file list currently has keyboard focus.
+    /// The panel's ⌘⇧N handler routes shortcuts to it instead of the board.
+    var focusedFinderCardID: UUID?
+
     // MARK: - Sorting
 
     /// Pinned notes always float to the top; within each group the requested
     /// sort applies. `.manual` orders by the drag-assigned `sortOrder` (notes
     /// without one fall back to their title) and ignores `ascending`.
     func sortedNotes(_ notes: [Note], by sortBy: AppSettings.SortBy, ascending: Bool) -> [Note] {
-        let ordered = notes.sorted { a, b in
+        sortedBoardItems(notes: notes, finderCards: [], by: sortBy, ascending: ascending).compactMap(\.note)
+    }
+
+    /// Interleave notes and Finder cards into one ordered stream using the
+    /// shared board ordering — the single source of truth both `sortedNotes`
+    /// and the board's keyboard/drag order go through.
+    func sortedBoardItems(notes: [Note], finderCards: [FinderCard], by sortBy: AppSettings.SortBy, ascending: Bool) -> [BoardItem] {
+        let items = notes.map(BoardItem.note) + finderCards.map(BoardItem.finder)
+        let ordered = items.sorted { a, b in
             if sortBy == .manual {
                 switch (a.sortOrder, b.sortOrder) {
                 case let (lhs?, rhs?):
                     if lhs != rhs {
                         return lhs < rhs
                     }
-                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                    return a.sortTitle.localizedCaseInsensitiveCompare(b.sortTitle) == .orderedAscending
                 case (nil, _?):
-                    return false // unpositioned notes sink below positioned ones
+                    return false // unpositioned items sink below positioned ones
                 case (_?, nil):
                     return true
                 case (nil, nil):
-                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                    return a.sortTitle.localizedCaseInsensitiveCompare(b.sortTitle) == .orderedAscending
                 }
             }
             let result: Bool = switch sortBy {
             case .name:
-                a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                a.sortTitle.localizedCaseInsensitiveCompare(b.sortTitle) == .orderedAscending
             case .dateModified:
                 a.modifiedAt < b.modifiedAt
             case .dateCreated:
@@ -391,9 +418,14 @@ final class NoteStore {
             autoPurgeExpiredTrash()
             diskFolderNames = Set((try? FileStorage.discoverFolders()) ?? [])
             refreshFolders()
+            finderCards = SidecarStore.shared.allFinderCardEntries
+                .map { FinderCard(id: $0.id, entry: $0.entry) }
+                .sorted { $0.createdAt < $1.createdAt }
+            focusedFinderCardID = nil
             let noteCount = notes.count
+            let cardCount = finderCards.count
             let trashCount = trashedNotes.count + trashedFolders.count
-            Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(trashCount) trashed items")
+            Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(cardCount) Finder cards, \(trashCount) trashed items")
         } catch {
             Log.storage.error("[NoteStore] loadFromDisk failed — \(error)")
         }
@@ -709,13 +741,26 @@ final class NoteStore {
         }
     }
 
-    /// Assign a fresh manual drag order to every note in `visible`, placing the
-    /// dragged note just above/below its drop target. The first drag flips the
-    /// sort setting to `.manual` so the new order is what the board displays.
+    /// Toggle the board pin on a Finder card (sidecar metadata only).
+    func togglePin(on card: FinderCard) {
+        setPinned(!card.pinned, on: card)
+    }
+
+    func setPinned(_ pinned: Bool, on card: FinderCard) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return }
+        guard finderCards[index].pinned != pinned else { return }
+        finderCards[index].pinned = pinned
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Assign a fresh manual drag order to every visible board item, placing
+    /// the dragged one just above/below its drop target. The first drag flips
+    /// the sort setting to `.manual` so the new order is what the board displays.
     /// Pass `persist: false` for live in-drag commits — the board saves the
     /// sidecar once when the drag ends instead of hitting the disk on every
     /// reorder crossing.
-    func reorderNote(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [Note], persist: Bool = true) {
+    func reorderBoardItem(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [BoardItem], persist: Bool = true) {
         guard draggedID != dropTargetID else { return }
         guard visible.contains(where: { $0.id == draggedID }),
               visible.contains(where: { $0.id == dropTargetID })
@@ -735,14 +780,26 @@ final class NoteStore {
                 syncNoteMeta(at: index)
             }
         }
+        for index in finderCards.indices where order[finderCards[index].id] != nil {
+            let newOrder = order[finderCards[index].id]
+            if finderCards[index].sortOrder != newOrder {
+                finderCards[index].sortOrder = newOrder
+                persistFinderCard(finderCards[index])
+            }
+        }
         if AppSettings.shared.sortBy != .manual {
             AppSettings.shared.sortBy = .manual
         }
         if persist {
             try? SidecarStore.shared.save()
         }
-        let targetTitle = notes.first(where: { $0.id == dropTargetID })?.title ?? "?"
+        let targetTitle = visible.first(where: { $0.id == dropTargetID })?.sortTitle ?? "?"
         Log.storage.info("[NoteStore] reorder — '\(draggedID)' → \(above ? "above" : "below", privacy: .public) '\(targetTitle, privacy: .public)'")
+    }
+
+    /// Notes-only form of `reorderBoardItem` kept for existing callers.
+    func reorderNote(_ draggedID: UUID, dropTargetID: UUID, above: Bool, in visible: [Note], persist: Bool = true) {
+        reorderBoardItem(draggedID, dropTargetID: dropTargetID, above: above, in: visible.map(BoardItem.note), persist: persist)
     }
 
     /// Push the current pin/sort metadata of `notes[index]` into its sidecar entry.
@@ -752,6 +809,235 @@ final class NoteStore {
             entry.pinned = note.pinned
             entry.sortOrder = note.sortOrder
             SidecarStore.shared.upsertNote(entry, for: note.id)
+        }
+    }
+
+    /// Snapshot a Finder card into its sidecar entry (without saving to disk).
+    private func persistFinderCard(_ card: FinderCard) {
+        SidecarStore.shared.upsertFinderCard(SidecarStore.FinderCardEntry(card), for: card.id)
+    }
+
+    /// Flush pending sidecard metadata to disk — the escape hatch for callers
+    /// that batched cheap updates with `persist: false`.
+    func saveSidecar() {
+        try? SidecarStore.shared.save()
+    }
+
+    // MARK: - Finder Card CRUD
+
+    /// Create an empty Finder card in `folder`. Under manual sort it takes the
+    /// next position after everything already in that folder.
+    @discardableResult
+    func createFinderCard(in folder: String = "") -> FinderCard {
+        let now = Date()
+        var card = FinderCard(folder: folder, createdAt: now, modifiedAt: now)
+        if AppSettings.shared.sortBy == .manual {
+            let existing = notes.filter { $0.folder == folder }.compactMap(\.sortOrder)
+                + finderCards.filter { $0.folder == folder }.compactMap(\.sortOrder)
+            card.sortOrder = (existing.max() ?? -1) + 1
+        }
+        finderCards.append(card)
+        persistFinderCard(card)
+        try? SidecarStore.shared.save()
+        Log.storage.info("[NoteStore] created Finder card \(card.id) in '\(folder, privacy: .public)'")
+        return card
+    }
+
+    /// Delete a Finder card outright — cards are sidecar metadata only, so
+    /// unlike notes there is no trash round-trip.
+    func deleteFinderCard(_ card: FinderCard) {
+        finderCards.removeAll { $0.id == card.id }
+        SidecarStore.shared.removeFinderCard(id: card.id)
+        selection.remove(.finderCard(card.id))
+        if focusedFinderCardID == card.id {
+            focusedFinderCardID = nil
+        }
+        try? SidecarStore.shared.save()
+        Log.storage.info("[NoteStore] deleted Finder card \(card.id)")
+    }
+
+    /// Replace the stored card wholesale and bump its modified date. The
+    /// browser passes `persist: false` on frequent navigation and flushes via
+    /// `saveSidecar()` later.
+    func updateFinderCard(_ card: FinderCard, persist: Bool = true) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return }
+        var updated = card
+        updated.modifiedAt = Date()
+        finderCards[index] = updated
+        persistFinderCard(updated)
+        if persist {
+            try? SidecarStore.shared.save()
+        }
+    }
+
+    /// Set the card's explicit title; an empty or whitespace-only name clears
+    /// it back to the fallback (selected favourite's name).
+    func renameFinderCard(_ card: FinderCard, to title: String?) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return }
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTitle = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        guard newTitle != finderCards[index].title else { return }
+        finderCards[index].title = newTitle
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set (or clear) the card's identity color.
+    func setFinderCardColor(_ color: NoteColor?, on card: FinderCard) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return }
+        guard finderCards[index].color != color else { return }
+        finderCards[index].color = color
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Move a Finder card between folders. Cards can't collide — they have no
+    /// on-disk file of their own.
+    func moveFinderCard(_ card: FinderCard, to folder: String) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }),
+              finderCards[index].folder != folder
+        else { return }
+        finderCards[index].folder = folder
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set the card's file-list height in points. The view passes
+    /// `persist: false` during a live resize (cheap, memory-only) and flushes
+    /// via `saveSidecar()` when the drag ends.
+    func setFinderCardListHeight(_ height: Double, for cardID: UUID, persist: Bool = false) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].listHeight != height
+        else { return }
+        finderCards[index].listHeight = height
+        persistFinderCard(finderCards[index])
+        if persist {
+            try? SidecarStore.shared.save()
+        }
+    }
+
+    /// Switch a Finder card between its icon grid and list view. Persisted to
+    /// the sidecar immediately (view mode is a discrete, infrequent toggle).
+    func setFinderCardViewMode(_ mode: FinderCardViewMode, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].viewMode != mode
+        else { return }
+        finderCards[index].viewMode = mode
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set a Finder card's sort column and direction. Persisted to the sidecar
+    /// immediately (sort is a discrete, infrequent toggle), mirroring
+    /// `setFinderCardViewMode`.
+    func setFinderCardSort(key: FinderSortKey, ascending: Bool, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].sortKey != key || finderCards[index].sortAscending != ascending
+        else { return }
+        finderCards[index].sortKey = key
+        finderCards[index].sortAscending = ascending
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set a Finder card's icon-grid icon size in points. Persisted
+    /// immediately (discrete, infrequent change), mirroring
+    /// `setFinderCardViewMode`.
+    func setFinderCardIconSize(_ size: Double, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].iconSize != size
+        else { return }
+        finderCards[index].iconSize = size
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set a Finder card's favourites chip font size in points. Persisted
+    /// immediately, mirroring `setFinderCardIconSize`.
+    func setFinderCardChipFontSize(_ size: Double, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].chipFontSize != size
+        else { return }
+        finderCards[index].chipFontSize = size
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Add a directory to the card's favourites and select it. Non-directories
+    /// are rejected; re-adding an existing favourite just re-selects it.
+    @discardableResult
+    func addFavorite(_ url: URL, to card: FinderCard) -> FinderFavorite? {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }) else { return nil }
+        let path = url.standardizedFileURL.path
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            Log.storage.warning("[NoteStore] addFavorite — not a directory: '\(path, privacy: .public)'")
+            return nil
+        }
+        if let existing = finderCards[index].favorites.first(where: { $0.path == path }) {
+            finderCards[index].selectedFavoriteID = existing.id
+            finderCards[index].currentPath = nil
+            persistFinderCard(finderCards[index])
+            try? SidecarStore.shared.save()
+            return existing
+        }
+        let favorite = FinderFavorite(path: path)
+        finderCards[index].favorites.append(favorite)
+        finderCards[index].selectedFavoriteID = favorite.id
+        finderCards[index].currentPath = nil
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+        return favorite
+    }
+
+    /// Remove a favourite from the card. If it was the selected one, selection
+    /// falls back to the first remaining favourite and the browser resets home.
+    func removeFavorite(id favoriteID: UUID, from card: FinderCard) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }),
+              let favIndex = finderCards[index].favorites.firstIndex(where: { $0.id == favoriteID })
+        else { return }
+        let wasSelected = finderCards[index].selectedFavoriteID == favoriteID
+        finderCards[index].favorites.remove(at: favIndex)
+        if wasSelected {
+            finderCards[index].selectedFavoriteID = finderCards[index].favorites.first?.id
+            finderCards[index].currentPath = nil
+        }
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Point the card's browser at a favourite as its home.
+    func selectFavorite(id favoriteID: UUID, in card: FinderCard) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }),
+              finderCards[index].favorites.contains(where: { $0.id == favoriteID }),
+              finderCards[index].selectedFavoriteID != favoriteID
+        else { return }
+        finderCards[index].selectedFavoriteID = favoriteID
+        finderCards[index].currentPath = nil
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Record where the browser currently sits. Navigation is cheap, so this
+    /// only touches the sidecar in memory unless `persist` is set — callers
+    /// flush with `saveSidecar()` when it matters.
+    func setCurrentPath(_ path: String?, for card: FinderCard, persist: Bool = false) {
+        guard let index = finderCards.firstIndex(where: { $0.id == card.id }),
+              finderCards[index].currentPath != path
+        else { return }
+        finderCards[index].currentPath = path
+        persistFinderCard(finderCards[index])
+        if persist {
+            try? SidecarStore.shared.save()
         }
     }
 
@@ -832,12 +1118,17 @@ final class NoteStore {
         let s = AppSettings.shared
         if let parent = selectedFolder?.name {
             let kidFolders = sortedFolders(childFolders(of: parent), by: s.sortBy, ascending: s.sortAscending)
-            let folderNotes = sortedNotes(filteredNotes, by: s.sortBy, ascending: s.sortAscending)
-            return kidFolders.map { .folder($0.name) } + folderNotes.map { .note($0.id) }
+            let folderItems = sortedBoardItems(notes: filteredNotes, finderCards: filteredFinderCards, by: s.sortBy, ascending: s.sortAscending)
+            return kidFolders.map { .folder($0.name) } + folderItems.map(\.selectableID)
         }
         let topLevel = sortedFolders(folders.filter(\.isTopLevel), by: s.sortBy, ascending: s.sortAscending)
-        let rootNotes = sortedNotes(notes.filter(\.folder.isEmpty), by: s.sortBy, ascending: s.sortAscending)
-        return topLevel.map { .folder($0.name) } + rootNotes.map { .note($0.id) }
+        let rootItems = sortedBoardItems(
+            notes: notes.filter(\.folder.isEmpty),
+            finderCards: finderCards.filter(\.folder.isEmpty),
+            by: s.sortBy,
+            ascending: s.sortAscending,
+        )
+        return topLevel.map { .folder($0.name) } + rootItems.map(\.selectableID)
     }
 
     /// Move the selection one row down (or up). When `extending` is true,
@@ -901,6 +1192,9 @@ final class NoteStore {
                 navigateToFolder(folder)
                 return true
             }
+        case .finderCard:
+            // Finder cards handle their own activation in the browser UI.
+            return false
         }
         return false
     }
@@ -927,10 +1221,22 @@ final class NoteStore {
                 nil
             }
         }
-        Log.storage.info("[NoteStore] trashSelection — \(noteIDs.count) notes, \(folderPaths.count) folders")
+        let finderCardIDs: [UUID] = snapshot.compactMap {
+            if case let .finderCard(id) = $0 {
+                id
+            } else {
+                nil
+            }
+        }
+        Log.storage.info("[NoteStore] trashSelection — \(noteIDs.count) notes, \(finderCardIDs.count) Finder cards, \(folderPaths.count) folders")
         for id in noteIDs {
             if let note = notes.first(where: { $0.id == id }) {
                 trashNote(note)
+            }
+        }
+        for id in finderCardIDs {
+            if let card = finderCards.first(where: { $0.id == id }) {
+                deleteFinderCard(card)
             }
         }
         for path in folderPaths where folders.contains(where: { $0.name == path }) {
@@ -960,17 +1266,31 @@ final class NoteStore {
         }
     }
 
+    /// Finder cards currently in the selection (resolved against the live card list).
+    var selectedFinderCards: [FinderCard] {
+        selection.compactMap {
+            if case let .finderCard(id) = $0 {
+                return finderCards.first(where: { $0.id == id })
+            }
+            return nil
+        }
+    }
+
     /// Move every selected note and folder into `targetFolder`.
     /// A target that is a selected folder itself or a descendant of a selected folder is skipped
     /// to avoid moving a folder into itself.
     func moveSelection(toFolder targetFolder: String) {
         guard !selection.isEmpty else { return }
         let noteSnapshot = selectedNotes
+        let cardSnapshot = selectedFinderCards
         let folderSnapshot = selectedFolderPaths
         let noteConflictsBefore = pendingNoteMoveConflicts.count
         let folderConflictsBefore = pendingFolderMoveConflicts.count
         for note in noteSnapshot {
             moveNote(note, to: targetFolder)
+        }
+        for card in cardSnapshot {
+            moveFinderCard(card, to: targetFolder)
         }
         for path in folderSnapshot {
             // Skip moving a folder into itself or any of its own descendants.
@@ -983,7 +1303,7 @@ final class NoteStore {
         let queuedFolders = pendingFolderMoveConflicts.count - folderConflictsBefore
         let movedNotes = noteSnapshot.count - queuedNotes
         let movedFolders = folderSnapshot.count - queuedFolders
-        Log.storage.info("[NoteStore] moveSelection → '\(targetFolder, privacy: .public)' — moved \(movedNotes) notes + \(movedFolders) folders, queued \(queuedNotes + queuedFolders) conflicts")
+        Log.storage.info("[NoteStore] moveSelection → '\(targetFolder, privacy: .public)' — moved \(movedNotes) notes + \(cardSnapshot.count) Finder cards + \(movedFolders) folders, queued \(queuedNotes + queuedFolders) conflicts")
         clearSelection()
     }
 
@@ -1020,22 +1340,29 @@ final class NoteStore {
         }
     }
 
-    /// Batch identity-color set across the selected notes (nil clears).
+    /// Batch identity-color set across the selected notes and Finder cards (nil clears).
     func setNoteColorOnSelection(_ color: NoteColor?) {
         let notes = selectedNotes
-        guard !notes.isEmpty else { return }
         for note in notes {
             setNoteColor(color, on: note)
         }
+        for card in selectedFinderCards {
+            setFinderCardColor(color, on: card)
+        }
+        guard !notes.isEmpty || !selectedFinderCards.isEmpty else { return }
+        try? SidecarStore.shared.save()
     }
 
-    /// Batch pin/unpin across the selected notes.
+    /// Batch pin/unpin across the selected notes and Finder cards.
     func setPinnedOnSelection(_ pinned: Bool) {
         let notes = selectedNotes
-        guard !notes.isEmpty else { return }
         for note in notes {
             setPinned(pinned, on: note)
         }
+        for card in selectedFinderCards {
+            setPinned(pinned, on: card)
+        }
+        guard !notes.isEmpty || !selectedFinderCards.isEmpty else { return }
         try? SidecarStore.shared.save()
     }
 
@@ -1274,6 +1601,21 @@ final class NoteStore {
         // Remove notes from active array
         notes.removeAll { $0.folder == name || $0.folder.hasPrefix(prefix) }
 
+        // Finder cards aren't destroyed with the folder — they repot to root.
+        let repottedIDs = finderCards
+            .filter { $0.folder == name || $0.folder.hasPrefix(prefix) }
+            .map(\.id)
+        if !repottedIDs.isEmpty {
+            for id in repottedIDs {
+                if let index = finderCards.firstIndex(where: { $0.id == id }) {
+                    finderCards[index].folder = ""
+                    persistFinderCard(finderCards[index])
+                }
+            }
+            try? SidecarStore.shared.save()
+            Log.storage.info("[NoteStore] trashFolder — repotted \(repottedIDs.count) Finder cards to root")
+        }
+
         let displayName = (name as NSString).lastPathComponent
         let savedDirname = "\(folderID.uuidString)_\(displayName)"
         trashedFolders.append(TrashedFolder(
@@ -1465,6 +1807,14 @@ final class NoteStore {
             })
             updateSidecarPaths(for: notes)
             SidecarStore.shared.renameFolderEntries(from: oldName, to: newFullPath)
+            SidecarStore.shared.renameFinderCardFolders(from: oldName, to: newFullPath)
+            for i in finderCards.indices {
+                if finderCards[i].folder == oldName {
+                    finderCards[i].folder = newFullPath
+                } else if finderCards[i].folder.hasPrefix(oldPrefix) {
+                    finderCards[i].folder = newFullPath + String(finderCards[i].folder.dropFirst(oldName.count))
+                }
+            }
             try? SidecarStore.shared.save()
             refreshFolders()
         } catch {
@@ -1592,6 +1942,14 @@ final class NoteStore {
             })
             updateSidecarPaths(for: notes)
             SidecarStore.shared.renameFolderEntries(from: name, to: newFullPath)
+            SidecarStore.shared.renameFinderCardFolders(from: name, to: newFullPath)
+            for i in finderCards.indices {
+                if finderCards[i].folder == name {
+                    finderCards[i].folder = newFullPath
+                } else if finderCards[i].folder.hasPrefix(oldPrefix) {
+                    finderCards[i].folder = newFullPath + "/" + String(finderCards[i].folder.dropFirst(oldPrefix.count))
+                }
+            }
             try? SidecarStore.shared.save()
             refreshFolders()
         } catch {

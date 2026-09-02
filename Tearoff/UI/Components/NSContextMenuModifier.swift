@@ -68,8 +68,14 @@ struct NSContextMenuModifier: ViewModifier {
     static var menuGeneration = 0
 
     func body(content: Content) -> some View {
-        content.overlay {
-            NSContextMenuOverlay(menuBuilder: menuBuilder)
+        // The catcher goes UNDER the content, not over it: as an overlay its
+        // NSView sits topmost and swallows every right-click in its frame —
+        // e.g. the board-wide new-items menu shadowed each card's own menus
+        // (path bar, card chrome, file lists). As a background layer it is a
+        // fallback: embedded NSViews (file lists, deeper catchers) hit-test
+        // first, and this menu fires only over SwiftUI-drawn regions.
+        content.background {
+            NSContextMenuCatcherView(menuBuilder: menuBuilder)
         }
     }
 }
@@ -81,9 +87,9 @@ extension View {
     }
 }
 
-// MARK: - NSViewRepresentable overlay
+// MARK: - NSViewRepresentable background catcher
 
-private struct NSContextMenuOverlay: NSViewRepresentable {
+private struct NSContextMenuCatcherView: NSViewRepresentable {
     let menuBuilder: () -> NSMenu
 
     func makeNSView(context _: Context) -> ContextMenuCatcher {

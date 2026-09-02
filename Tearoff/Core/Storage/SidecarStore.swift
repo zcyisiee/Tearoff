@@ -33,11 +33,38 @@ final class SidecarStore {
         var color: String // TagColor rawValue
     }
 
+    struct FinderCardEntry: Codable {
+        struct FavoriteEntry: Codable {
+            var id: String
+            var path: String
+            var displayName: String
+        }
+
+        var title: String? // nil → UI falls back to selected favourite's displayName
+        var folder: String // Tearoff folder path, "" = root
+        var favorites: [FavoriteEntry]
+        var selectedFavoriteID: String?
+        var currentPath: String? // absolute path currently browsed
+        var pinned: Bool? // v4 — board pin (nil/false = not pinned)
+        var sortOrder: Int? // v4 — manual drag order within a visible list
+        var color: String? // NoteColor rawValue
+        var isExpanded: Bool? // v4 — legacy tall/default flag; migrated into `listHeight` (no longer written)
+        var listHeight: Double? // v5 — file list height in points (nil = default 240)
+        var viewMode: String? // v6 — file list view: "icon" / "list" (nil = default icon)
+        var sortKey: String? // v7 — file list sort column: "name" / "kind" / "modifiedDate" (nil = default name)
+        var sortAscending: Bool? // v7 — file list sort direction (nil = default ascending)
+        var iconSize: Double? // v8 — icon-grid icon size in points (nil = default 64)
+        var chipFontSize: Double? // v8 — favourites chip font size in points (nil = default 11)
+        var createdAt: Date
+        var modifiedAt: Date
+    }
+
     struct Payload: Codable {
-        var version: Int = 3
+        var version: Int = 4
         var notes: [String: NoteEntry] = [:] // UUID string → NoteEntry
         var trash: [String: TrashEntry] = [:] // UUID string → TrashEntry
         var folders: [String: FolderEntry] = [:] // folder path → FolderEntry
+        var finderCards: [String: FinderCardEntry] = [:] // UUID string → FinderCardEntry
 
         init() {}
 
@@ -47,10 +74,11 @@ final class SidecarStore {
             notes = try c.decodeIfPresent([String: NoteEntry].self, forKey: .notes) ?? [:]
             trash = try c.decodeIfPresent([String: TrashEntry].self, forKey: .trash) ?? [:]
             folders = try c.decodeIfPresent([String: FolderEntry].self, forKey: .folders) ?? [:]
+            finderCards = try c.decodeIfPresent([String: FinderCardEntry].self, forKey: .finderCards) ?? [:]
         }
 
         private enum CodingKeys: String, CodingKey {
-            case version, notes, trash, folders
+            case version, notes, trash, folders, finderCards
         }
     }
 
@@ -79,12 +107,13 @@ final class SidecarStore {
         let count = data.notes.count
         let version = data.version
         Log.storage.info("[Sidecar] loaded \(count) note entries (v\(version))")
-        // v2 → v3: pin/order fields are optional on NoteEntry, so old payloads
-        // decode as-is; just stamp the new version back to disk.
-        if data.version < 3 {
-            data.version = 3
+        // v2 → v4: newer fields (pin/order, finder cards) are optional in their
+        // entries, so old payloads decode as-is; just stamp the new version back
+        // to disk.
+        if data.version < 4 {
+            data.version = 4
             try? save()
-            Log.storage.info("[Sidecar] migrated payload v2 → v3")
+            Log.storage.info("[Sidecar] migrated payload v\(version) → v4")
         }
     }
 
@@ -140,6 +169,45 @@ final class SidecarStore {
 
     func removeTrash(id: UUID) {
         data.trash.removeValue(forKey: id.uuidString)
+    }
+
+    // MARK: - Finder cards
+
+    func finderCardEntry(for id: UUID) -> FinderCardEntry? {
+        data.finderCards[id.uuidString]
+    }
+
+    func upsertFinderCard(_ entry: FinderCardEntry, for id: UUID) {
+        data.finderCards[id.uuidString] = entry
+    }
+
+    func removeFinderCard(id: UUID) {
+        data.finderCards.removeValue(forKey: id.uuidString)
+    }
+
+    var allFinderCardEntries: [(id: UUID, entry: FinderCardEntry)] {
+        data.finderCards.compactMap { uuidStr, entry in
+            guard let id = UUID(uuidString: uuidStr) else { return nil }
+            return (id, entry)
+        }
+    }
+
+    /// Rewrites `finderCards[*].folder` after a folder rename / move. Matches
+    /// the renamed folder itself plus every card living in a sub-folder of it.
+    func renameFinderCardFolders(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        let oldPrefix = oldPath + "/"
+        let newPrefix = newPath + "/"
+        for key in Array(data.finderCards.keys) {
+            guard var entry = data.finderCards[key] else { continue }
+            if entry.folder == oldPath {
+                entry.folder = newPath
+                data.finderCards[key] = entry
+            } else if entry.folder.hasPrefix(oldPrefix) {
+                entry.folder = newPrefix + String(entry.folder.dropFirst(oldPrefix.count))
+                data.finderCards[key] = entry
+            }
+        }
     }
 
     // MARK: - Folders

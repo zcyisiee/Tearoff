@@ -1,5 +1,36 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - Dragged image-file types
+
+extension NSPasteboard.PasteboardType {
+    /// Pasteboard types that make the drop overlays a candidate drag
+    /// destination for image *file* drags only.
+    ///
+    /// AppKit routes a drag to the topmost view registered for a declared
+    /// pasteboard type and does not fall through, so a `.fileURL` registration
+    /// here would swallow every Finder file drag before the Finder cards below
+    /// ever receive `validateDrop` / `acceptDrop`. Registering only image
+    /// content types keeps the overlays as image-only candidates, letting
+    /// non-image file drags fall through to the cards (which register `.fileURL`).
+    ///
+    /// We register both the `public.image` parent (in case the OS matches by
+    /// UTI conformance) and the concrete image UTIs (in case it matches by
+    /// literal pasteboard type — the concrete set is what Finder declares for
+    /// an image-file drag). The concrete types are derived from the same
+    /// filename extensions the editor accepts via `UTType`, so we stay in sync
+    /// with the image formats the overlays actually handle.
+    static let imageFileDragTypes: [NSPasteboard.PasteboardType] = {
+        var identifiers: Set<String> = [UTType.image.identifier]
+        for ext in ["jpg", "jpeg", "png", "gif", "webp", "tiff", "tif", "bmp", "heic", "heif"] {
+            if let type = UTType(filenameExtension: ext) {
+                identifiers.insert(type.identifier)
+            }
+        }
+        return identifiers.sorted().map { NSPasteboard.PasteboardType($0) }
+    }()
+}
 
 // MARK: - Drop target view
 
@@ -10,7 +41,7 @@ final class DropTargetView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes(NSPasteboard.PasteboardType.imageFileDragTypes)
     }
 
     @available(*, unavailable)
@@ -87,7 +118,7 @@ final class BoardImageDropView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes(NSPasteboard.PasteboardType.imageFileDragTypes)
     }
 
     @available(*, unavailable)

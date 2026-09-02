@@ -75,3 +75,7 @@ build_*/
 
 # Task briefs / agent logs (local only)
 pi-briefs/
+subagents-plan/
+
+# Agent's plan
+AGENTS.md

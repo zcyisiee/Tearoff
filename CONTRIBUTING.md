@@ -72,12 +72,19 @@ Tearoff/
 │   ├── Shortcuts/
 │   │   ├── ShortcutManager.swift   #   Carbon RegisterEventHotKey global shortcut
 │   │   └── KeyCodeTranslator.swift #   Virtual key code → display string mapping
+│   ├── Finder/                     # Finder-card engine (no UI)
+│   │   ├── FinderCardBrowser.swift #   @Observable per-card browser — background enumeration, file ops, watcher lifecycle
+│   │   ├── DirectoryWatcher.swift  #   One DispatchSource vnode watcher per visible card (debounced, fd closed on stop)
+│   │   ├── FileIconCache.swift     #   NSCache of 16pt file icons keyed by UTType / folder / package path
+│   │   └── FinderEntry.swift       #   Row model (url, name, isDirectory, isPackage, date, size, UTType id)
 │   ├── Storage/
-│   │   ├── NoteStore.swift         #   @Observable — note CRUD, trash, folders, tag filter, multi-selection + batch ops, move-conflict queue
+│   │   ├── NoteStore.swift         #   @Observable — note + Finder-card CRUD, trash, folders, tag filter, multi-selection + batch ops, move-conflict queue
 │   │   ├── FileStorage.swift       #   Plain .md file I/O (no YAML); asset dir management
-│   │   ├── SidecarStore.swift      #   In-memory .tearoff/meta.json store + persistence
+│   │   ├── SidecarStore.swift      #   In-memory .tearoff/meta.json store + persistence (v4: notes, trash, folders, finderCards)
 │   │   ├── SidecarMigration.swift  #   One-time migration: strips YAML, restores timestamps
 │   │   ├── Note.swift              #   Note model (id, title, body, timestamps, tags, savedAt)
+│   │   ├── FinderCard.swift        #   Finder card model (favourites, selected favourite, current path, pin/order/color) — sidecar-only, no .md
+│   │   ├── BoardItem.swift         #   enum { note | finder } — the board's single ordered card stream
 │   │   ├── Folder.swift            #   Folder model
 │   │   ├── TagColor.swift          #   Finder-style 7-color tag palette
 │   │   └── TrashedFolder.swift     #   Trashed folder with expiry metadata
@@ -111,6 +118,7 @@ Tearoff/
 │   │   ├── NSContextMenuModifier.swift  # NSMenu context menus with SF Symbol icons
 │   │   ├── NoteCardView.swift      #   Note list row (title, preview, date)
 │   │   ├── NoteListMenus.swift     #   Note/folder context menu builders (incl. Tags submenu)
+│   │   ├── FinderCardMenus.swift   #   Finder card / file / favourite context menus (Open With, Reveal, Trash …)
 │   │   ├── PageLayout.swift        #   Navigation page chrome (header + content + footer)
 │   │   ├── PinButton.swift         #   Toggle for PanelSettings.isPanelPinned
 │   │   ├── ShortcutRecorderView.swift   # Key capture field for shortcut settings
@@ -118,6 +126,10 @@ Tearoff/
 │   │   ├── TagDotsView.swift       #   Inline colored dots for note rows
 │   │   ├── TagFilterBar.swift      #   Search-context tag filter strip
 │   │   └── VisualEffectView.swift  #   NSVisualEffectView wrapper with optional tint sublayer
+│   ├── Finder/
+│   │   ├── FinderCardView.swift    #   Finder card chrome: favourites bar, breadcrumb, list host, footer (mirrors BoardNoteCard)
+│   │   ├── FinderFileListView.swift#   NSTableView file list — selection, inline rename, keyboard, drag source + drop target
+│   │   └── FinderBrowserRegistry.swift # Live browsers by card id for panel-level hooks (Escape, ⌘⇧N, watcher suspend/resume)
 │   └── Settings/
 │       ├── SettingsView.swift      #   Tab container (General, Behavior, Tags, Keyboard, About)
 │       ├── GeneralSettingsTab.swift #   Appearance (incl. panel style/tint), editor font, language, multi-root storage list
@@ -155,9 +167,10 @@ Tearoff/
 | **Multiple storage locations** | `StorageSettings` owns a list of `StorageRoot`s + an `activeRootID` (persistent default) + an in-memory `sessionRootOverride` (menu-bar temporary switch, reverts on restart). `resolvedStorageDirectory` resolves session-override → active root → legacy → default. All storage (`FileStorage.rootURL`, `SidecarStore`, `.trash/`) reads the active root live, so flipping it re-points the whole layer — but in-memory `NoteStore`/`SidecarStore` must be reloaded (`AppDelegate.switchRoot(to:temporary:dismissPicker:)` is the single path: save dirty → set override/activeID → `SidecarStore.load` → `noteStore.loadFromDisk`, wrapped in `withAnimation` for a row crossfade). Per-root isolation: each root has its own sidecar, trash, and external-edit scope. |
 | **Local shortcut monitor** | `SidePanelController` installs an `NSEvent.addLocalMonitorForEvents` that checks all six configurable local shortcuts at event time. Settings changes take effect immediately without re-registration. |
 | **JSON i18n** | `L10n` loads locale JSON at runtime. Access: `l10n["key"]` or `l10n.t("key", arg1, arg2)` for interpolation |
-| **OSLog diagnostics** | 6 categorized loggers (app, storage, window, shortcuts, navigation, updates). View in Console.app with `subsystem:io.github.zcyisiee.Tearoff` |
+| **OSLog diagnostics** | 7 categorized loggers (app, storage, window, shortcuts, navigation, updates, finder). View in Console.app with `subsystem:io.github.zcyisiee.Tearoff` |
 | **Move conflict queue** | Name-conflict pre-flight uses filesystem-aware helpers (`noteFilenameWouldCollide`, `folderWouldCollide`) that check both in-memory state and the destination on disk. Conflicts are queued, not singletons — `MoveConflictAlerts` reads the queue head and surfaces batch buttons (Keep Both All / Replace All / Skip / Cancel) when more than one is pending. Resolver branches handle orphan files / directories at the destination. |
 | **DMG auto-update** | `UpdateChecker` queries GitHub Releases API. `UpdateInstaller`: mount DMG → verify bundle ID → copy → replace → restart |
+| **Finder cards** | A second card kind with no `.md` behind it — `FinderCard` lives only in the sidecar (`finderCards`, schema v4; older payloads decode unchanged). Notes and Finder cards share one identity space (UUID) and one ordered stream (`BoardItem`, `NoteStore.sortedBoardItems` / `reorderBoardItem`), so pin-first, manual order, folder tabs, and multi-selection work across both. The card chrome is SwiftUI (`FinderCardView`), the file list is an `NSTableView` (`FinderFileListView`) because it natively gives multi-select, inline rename, type-select, and — crucially — `NSDraggingSource` drag-out with begin/end callbacks. Drag-out suspends panel auto-hide via `SidePanelController.suspendAutoHide()` / `resumeAutoHide(treatAsMouseExit:)`. Watching is one `DispatchSource` vnode source per *mounted* card on its *current* directory only, debounced 200 ms; `FinderBrowserRegistry` suspends all watchers on `hidePanel` (fds closed, zero idle CPU) and re-enumerates + re-arms on `showPanel`. Keyboard focus is tracked in `NoteStore.focusedFinderCardID`: while set, the panel's ↑/↓/Return monitor stands down and ⌘⇧N creates a folder inside the card instead of a Tearoff folder; Escape clears the file selection first. |
 
 ---
 

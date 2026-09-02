@@ -39,8 +39,8 @@ final class BoardCardLayout {
 /// the whole board.
 @Observable
 final class BoardDragSession {
-    /// The note being dragged (`nil` = no active drag).
-    private(set) var note: Note?
+    /// The board item being dragged — note or Finder card (`nil` = no active drag).
+    private(set) var item: BoardItem?
     /// Where inside the card the pointer grabbed, in `BoardCardSpace`.
     private(set) var grabOffset: CGSize = .zero
     /// Captured card size — keeps the replica at the source card's footprint.
@@ -48,12 +48,18 @@ final class BoardDragSession {
     /// Current pointer position in `BoardCardSpace`.
     private(set) var pointer: CGPoint?
 
-    var noteID: UUID? {
-        note?.id
+    var itemID: UUID? {
+        item?.id
     }
 
-    func begin(note: Note, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
-        self.note = note
+    /// Note id when dragging a note, nil for Finder cards (kept for callers
+    /// that only care about notes).
+    var noteID: UUID? {
+        item?.note?.id
+    }
+
+    func begin(item: BoardItem, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
+        self.item = item
         self.grabOffset = grabOffset
         self.size = size
         self.pointer = pointer
@@ -64,7 +70,7 @@ final class BoardDragSession {
     }
 
     func end() {
-        note = nil
+        item = nil
         pointer = nil
     }
 }
@@ -88,6 +94,7 @@ final class BoardDragSession {
 struct BoardNoteCard: View {
     @Environment(L10n.self) private var l10n
     @Environment(AppSettings.self) private var appSettings
+    @Environment(NoteStore.self) private var noteStore
     let note: Note
     var isSelected: Bool = false
     /// True while this card is expanded into its in-place editor.
@@ -434,15 +441,21 @@ struct BoardNoteCard: View {
     @ViewBuilder
     private var pinChrome: some View {
         if note.pinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(accentColor)
-                .padding(.top, DesignToken.Space.xs)
-                .padding(.trailing, DesignToken.Space.xs)
-                .padding(2)
-                .help(l10n["note.pinned"])
-        } else if isHovered, let onPinToggle {
-            Button(action: onPinToggle) {
+            // Pinned state is a button too — clicking again unpins (previously
+            // this branch was a static image, so a pinned note could never be
+            // unpinned from its own pin icon).
+            Button(action: togglePin) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(2)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, DesignToken.Space.xs)
+            .padding(.trailing, DesignToken.Space.xs)
+            .help(l10n["note.unpin"])
+        } else if isHovered {
+            Button(action: togglePin) {
                 Image(systemName: "pin")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(DesignToken.mutedSoft)
@@ -453,6 +466,13 @@ struct BoardNoteCard: View {
             .padding(.trailing, DesignToken.Space.xs)
             .help(l10n["note.pin"])
         }
+    }
+
+    /// Pin/unpin through the store's live note — the `note` prop is a value
+    /// snapshot and may be stale by click time.
+    private func togglePin() {
+        guard let current = noteStore.notes.first(where: { $0.id == note.id }) else { return }
+        noteStore.togglePin(on: current)
     }
 
     // MARK: Fill / border
@@ -535,15 +555,27 @@ struct BoardDragReplica: View {
     let session: BoardDragSession
 
     var body: some View {
-        if let note = session.note, let pointer = session.pointer {
-            BoardNoteCard(
-                note: note,
-                isSelected: false,
-                isEditing: false,
-                isDragging: true,
-                isReplica: true,
-                onTap: { _ in },
-            )
+        if let item = session.item, let pointer = session.pointer {
+            Group {
+                switch item {
+                case let .note(note):
+                    BoardNoteCard(
+                        note: note,
+                        isSelected: false,
+                        isEditing: false,
+                        isDragging: true,
+                        isReplica: true,
+                        onTap: { _ in },
+                    )
+                case let .finder(card):
+                    FinderCardView(
+                        card: card,
+                        isDragging: true,
+                        isReplica: true,
+                        onTap: { _ in },
+                    )
+                }
+            }
             // Pin to the captured source footprint. The board-content
             // overlay proposes its full height to the replica, and the
             // replica's natural height can also diverge from the slot (an
