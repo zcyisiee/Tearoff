@@ -741,9 +741,6 @@ struct NoteBoardView: View {
             onTap: { flags in
                 handleFinderCardTap(card, flags: flags, visible: visible)
             },
-            onTitleAreaTap: { flags in
-                handleFinderTitleAreaTap(card, flags: flags, visible: visible)
-            },
             onPinToggle: { noteStore.togglePin(on: card) },
             onDragTick: { location, start in
                 handleDragTick(.finder(card), location: location, start: start, visible: visible)
@@ -811,17 +808,6 @@ struct NoteBoardView: View {
             )
         } else if !noteStore.selection.isEmpty {
             noteStore.clearSelection()
-        }
-    }
-
-    /// Single click on the Finder card's title row: modifier clicks fall
-    /// through to the card body's selection semantics; a quick second plain
-    /// click reveals the card's directory in Finder.
-    private func handleFinderTitleAreaTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
-        if !flags.intersection([.command, .shift]).isEmpty {
-            handleFinderCardTap(card, flags: flags, visible: visible)
-        } else if consumeDoubleClick(on: card.id) {
-            revealFinderCard(card)
         }
     }
 

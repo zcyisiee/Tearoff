@@ -8,6 +8,8 @@
   "finder.file.showHidden": "छिपी फ़ाइलें दिखाएँ",
   "finder.file.quickLook": "त्वरित दृश्य",
   "finder.file.getInfo": "जानकारी प्राप्त करें",
+  "finder.iconSize.menu": "आइकन आकार",
+  "finder.chipFont.menu": "फ़ोल्डर चिप फ़ॉन्ट आकार",
   "app.name": "Tearoff",
   "menu.toggle": "Tearoff दिखाएं/छिपाएं",
   "menu.settings": "सेटिंग्स…",

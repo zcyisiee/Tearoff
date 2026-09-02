@@ -332,8 +332,54 @@ enum FinderCardMenus {
         }
 
         menu.addItem(.separator())
+
+        // Icon-grid icon size (per card).
+        let iconSizeItem = NSMenuItem(title: l10n["finder.iconSize.menu"], action: nil, keyEquivalent: "")
+        iconSizeItem.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)
+        iconSizeItem.submenu = iconSizeSubmenu(card: card, noteStore: noteStore)
+        menu.addItem(iconSizeItem)
+
+        // Favourites chip font size (per card).
+        let chipFontItem = NSMenuItem(title: l10n["finder.chipFont.menu"], action: nil, keyEquivalent: "")
+        chipFontItem.image = NSImage(systemSymbolName: "textformat.size", accessibilityDescription: nil)
+        chipFontItem.submenu = chipFontSizeSubmenu(card: card, noteStore: noteStore)
+        menu.addItem(chipFontItem)
+
+        menu.addItem(.separator())
         addShowHiddenFilesItem(to: menu, l10n: l10n)
 
+        return menu
+    }
+
+    /// Icon-grid icon size options; the card's current size is checked.
+    private static func iconSizeSubmenu(card: FinderCard, noteStore: NoteStore) -> NSMenu {
+        let menu = NSMenu()
+        let cardID = card.id
+        let current = card.iconSize ?? 64
+        for size in [32.0, 48, 64, 96, 128] {
+            let item = menu.addActionItem(title: "\(Int(size)) pt", icon: "") {
+                noteStore.setFinderCardIconSize(size, for: cardID)
+            }
+            if current == size {
+                item.state = .on
+            }
+        }
+        return menu
+    }
+
+    /// Favourites chip font size options; the card's current size is checked.
+    private static func chipFontSizeSubmenu(card: FinderCard, noteStore: NoteStore) -> NSMenu {
+        let menu = NSMenu()
+        let cardID = card.id
+        let current = card.chipFontSize ?? 11
+        for size in [9.0, 10, 11, 12, 13] {
+            let item = menu.addActionItem(title: "\(Int(size)) pt", icon: "") {
+                noteStore.setFinderCardChipFontSize(size, for: cardID)
+            }
+            if current == size {
+                item.state = .on
+            }
+        }
         return menu
     }
 

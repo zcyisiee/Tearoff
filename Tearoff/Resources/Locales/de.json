@@ -8,6 +8,8 @@
   "finder.file.showHidden": "Ausgeblendete Dateien anzeigen",
   "finder.file.quickLook": "Quick Look",
   "finder.file.getInfo": "Informationen",
+  "finder.iconSize.menu": "Symbolgröße",
+  "finder.chipFont.menu": "Schriftgröße der Ordner-Chips",
   "app.name": "Tearoff",
   "menu.toggle": "Tearoff ein-/ausblenden",
   "menu.settings": "Einstellungen…",

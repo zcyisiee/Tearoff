@@ -945,6 +945,31 @@ final class NoteStore {
         try? SidecarStore.shared.save()
     }
 
+    /// Set a Finder card's icon-grid icon size in points. Persisted
+    /// immediately (discrete, infrequent change), mirroring
+    /// `setFinderCardViewMode`.
+    func setFinderCardIconSize(_ size: Double, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].iconSize != size
+        else { return }
+        finderCards[index].iconSize = size
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
+    /// Set a Finder card's favourites chip font size in points. Persisted
+    /// immediately, mirroring `setFinderCardIconSize`.
+    func setFinderCardChipFontSize(_ size: Double, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].chipFontSize != size
+        else { return }
+        finderCards[index].chipFontSize = size
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
     /// Add a directory to the card's favourites and select it. Non-directories
     /// are rejected; re-adding an existing favourite just re-selects it.
     @discardableResult

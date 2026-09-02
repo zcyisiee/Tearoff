@@ -109,7 +109,11 @@ struct FinderFileListView: NSViewRepresentable {
         table.gridStyleMask = []
         table.focusRingType = .none
         table.registerForDraggedTypes([.fileURL])
-        table.setDraggingSourceOperationMask([.copy, .move, .generic], forLocal: false)
+        // External destinations only get a copy — allowing `.move` makes Finder
+        // choose move for iCloud-synced sources, which triggers the system
+        // "remove from iCloud Drive" confirmation. The card-internal drag
+        // (`forLocal: true`) keeps move so items can be reordered/filed.
+        table.setDraggingSourceOperationMask([.copy], forLocal: false)
         table.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("finder.file"))

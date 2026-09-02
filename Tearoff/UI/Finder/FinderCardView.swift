@@ -3,8 +3,8 @@ import OSLog
 import SwiftUI
 
 /// Finder card on the board: identity-colored title over a mini file browser —
-/// a favourites chip bar, a breadcrumb strip, the AppKit file list, and a meta
-/// row. Chrome mirrors `BoardNoteCard` (fill, border, pin, tap/drag/hover) so
+/// a wrapping favourites chip bar, the AppKit file list, and a breadcrumb
+/// strip. Chrome mirrors `BoardNoteCard` (fill, border, pin, tap/drag/hover) so
 /// the two card kinds read as siblings on the same board: single click selects
 /// via the board, press-drag live-reorders, and the drag replica renders this
 /// same face. The browser engine lives in `@State` and is registered with
@@ -29,7 +29,6 @@ struct FinderCardView: View {
     /// Card is being renamed in place (board-owned state, like note rename).
     var isRenamingTitle: Bool = false
     var onTap: (NSEvent.ModifierFlags) -> Void
-    var onTitleAreaTap: ((NSEvent.ModifierFlags) -> Void)?
     var onPinToggle: (() -> Void)?
     /// Press-drag tick (≥8pt movement): (pointer, press start) in
     /// `BoardCardSpace`; the board owns the drag session.
@@ -75,7 +74,7 @@ struct FinderCardView: View {
 
     // MARK: - Card chrome
 
-    /// Shared visuals: title row + card body on the tinted card, pin chrome,
+    /// Shared visuals: header row + card body on the tinted card, pin chrome,
     /// border. Used verbatim by the interactive card and the drag replica.
     private func cardFace(@ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.sm) {
@@ -99,7 +98,7 @@ struct FinderCardView: View {
 
     private var interactiveBody: some View {
         cardFace {
-            titleRow
+            headerRow
             if card.currentURL == nil {
                 emptyStateContent
             } else {
@@ -109,7 +108,6 @@ struct FinderCardView: View {
                     onError: { handleError($0) },
                     onInteraction: { lastEmbeddedInteraction = Date() },
                 )
-                footerRow
             }
         }
         .background {
@@ -188,18 +186,12 @@ struct FinderCardView: View {
     /// never mounted and the registry never sees this card.
     private var replicaContent: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.sm) {
-            titleRow
+            headerRow
 
             if card.favorites.isEmpty {
                 Text(l10n["finder.empty.noFavorites"])
                     .font(DesignToken.Typography.caption)
                     .foregroundStyle(DesignToken.mutedSoft)
-            } else {
-                HStack(spacing: DesignToken.Space.xs) {
-                    ForEach(card.favorites.prefix(4)) { favorite in
-                        chipLabel(favorite, isSelected: favorite.id == card.selectedFavoriteID)
-                    }
-                }
             }
 
             Rectangle()
@@ -226,10 +218,15 @@ struct FinderCardView: View {
         return card.color != nil ? DesignToken.clearBorder : DesignToken.hairlineSoft
     }
 
-    // MARK: - Title row
+    // MARK: - Header row
 
-    private var titleRow: some View {
-        HStack(spacing: 0) {
+    /// Top row of the card: the wrapping favourite chips on the left and the
+    /// header controls (view toggle / sort / ⋯) on the right, so the controls
+    /// stay visible no matter how many chips wrap. A card being renamed swaps
+    /// the chips for a slim title field at the title's old position; a card
+    /// with no favourites shows only the right-aligned controls.
+    private var headerRow: some View {
+        HStack(alignment: .top, spacing: 0) {
             if isRenamingTitle {
                 TextField(card.displayTitle, text: $titleDraft)
                     .textFieldStyle(.plain)
@@ -241,35 +238,16 @@ struct FinderCardView: View {
                     .onExitCommand {
                         onRenameCancel?()
                     }
+            } else if !card.favorites.isEmpty {
+                favoritesBar
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                HStack(spacing: DesignToken.Space.xs) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(accentColor)
-
-                    Text(card.displayTitle)
-                        .font(appSettings.boardTitleFont)
-                        .foregroundStyle(accentColor)
-                        .lineLimit(1)
-                }
-
-                titleEditToggleArea
+                Spacer(minLength: 0)
             }
 
             headerControls
         }
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Blank area filling the title row's trailing space — the board's
-    /// temporary-edit switch (same contract as `BoardNoteCard`).
-    private var titleEditToggleArea: some View {
-        Color.clear
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onTitleAreaTap?(NSApp.currentEvent?.modifierFlags ?? [])
-            }
     }
 
     /// Switches the embedded file list between its icon grid and list view.
@@ -368,15 +346,21 @@ struct FinderCardView: View {
     @ViewBuilder
     private var pinChrome: some View {
         if card.pinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(accentColor)
-                .padding(.top, DesignToken.Space.xs)
-                .padding(.trailing, DesignToken.Space.xs)
-                .padding(2)
-                .help(l10n["note.pinned"])
-        } else if isHovered, let onPinToggle {
-            Button(action: onPinToggle) {
+            // Pinned state is a button too — clicking again unpins (previously
+            // this branch was a static image, so a pinned card could never be
+            // unpinned from its own pin icon).
+            Button(action: togglePin) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(2)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, DesignToken.Space.xs)
+            .padding(.trailing, DesignToken.Space.xs)
+            .help(l10n["note.unpin"])
+        } else if isHovered {
+            Button(action: togglePin) {
                 Image(systemName: "pin")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(DesignToken.mutedSoft)
@@ -389,18 +373,63 @@ struct FinderCardView: View {
         }
     }
 
-    // MARK: - Favourites chip (drag replica)
+    /// Pin/unpin through the store's live card — the `card` prop is a value
+    /// snapshot and may be stale by click time.
+    private func togglePin() {
+        guard let current = noteStore.finderCards.first(where: { $0.id == card.id }) else { return }
+        noteStore.togglePin(on: current)
+    }
 
-    /// Chip visuals shared by the drag replica. The favourites bar itself is
-    /// gone — the card header now uses the "⋯" menu for favourites.
+    // MARK: - Favourites bar
+
+    /// Wrapping row of favourite-folder chips on the card's top row. Shown for
+    /// any non-empty favourite set — a single favourite renders as the
+    /// selected chip, since the removed title no longer names the current
+    /// folder. Clicking a chip switches the card's home folder;
+    /// right-clicking offers reveal / remove.
+    @ViewBuilder
+    private var favoritesBar: some View {
+        if !card.favorites.isEmpty {
+            FavoritesFlowLayout(spacing: DesignToken.Space.xs) {
+                ForEach(card.favorites) { favorite in
+                    Button {
+                        selectFavorite(favorite)
+                    } label: {
+                        chipLabel(favorite, isSelected: favorite.id == card.selectedFavoriteID)
+                    }
+                    .buttonStyle(.plain)
+                    .nsContextMenu {
+                        FinderCardMenus.favoriteMenu(
+                            favorite: favorite,
+                            card: card,
+                            noteStore: noteStore,
+                            l10n: l10n,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /// Switch the card's home folder through the store's live card (the `card`
+    /// prop is a value snapshot). The browser follows via
+    /// `onChange(of: card.selectedFavoriteID)` → `syncBrowserWithURL`.
+    private func selectFavorite(_ favorite: FinderFavorite) {
+        guard let current = noteStore.finderCards.first(where: { $0.id == card.id }) else { return }
+        noteStore.selectFavorite(id: favorite.id, in: current)
+    }
+
+    /// Chip visuals shared by the favourites bar and the drag replica. The
+    /// font size is a per-card setting (`chipFontSize`, default 11).
     private func chipLabel(_ favorite: FinderFavorite, isSelected: Bool) -> some View {
-        HStack(spacing: DesignToken.Space.xs) {
+        let fontSize = CGFloat(card.chipFontSize ?? 11)
+        return HStack(spacing: DesignToken.Space.xs) {
             Image(systemName: "folder")
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(size: max(fontSize - 2, 7), weight: .medium))
                 .foregroundStyle(isSelected ? DesignToken.onAccent : accentColor)
 
             Text(favorite.displayName)
-                .font(DesignToken.Typography.caption)
+                .font(.system(size: fontSize))
                 .foregroundStyle(isSelected ? DesignToken.onAccent : DesignToken.bodyText)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -543,6 +572,7 @@ struct FinderCardView: View {
                     actions: makeActions(),
                     commands: commands,
                     quickLook: quickLookController,
+                    iconSize: CGFloat(card.iconSize ?? 64),
                 )
             } else {
                 FinderFileListView(
@@ -559,6 +589,7 @@ struct FinderCardView: View {
         .background(DesignToken.surfaceInset.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
         .overlay { fileListOverlay }
+        .overlay(alignment: .bottom) { errorBanner }
     }
 
     private var appearance: FinderListAppearance {
@@ -673,29 +704,28 @@ struct FinderCardView: View {
         }
     }
 
-    // MARK: - Footer
+    // MARK: - Error banner
 
-    private var footerRow: some View {
-        HStack(spacing: DesignToken.Space.xs) {
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(DesignToken.Typography.caption)
-                    .foregroundStyle(DesignToken.error)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } else {
-                Text(l10n.t("finder.itemCount", "\(browser.totalCount)"))
-                    .font(DesignToken.Typography.caption)
-                    .foregroundStyle(DesignToken.mutedSoft)
-            }
-
-            Spacer(minLength: 0)
-
-            Text(card.folder.isEmpty ? l10n["common.root"] : (card.folder as NSString).lastPathComponent)
-                .font(appSettings.boardMetaFont)
-                .foregroundStyle(DesignToken.mutedSoft)
+    /// Transient operation-error banner pinned to the file list's bottom edge
+    /// (the old footer row carried this; the footer itself was removed to keep
+    /// the card lean). Auto-clears via `handleError`'s 3-second timer.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let errorMessage {
+            Text(errorMessage)
+                .font(DesignToken.Typography.caption)
+                .foregroundStyle(DesignToken.error)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .padding(.horizontal, DesignToken.Space.sm)
+                .padding(.vertical, 4)
+                .background {
+                    Capsule().fill(DesignToken.solidCard)
+                }
+                .overlay {
+                    Capsule().strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
+                }
+                .padding(DesignToken.Space.sm)
         }
     }
 
@@ -801,10 +831,27 @@ struct FinderCardView: View {
     /// Store-driven navigation (`selectFavorite`, `removeFavorite`, …) lands
     /// here; compare standardized paths so the browser's own
     /// `onCurrentURLChanged` write-back can't loop.
+    ///
+    /// The navigation is deferred to the main actor instead of running inline
+    /// from `.onChange`. `onChange` fires during SwiftUI's view-update phase;
+    /// mutating the `@Observable` browser (and, through `onCurrentURLChanged`,
+    /// the `@Observable` store) from inside that phase can re-invalidate the
+    /// body mid-update and wedge the card — the reported "click a chip, card
+    /// freezes" failure. The target is re-derived from the *live* card on the
+    /// main actor (not the `card` value snapshot captured by `onChange`), so a
+    /// fast burst of chip taps always settles on the last folder clicked, and
+    /// the re-checked standardized-path guard turns duplicate deferred
+    /// navigations from the same update cycle into no-ops.
     private func syncBrowserWithURL() {
-        let target = card.currentURL?.standardizedFileURL
-        guard target?.path != browser.currentURL?.standardizedFileURL.path else { return }
-        browser.navigate(to: target, recordsHistory: false)
+        let store = noteStore
+        let cardID = card.id
+        let browser = browser
+        Task { @MainActor in
+            guard let live = store.finderCards.first(where: { $0.id == cardID }) else { return }
+            let target = live.currentURL?.standardizedFileURL
+            guard target?.path != browser.currentURL?.standardizedFileURL.path else { return }
+            browser.navigate(to: target, recordsHistory: false)
+        }
     }
 
     /// Re-applies the card's sort column/direction to the browser and reloads.
@@ -841,5 +888,74 @@ private extension DesignToken {
     /// Hairline that reads on tinted cards (same helper as BoardNoteCard).
     static var clearBorder: Color {
         Color.primary.opacity(0.12)
+    }
+}
+
+// MARK: - Wrapping chip layout
+
+/// Minimal wrapping HStack for the favourites bar: lays chips left-to-right,
+/// starting a new row whenever the next chip would overflow the proposed
+/// width. Rows are top-aligned and each row's height is its tallest chip.
+private struct FavoritesFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let rows = layoutRows(proposal: proposal, subviews: subviews)
+        var size = CGSize.zero
+        for row in rows {
+            size.width = max(size.width, row.width)
+            size.height += row.height
+        }
+        if rows.count > 1 {
+            size.height += spacing * CGFloat(rows.count - 1)
+        }
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let rows = layoutRows(
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height),
+            subviews: subviews,
+        )
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size),
+                )
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func layoutRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [Row] = []
+        var current = Row()
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if !current.indices.isEmpty, current.width + spacing + size.width > maxWidth {
+                rows.append(current)
+                current = Row()
+            }
+            current.width += (current.indices.isEmpty ? 0 : spacing) + size.width
+            current.height = max(current.height, size.height)
+            current.indices.append(index)
+        }
+        if !current.indices.isEmpty {
+            rows.append(current)
+        }
+        return rows
     }
 }

@@ -364,5 +364,7 @@
   "finder.sort.descending": "Descending",
   "finder.file.showHidden": "Show Hidden Files",
   "finder.file.quickLook": "Quick Look",
-  "finder.file.getInfo": "Get Info"
+  "finder.file.getInfo": "Get Info",
+  "finder.iconSize.menu": "Icon Size",
+  "finder.chipFont.menu": "Folder Chip Font Size"
 }

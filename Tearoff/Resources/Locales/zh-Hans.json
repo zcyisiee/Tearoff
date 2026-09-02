@@ -364,5 +364,7 @@
   "finder.sort.descending": "降序",
   "finder.file.showHidden": "显示隐藏文件",
   "finder.file.quickLook": "快速查看",
-  "finder.file.getInfo": "显示简介"
+  "finder.file.getInfo": "显示简介",
+  "finder.iconSize.menu": "图标大小",
+  "finder.chipFont.menu": "文件夹标记字体"
 }

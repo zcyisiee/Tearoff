@@ -86,6 +86,12 @@ struct FinderCard: Identifiable, Hashable {
     /// Direction of the sort. `true` = ascending. Persisted per card (v7).
     var sortAscending: Bool
 
+    /// Icon-grid icon size in points. nil = default (64). Persisted (v8).
+    var iconSize: Double?
+
+    /// Favourites chip font size in points. nil = default (11). Persisted (v8).
+    var chipFontSize: Double?
+
     var createdAt: Date
     var modifiedAt: Date
 
@@ -125,6 +131,8 @@ struct FinderCard: Identifiable, Hashable {
         viewMode: FinderCardViewMode = .icon,
         sortKey: FinderSortKey = .name,
         sortAscending: Bool = true,
+        iconSize: Double? = nil,
+        chipFontSize: Double? = nil,
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
     ) {
@@ -141,6 +149,8 @@ struct FinderCard: Identifiable, Hashable {
         self.viewMode = viewMode
         self.sortKey = sortKey
         self.sortAscending = sortAscending
+        self.iconSize = iconSize
+        self.chipFontSize = chipFontSize
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
@@ -160,6 +170,8 @@ struct FinderCard: Identifiable, Hashable {
             && lhs.viewMode == rhs.viewMode
             && lhs.sortKey == rhs.sortKey
             && lhs.sortAscending == rhs.sortAscending
+            && lhs.iconSize == rhs.iconSize
+            && lhs.chipFontSize == rhs.chipFontSize
     }
 }
 
@@ -197,6 +209,8 @@ extension FinderCard {
             viewMode: entry.viewMode.flatMap(FinderCardViewMode.init(rawValue:)) ?? .icon,
             sortKey: entry.sortKey.flatMap(FinderSortKey.init(rawValue:)) ?? .name,
             sortAscending: entry.sortAscending ?? true,
+            iconSize: entry.iconSize,
+            chipFontSize: entry.chipFontSize,
             createdAt: entry.createdAt,
             modifiedAt: entry.modifiedAt,
         )
@@ -222,6 +236,8 @@ extension SidecarStore.FinderCardEntry {
             viewMode: card.viewMode.rawValue,
             sortKey: card.sortKey.rawValue,
             sortAscending: card.sortAscending,
+            iconSize: card.iconSize,
+            chipFontSize: card.chipFontSize,
             createdAt: card.createdAt,
             modifiedAt: card.modifiedAt,
         )

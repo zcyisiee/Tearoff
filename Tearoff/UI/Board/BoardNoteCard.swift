@@ -94,6 +94,7 @@ final class BoardDragSession {
 struct BoardNoteCard: View {
     @Environment(L10n.self) private var l10n
     @Environment(AppSettings.self) private var appSettings
+    @Environment(NoteStore.self) private var noteStore
     let note: Note
     var isSelected: Bool = false
     /// True while this card is expanded into its in-place editor.
@@ -440,15 +441,21 @@ struct BoardNoteCard: View {
     @ViewBuilder
     private var pinChrome: some View {
         if note.pinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(accentColor)
-                .padding(.top, DesignToken.Space.xs)
-                .padding(.trailing, DesignToken.Space.xs)
-                .padding(2)
-                .help(l10n["note.pinned"])
-        } else if isHovered, let onPinToggle {
-            Button(action: onPinToggle) {
+            // Pinned state is a button too — clicking again unpins (previously
+            // this branch was a static image, so a pinned note could never be
+            // unpinned from its own pin icon).
+            Button(action: togglePin) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(2)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, DesignToken.Space.xs)
+            .padding(.trailing, DesignToken.Space.xs)
+            .help(l10n["note.unpin"])
+        } else if isHovered {
+            Button(action: togglePin) {
                 Image(systemName: "pin")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(DesignToken.mutedSoft)
@@ -459,6 +466,13 @@ struct BoardNoteCard: View {
             .padding(.trailing, DesignToken.Space.xs)
             .help(l10n["note.pin"])
         }
+    }
+
+    /// Pin/unpin through the store's live note — the `note` prop is a value
+    /// snapshot and may be stale by click time.
+    private func togglePin() {
+        guard let current = noteStore.notes.first(where: { $0.id == note.id }) else { return }
+        noteStore.togglePin(on: current)
     }
 
     // MARK: Fill / border

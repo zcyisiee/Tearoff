@@ -53,6 +53,8 @@ final class SidecarStore {
         var viewMode: String? // v6 — file list view: "icon" / "list" (nil = default icon)
         var sortKey: String? // v7 — file list sort column: "name" / "kind" / "modifiedDate" (nil = default name)
         var sortAscending: Bool? // v7 — file list sort direction (nil = default ascending)
+        var iconSize: Double? // v8 — icon-grid icon size in points (nil = default 64)
+        var chipFontSize: Double? // v8 — favourites chip font size in points (nil = default 11)
         var createdAt: Date
         var modifiedAt: Date
     }

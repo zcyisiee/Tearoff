@@ -10,19 +10,34 @@ import SwiftUI
 /// gutter. Directories-first / name ordering is inherited from the browser's
 /// own `enumerate` — this layout only positions items.
 final class FinderIconFlowLayout: NSCollectionViewFlowLayout {
-    static let iconSize: CGFloat = 64
+    static let defaultIconSize: CGFloat = 64
     static let backdropPad: CGFloat = 4 // selected-icon highlight extends 4pt past the icon
     static let topPadding: CGFloat = 8
     static let spacing: CGFloat = 16 // gutter between items and rows
     static let labelHeight: CGFloat = 30 // two 12pt label lines
     static let bottomPadding: CGFloat = 10
-    /// Drives the column count; the actual item width expands to fill the row.
-    static let nominalWidth: CGFloat = 84
     static let horizontalPad: CGFloat = 10
 
-    var itemHeight: CGFloat = FinderIconFlowLayout.topPadding
-        + FinderIconFlowLayout.backdropPad * 2 + FinderIconFlowLayout.iconSize
-        + 6 + FinderIconFlowLayout.labelHeight + FinderIconFlowLayout.bottomPadding
+    /// Icon edge in points (user-adjustable per card). Drives the item height
+    /// and the nominal column width; mutating it re-lays out the grid.
+    var iconSize: CGFloat = FinderIconFlowLayout.defaultIconSize {
+        didSet {
+            if iconSize != oldValue {
+                invalidateLayout()
+            }
+        }
+    }
+
+    /// Drives the column count; the actual item width expands to fill the row.
+    var nominalWidth: CGFloat {
+        iconSize + 20
+    }
+
+    var itemHeight: CGFloat {
+        FinderIconFlowLayout.topPadding
+            + FinderIconFlowLayout.backdropPad * 2 + iconSize
+            + 6 + FinderIconFlowLayout.labelHeight + FinderIconFlowLayout.bottomPadding
+    }
 
     override func prepare() {
         super.prepare()
@@ -31,11 +46,11 @@ final class FinderIconFlowLayout: NSCollectionViewFlowLayout {
         guard let collectionView else { return }
         let available = max(
             collectionView.bounds.width - FinderIconFlowLayout.horizontalPad * 2,
-            FinderIconFlowLayout.nominalWidth,
+            nominalWidth,
         )
 
         let fit = (available + FinderIconFlowLayout.spacing)
-            / (FinderIconFlowLayout.nominalWidth + FinderIconFlowLayout.spacing)
+            / (nominalWidth + FinderIconFlowLayout.spacing)
         let columns = max(1, Int(fit))
         let itemWidth = (available - FinderIconFlowLayout.spacing * CGFloat(columns - 1))
             / CGFloat(columns)
@@ -87,6 +102,12 @@ final class FinderIconItem: NSCollectionViewItem {
     let nameField = NSTextField(labelWithString: "")
     private let backdrop = FinderIconBackdrop()
 
+    private var backdropWidthConstraint: NSLayoutConstraint!
+    private var backdropHeightConstraint: NSLayoutConstraint!
+    private var iconWidthConstraint: NSLayoutConstraint!
+    private var iconHeightConstraint: NSLayoutConstraint!
+    private var nameHeightConstraint: NSLayoutConstraint!
+
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
@@ -113,33 +134,61 @@ final class FinderIconItem: NSCollectionViewItem {
         nameField.drawsBackground = false
         nameField.backgroundColor = .clear
 
+        let defaultBackdrop = FinderIconFlowLayout.backdropPad * 2 + FinderIconFlowLayout.defaultIconSize
+        backdropWidthConstraint = backdrop.widthAnchor.constraint(equalToConstant: defaultBackdrop)
+        backdropHeightConstraint = backdrop.heightAnchor.constraint(equalToConstant: defaultBackdrop)
+        iconWidthConstraint = iconView.widthAnchor.constraint(equalToConstant: FinderIconFlowLayout.defaultIconSize)
+        iconHeightConstraint = iconView.heightAnchor.constraint(equalToConstant: FinderIconFlowLayout.defaultIconSize)
+        nameHeightConstraint = nameField.heightAnchor.constraint(equalToConstant: FinderIconFlowLayout.labelHeight)
+
         NSLayoutConstraint.activate([
             backdrop.topAnchor.constraint(equalTo: root.topAnchor, constant: FinderIconFlowLayout.topPadding),
             backdrop.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            backdrop.widthAnchor.constraint(equalToConstant: FinderIconFlowLayout.backdropPad * 2 + FinderIconFlowLayout.iconSize),
-            backdrop.heightAnchor.constraint(equalToConstant: FinderIconFlowLayout.backdropPad * 2 + FinderIconFlowLayout.iconSize),
+            backdropWidthConstraint,
+            backdropHeightConstraint,
 
             iconView.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: backdrop.centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: FinderIconFlowLayout.iconSize),
-            iconView.heightAnchor.constraint(equalToConstant: FinderIconFlowLayout.iconSize),
+            iconWidthConstraint,
+            iconHeightConstraint,
 
             nameField.topAnchor.constraint(equalTo: backdrop.bottomAnchor, constant: 6),
             nameField.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             nameField.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 2),
             nameField.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -2),
             nameField.widthAnchor.constraint(lessThanOrEqualToConstant: 120),
-            nameField.heightAnchor.constraint(equalToConstant: FinderIconFlowLayout.labelHeight),
+            nameHeightConstraint,
         ])
     }
 
-    func configure(entry: FinderEntry, appearance: FinderListAppearance) {
+    /// `labelMaxWidth` is the width the name field will actually render at
+    /// (item width, capped at 120) — the label height is measured against it
+    /// so a one-line name gets a one-line field and the selection highlight
+    /// hugs the glyphs instead of filling a fixed two-line strip.
+    func configure(
+        entry: FinderEntry,
+        appearance: FinderListAppearance,
+        iconSize: CGFloat = FinderIconFlowLayout.defaultIconSize,
+        labelMaxWidth: CGFloat = 120,
+    ) {
         self.entry = entry
         self.appearance = appearance
-        iconView.image = FileIconCache.shared.icon(for: entry, size: FinderIconFlowLayout.iconSize)
+        let backdropSize = FinderIconFlowLayout.backdropPad * 2 + iconSize
+        backdropWidthConstraint.constant = backdropSize
+        backdropHeightConstraint.constant = backdropSize
+        iconWidthConstraint.constant = iconSize
+        iconHeightConstraint.constant = iconSize
+        iconView.image = FileIconCache.shared.icon(for: entry, size: iconSize)
         nameField.stringValue = entry.name
         nameField.font = appearance.nameFont
         nameField.textColor = appearance.primaryText
+        let measured = nameField.cell?.cellSize(
+            forBounds: NSRect(x: 0, y: 0, width: max(labelMaxWidth, 20), height: .greatestFiniteMagnitude),
+        ).height
+        nameHeightConstraint.constant = min(
+            ceil(measured ?? FinderIconFlowLayout.labelHeight),
+            FinderIconFlowLayout.labelHeight,
+        )
         refreshSelection()
     }
 
@@ -190,6 +239,8 @@ struct FinderIconListView: NSViewRepresentable {
     /// Quick Look controller for this card — wired as the panel's data
     /// source/delegate during `beginPreviewPanelControl`.
     let quickLook: FinderQuickLookController
+    /// Icon edge in points (per-card setting, default 64).
+    var iconSize: CGFloat = FinderIconFlowLayout.defaultIconSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -204,7 +255,9 @@ struct FinderIconListView: NSViewRepresentable {
 
         let collection = FinderIconCollectionView()
         collection.coordinator = context.coordinator
-        collection.collectionViewLayout = FinderIconFlowLayout()
+        let flowLayout = FinderIconFlowLayout()
+        flowLayout.iconSize = iconSize
+        collection.collectionViewLayout = flowLayout
         collection.backgroundColors = [NSColor.clear]
         collection.isSelectable = true
         collection.allowsMultipleSelection = true
@@ -212,7 +265,11 @@ struct FinderIconListView: NSViewRepresentable {
         collection.focusRingType = .none
         collection.register(FinderIconItem.self, forItemWithIdentifier: FinderIconItem.reuseIdentifier)
         collection.registerForDraggedTypes([.fileURL])
-        collection.setDraggingSourceOperationMask([.copy, .move, .generic], forLocal: false)
+        // External destinations only get a copy — allowing `.move` makes Finder
+        // choose move for iCloud-synced sources, which triggers the system
+        // "remove from iCloud Drive" confirmation. The card-internal drag
+        // (`forLocal: true`) keeps move so items can be reordered/filed.
+        collection.setDraggingSourceOperationMask([.copy], forLocal: false)
         collection.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
         collection.delegate = context.coordinator
@@ -343,6 +400,16 @@ extension FinderIconListView {
         /// selection changes into the grid.
         func sync() {
             guard let collection else { return }
+
+            // Icon size is a layout concern: re-lay out and re-render items so
+            // icons, backdrops, and label widths all pick up the new size.
+            if let layout = collection.collectionViewLayout as? FinderIconFlowLayout,
+               layout.iconSize != parent.iconSize
+            {
+                layout.iconSize = parent.iconSize
+                collection.reloadData()
+                reloadSelection()
+            }
 
             if lastAppearance != parent.appearance {
                 lastAppearance = parent.appearance
@@ -631,7 +698,13 @@ extension FinderIconListView {
         func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
             let item = (collectionView.makeItem(withIdentifier: FinderIconItem.reuseIdentifier, for: indexPath) as? FinderIconItem) ?? FinderIconItem()
             if let entry = entry(at: indexPath.item) {
-                item.configure(entry: entry, appearance: parent.appearance)
+                let itemWidth = (collectionView.collectionViewLayout as? FinderIconFlowLayout)?.itemSize.width ?? 120
+                item.configure(
+                    entry: entry,
+                    appearance: parent.appearance,
+                    iconSize: parent.iconSize,
+                    labelMaxWidth: min(120, itemWidth - 4),
+                )
             }
             return item
         }
