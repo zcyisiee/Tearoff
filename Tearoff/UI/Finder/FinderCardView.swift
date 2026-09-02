@@ -94,10 +94,10 @@ struct FinderCardView: View {
         cardFace {
             titleRow
             favouritesBar
-            if card.selectedFavorite != nil {
-                breadcrumbRow
-            }
             fileList
+            if browser.currentURL != nil {
+                FinderPathBar(browser: browser) { handleError($0) }
+            }
             footerRow
         }
         .background {
@@ -436,97 +436,6 @@ struct FinderCardView: View {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? url.hasDirectoryPath
     }
 
-    // MARK: - Breadcrumb
-
-    private var breadcrumbRow: some View {
-        HStack(spacing: DesignToken.Space.xs) {
-            Button {
-                browser.goUp()
-            } label: {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(DesignToken.muted)
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(l10n["finder.goUp"])
-
-            breadcrumbSegments
-        }
-    }
-
-    /// Path strip: favourite name + relative components while browsing inside
-    /// the favourite, otherwise the absolute path collapsed to "…" + last 3.
-    private var breadcrumbSegments: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(Array(computedBreadcrumbSegments.enumerated()), id: \.offset) { index, segment in
-                        if index > 0 {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundStyle(DesignToken.mutedSoft)
-                        }
-
-                        Group {
-                            if let url = segment.url {
-                                Button {
-                                    browser.navigate(to: url)
-                                } label: {
-                                    Text(segment.label)
-                                        .foregroundStyle(segment.isCurrent ? DesignToken.bodyStrong : DesignToken.muted)
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                Text(segment.label)
-                                    .foregroundStyle(DesignToken.muted)
-                            }
-                        }
-                        .font(DesignToken.Typography.caption)
-                        .lineLimit(1)
-                        .id(index)
-                    }
-                }
-            }
-            .onChange(of: browser.currentURL) { _, _ in
-                let count = computedBreadcrumbSegments.count
-                guard count > 0 else { return }
-                proxy.scrollTo(count - 1, anchor: .trailing)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var computedBreadcrumbSegments: [(label: String, url: URL?, isCurrent: Bool)] {
-        guard let favorite = card.selectedFavorite, let current = browser.currentURL else { return [] }
-        let currentPath = current.standardizedFileURL.path
-        let homePath = favorite.url.standardizedFileURL.path
-
-        var segments: [(label: String, url: URL?, isCurrent: Bool)] = []
-        if currentPath == homePath || currentPath.hasPrefix(homePath + "/") {
-            segments.append((favorite.displayName, favorite.url, false))
-            var url = favorite.url
-            for name in currentPath.dropFirst(homePath.count).split(separator: "/") {
-                url = url.appendingPathComponent(String(name))
-                segments.append((String(name), url, false))
-            }
-        } else {
-            var url = URL(fileURLWithPath: "/")
-            for name in currentPath.split(separator: "/") {
-                url = url.appendingPathComponent(String(name))
-                segments.append((String(name), url, false))
-            }
-            if segments.count > 4 {
-                segments = [("…", nil, false)] + Array(segments.suffix(3))
-            }
-        }
-        if let last = segments.indices.last {
-            segments[last].isCurrent = true
-        }
-        return segments
-    }
-
     // MARK: - File list
 
     private var fileList: some View {
@@ -743,7 +652,7 @@ struct FinderCardView: View {
             }
         }
 
-        browser.navigate(to: card.currentURL)
+        browser.navigate(to: card.currentURL, recordsHistory: false)
         browser.startWatching()
     }
 
@@ -761,7 +670,7 @@ struct FinderCardView: View {
     private func syncBrowserWithURL() {
         let target = card.currentURL?.standardizedFileURL
         guard target?.path != browser.currentURL?.standardizedFileURL.path else { return }
-        browser.navigate(to: target)
+        browser.navigate(to: target, recordsHistory: false)
     }
 
     private func reportFrame(_ geo: GeometryProxy) {

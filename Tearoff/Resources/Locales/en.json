@@ -337,6 +337,7 @@
   "finder.file.openWith": "Open With",
   "finder.file.reveal": "Reveal in Finder",
   "finder.file.copyPath": "Copy Path",
+  "finder.file.copyName": "Copy Name",
   "finder.file.duplicate": "Duplicate",
   "finder.file.moveToTrash": "Move to Trash",
   "finder.empty.noFavorites": "Drop a folder here or press + to add a favorite",

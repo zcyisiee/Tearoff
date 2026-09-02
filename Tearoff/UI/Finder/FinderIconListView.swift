@@ -988,6 +988,12 @@ final class FinderIconCollectionView: NSCollectionView {
             case "a": // ⌘A — select all
                 coordinator.selectAll()
                 return
+            case "[": // ⌘[ — go back in history
+                coordinator.parent.browser.goBack()
+                return
+            case "]": // ⌘] — go forward in history
+                coordinator.parent.browser.goForward()
+                return
             default:
                 break
             }

@@ -55,6 +55,22 @@ final class FinderCardBrowser {
     private(set) var isWatching = false
     private var watcher: DirectoryWatcher?
 
+    // MARK: - History
+
+    /// Previous locations for ⌘[ (`goBack`). Back-most is furthest in the past.
+    private var backStack: [URL] = []
+    /// Locations discarded by a forward push / new navigation, for ⌘]
+    /// (`goForward`). Front-most is next in the future.
+    private var forwardStack: [URL] = []
+
+    var canGoBack: Bool {
+        !backStack.isEmpty
+    }
+
+    var canGoForward: Bool {
+        !forwardStack.isEmpty
+    }
+
     // MARK: - Callbacks
 
     /// Wired by the UI to persist `currentPath` into the sidecar.
@@ -68,8 +84,20 @@ final class FinderCardBrowser {
     /// Shows `url` (standardized). Clears selection, fires
     /// `onCurrentURLChanged`, reloads, and — when watching — re-targets the
     /// vnode watcher at the new directory.
-    func navigate(to url: URL?) {
+    ///
+    /// `recordsHistory` is `true` for user navigation (path-bar click, folder
+    /// activation, `goUp`): the previous location is pushed onto the back
+    /// stack and the forward stack is cleared, Finder-style. It is `false` for
+    /// the initial mount and for store-driven repositioning (`syncBrowserWithURL`),
+    /// which establish the canonical location without adding a history entry.
+    func navigate(to url: URL?, recordsHistory: Bool = true) {
         let standardized = url?.standardizedFileURL
+
+        if recordsHistory, let previous = currentURL, previous != standardized {
+            backStack.append(previous)
+            forwardStack.removeAll()
+        }
+
         currentURL = standardized
         selection = []
         onCurrentURLChanged?(standardized)
@@ -82,6 +110,7 @@ final class FinderCardBrowser {
 
     /// Navigates to the parent directory. Returns false when there's nowhere
     /// to go (no current directory, or already at the filesystem root).
+    /// Counts as a navigation (pushes the current location onto the back stack).
     @discardableResult
     func goUp() -> Bool {
         guard let currentURL else { return false }
@@ -90,6 +119,46 @@ final class FinderCardBrowser {
         guard parent.path != currentURL.path else { return false }
         navigate(to: parent)
         return true
+    }
+
+    /// Steps back in history. Pops the previous location, pushes the current
+    /// one onto the forward stack, and re-targets without recording a new
+    /// history entry. Returns false when the back stack is empty.
+    @discardableResult
+    func goBack() -> Bool {
+        guard let previous = backStack.popLast() else { return false }
+        if let currentURL {
+            forwardStack.append(currentURL)
+        }
+        revealHistoryLocation(previous)
+        return true
+    }
+
+    /// Steps forward in history. Pops the next location, pushes the current
+    /// one back onto the back stack, and re-targets without recording a new
+    /// history entry. Returns false when the forward stack is empty.
+    @discardableResult
+    func goForward() -> Bool {
+        guard let next = forwardStack.popLast() else { return false }
+        if let currentURL {
+            backStack.append(currentURL)
+        }
+        revealHistoryLocation(next)
+        return true
+    }
+
+    /// Applies a history location (forward/back traversal) without touching the
+    /// stacks: sets the URL, clears selection, notifies, re-targets, reloads.
+    private func revealHistoryLocation(_ url: URL) {
+        let standardized = url.standardizedFileURL
+        currentURL = standardized
+        selection = []
+        onCurrentURLChanged?(standardized)
+
+        if isWatching {
+            retargetWatcher(to: standardized)
+        }
+        reload()
     }
 
     // MARK: - Loading

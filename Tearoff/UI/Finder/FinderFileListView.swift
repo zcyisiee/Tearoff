@@ -634,6 +634,12 @@ final class FinderTableView: NSTableView {
             case "a": // ⌘A — select all
                 selectAll(nil)
                 return
+            case "[": // ⌘[ — go back in history
+                coordinator.parent.browser.goBack()
+                return
+            case "]": // ⌘] — go forward in history
+                coordinator.parent.browser.goForward()
+                return
             default:
                 break
             }

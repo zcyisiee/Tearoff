@@ -337,6 +337,7 @@
   "finder.file.openWith": "打开方式",
   "finder.file.reveal": "在 Finder 中显示",
   "finder.file.copyPath": "拷贝路径",
+  "finder.file.copyName": "拷贝名称",
   "finder.file.duplicate": "复制",
   "finder.file.moveToTrash": "移到废纸篓",
   "finder.empty.noFavorites": "把文件夹拖到这里，或点 + 添加常用目录",

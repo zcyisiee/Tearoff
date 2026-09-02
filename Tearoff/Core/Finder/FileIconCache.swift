@@ -52,4 +52,24 @@ final class FileIconCache {
         cache.setObject(sized, forKey: key)
         return sized
     }
+
+    /// Returns a `size`×`size` icon for a bare filesystem URL (used by the
+    /// path bar, where segments reference directory URLs rather than
+    /// `FinderEntry` values). Cached by URL path so repeated renders don't
+    /// round-trip `NSWorkspace`. Destinations are directories, so this uses
+    /// `icon(forFile:)`, which honours custom folder icons.
+    func icon(forURL url: URL, size: CGFloat = 16) -> NSImage {
+        let key = "url:\(Int(size)):\(url.path)" as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+
+        let unsized = url.path == "/"
+            ? NSWorkspace.shared.icon(for: .folder)
+            : NSWorkspace.shared.icon(forFile: url.path)
+        let sized = unsized.copy() as! NSImage
+        sized.size = NSSize(width: size, height: size)
+        cache.setObject(sized, forKey: key)
+        return sized
+    }
 }
