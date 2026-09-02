@@ -68,7 +68,7 @@ enum NoteColor: String, CaseIterable, Codable {
     private var tintLight: UInt32 {
         switch self {
         case .amber: 0xF2E7CF
-        case .teal: 0xDCe9EA
+        case .teal: 0xDCE9EA
         case .olive: 0xE2EBDC
         case .ochre: 0xF0E5CE
         case .brick: 0xF2DDDA

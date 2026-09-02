@@ -6,7 +6,7 @@ struct HeaderIconButton: View {
     let help: String
     /// Overrides the muted idle color — used by stateful buttons (e.g. the
     /// lit panel pin).
-    var tint: Color? = nil
+    var tint: Color?
     let action: () -> Void
 
     @State private var isHovered = false
@@ -33,7 +33,9 @@ struct HeaderIconButton: View {
     }
 
     private var idleColor: Color {
-        if let tint { return tint }
+        if let tint {
+            return tint
+        }
         return isHovered ? DesignToken.bodyStrong : DesignToken.muted
     }
 }

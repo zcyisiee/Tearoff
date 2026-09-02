@@ -13,7 +13,9 @@ struct OutlineEntry: Identifiable, Equatable {
     /// collapse state so it survives edits that shift character offsets.
     let pathKey: String
 
-    var id: String { pathKey }
+    var id: String {
+        pathKey
+    }
 }
 
 // MARK: - MarkdownOutline

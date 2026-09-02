@@ -59,7 +59,9 @@ enum NoteThumbnailRenderer {
 
     final class CachableBlocks {
         let value: [CardPreviewBlock]
-        init(_ value: [CardPreviewBlock]) { self.value = value }
+        init(_ value: [CardPreviewBlock]) {
+            self.value = value
+        }
     }
 
     // MARK: - Parsing
@@ -70,7 +72,9 @@ enum NoteThumbnailRenderer {
         var didSkipTitle = false
 
         for (lineIndex, rawLine) in content.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            if blocks.count >= maxLines { break }
+            if blocks.count >= maxLines {
+                break
+            }
             let line = String(rawLine)
 
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
@@ -79,12 +83,16 @@ enum NoteThumbnailRenderer {
             }
             if inFence {
                 // Collapsed fence contents: one dim line per block.
-                if case .code = blocks.last?.kind { continue }
+                if case .code = blocks.last?.kind {
+                    continue
+                }
                 blocks.append(CardPreviewBlock(id: blocks.count, kind: .code(text: AttributedString("…"))))
                 continue
             }
 
-            if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                continue
+            }
             if line.hasPrefix("#") {
                 guard let level = headingLevel(line) else { continue }
                 let text = inline(String(line.dropFirst(level + 1))) ?? AttributedString("")
@@ -210,7 +218,9 @@ enum NoteThumbnailRenderer {
         func flush(_ intent: InlinePresentationIntent? = nil) {
             guard !buffer.isEmpty else { return }
             var a = AttributedString(buffer)
-            if let intent { a.inlinePresentationIntent = intent }
+            if let intent {
+                a.inlinePresentationIntent = intent
+            }
             result += a
             buffer = ""
         }

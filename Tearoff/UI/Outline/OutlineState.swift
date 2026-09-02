@@ -48,7 +48,9 @@ final class OutlineState {
         let level = entries[index].level
         var children: [Int] = []
         for i in (index + 1) ..< entries.count {
-            if entries[i].level <= level { break }
+            if entries[i].level <= level {
+                break
+            }
             if entries[i].level == level + 1 {
                 children.append(i)
             }

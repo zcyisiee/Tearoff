@@ -49,7 +49,10 @@ enum DesignToken {
 
     // MARK: Color — accent (theme-driven, amber in the default Cream theme)
 
-    static var accent: Color { ThemeEngine.shared.activeTheme.accent }
+    static var accent: Color {
+        ThemeEngine.shared.activeTheme.accent
+    }
+
     static let accentActive = dynamic(light: 0x9F6819, dark: 0xF0CF92)
     /// Text/icon color on top of accent fills.
     static let onAccent = dynamic(light: 0xFFF8F3, dark: 0x3D2C0F)

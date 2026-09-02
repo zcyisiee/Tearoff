@@ -238,7 +238,9 @@ final class ThemeEngine {
 
     private func localizedCopyName(of name: String) -> String {
         let l10n = L10n.shared
-        if name.hasPrefix("Tearoff ") { return name + " 2" }
+        if name.hasPrefix("Tearoff ") {
+            return name + " 2"
+        }
         return l10n["themes.copyPrefix"] + " " + name
     }
 }
@@ -275,4 +277,5 @@ extension Color {
 }
 
 // MARK: - DesignToken integration is in Core/Design/DesignTokens.swift
+
 // (`accent` is a computed property backed by ThemeEngine).

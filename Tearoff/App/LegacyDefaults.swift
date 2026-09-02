@@ -18,7 +18,9 @@ enum LegacyDefaults {
         ) as? [String], !keys.isEmpty else { return }
 
         for key in keys {
-            if defaults.object(forKey: key) != nil { continue }
+            if defaults.object(forKey: key) != nil {
+                continue
+            }
             if let value = CFPreferencesCopyAppValue(key as CFString, oldBundleID) {
                 defaults.set(value, forKey: key)
             }
