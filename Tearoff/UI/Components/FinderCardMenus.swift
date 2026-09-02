@@ -268,11 +268,11 @@ enum FinderCardMenus {
         favorite: FinderFavorite,
         card: FinderCard,
         noteStore: NoteStore,
+        browser: FinderCardBrowser,
         l10n: L10n,
+        onError: @escaping (Error) -> Void,
     ) -> NSMenu {
         let menu = NSMenu()
-        let favoriteID = favorite.id
-        let cardID = card.id
 
         menu.addActionItem(title: l10n["finder.file.reveal"], icon: "folder") {
             FinderCardBrowser.revealInFinder([favorite.url])
@@ -281,11 +281,50 @@ enum FinderCardMenus {
         menu.addItem(.separator())
 
         menu.addActionItem(title: l10n["finder.favorite.remove"], icon: "minus.circle") {
-            guard let current = noteStore.finderCards.first(where: { $0.id == cardID }) else { return }
-            noteStore.removeFavorite(id: favoriteID, from: current)
+            guard let current = noteStore.finderCards.first(where: { $0.id == card.id }) else { return }
+            noteStore.removeFavorite(id: favorite.id, from: current)
         }
 
+        menu.addItem(.separator())
+
+        addTrashFavoriteItem(
+            to: menu,
+            favorite: favorite,
+            card: card,
+            noteStore: noteStore,
+            browser: browser,
+            l10n: l10n,
+            onError: onError,
+        )
+
         return menu
+    }
+
+    /// "Move to Trash" for a favourite's folder: trashes the directory on
+    /// disk, then drops the favourite so the card doesn't keep pointing at a
+    /// trashed path. Shared by the chip context menu and the ⋯ favorites
+    /// submenu. Recoverable (Finder Trash), so no confirmation — same as the
+    /// file list's own trash item.
+    private static func addTrashFavoriteItem(
+        to menu: NSMenu,
+        favorite: FinderFavorite,
+        card: FinderCard,
+        noteStore: NoteStore,
+        browser: FinderCardBrowser,
+        l10n: L10n,
+        onError: @escaping (Error) -> Void,
+    ) {
+        menu.addActionItem(title: l10n["finder.file.moveToTrash"], icon: "trash") {
+            do {
+                try browser.trash([favorite.url])
+            } catch {
+                onError(error)
+                return
+            }
+            if let current = noteStore.finderCards.first(where: { $0.id == card.id }) {
+                noteStore.removeFavorite(id: favorite.id, from: current)
+            }
+        }
     }
 
     // MARK: - Header Menu
@@ -298,6 +337,7 @@ enum FinderCardMenus {
         noteStore: NoteStore,
         browser: FinderCardBrowser,
         l10n: L10n,
+        onError: @escaping (Error) -> Void,
     ) -> NSMenu {
         let menu = NSMenu()
 
@@ -305,7 +345,13 @@ enum FinderCardMenus {
         // select / reveal / remove, reusing the chip menu's actions.
         let favoritesItem = NSMenuItem(title: l10n["finder.header.favorites"], action: nil, keyEquivalent: "")
         favoritesItem.image = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
-        favoritesItem.submenu = favoritesSubmenu(card: card, noteStore: noteStore, l10n: l10n)
+        favoritesItem.submenu = favoritesSubmenu(
+            card: card,
+            noteStore: noteStore,
+            browser: browser,
+            l10n: l10n,
+            onError: onError,
+        )
         menu.addItem(favoritesItem)
 
         menu.addActionItem(title: l10n["finder.favorite.add"], icon: "folder.badge.plus") {
@@ -430,7 +476,9 @@ enum FinderCardMenus {
     private static func favoritesSubmenu(
         card: FinderCard,
         noteStore: NoteStore,
+        browser: FinderCardBrowser,
         l10n: L10n,
+        onError: @escaping (Error) -> Void,
     ) -> NSMenu {
         let menu = NSMenu()
 
@@ -460,6 +508,16 @@ enum FinderCardMenus {
                 guard let current = noteStore.finderCards.first(where: { $0.id == card.id }) else { return }
                 noteStore.removeFavorite(id: favorite.id, from: current)
             }
+            submenu.addItem(.separator())
+            addTrashFavoriteItem(
+                to: submenu,
+                favorite: favorite,
+                card: card,
+                noteStore: noteStore,
+                browser: browser,
+                l10n: l10n,
+                onError: onError,
+            )
 
             parent.submenu = submenu
             menu.addItem(parent)

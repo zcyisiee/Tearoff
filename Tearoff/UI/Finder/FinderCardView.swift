@@ -334,6 +334,7 @@ struct FinderCardView: View {
             noteStore: noteStore,
             browser: browser,
             l10n: l10n,
+            onError: { handleError($0) },
         )
         NSContextMenuModifier.isShowingMenu = true
         menu.popUpAtScreenPoint(NSEvent.mouseLocation)
@@ -403,7 +404,9 @@ struct FinderCardView: View {
                             favorite: favorite,
                             card: card,
                             noteStore: noteStore,
+                            browser: browser,
                             l10n: l10n,
+                            onError: { handleError($0) },
                         )
                     }
                 }

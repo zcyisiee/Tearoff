@@ -371,12 +371,11 @@ final class SidePanelController: NSWindowController {
 
     @objc private func handlePinStateChanged() {
         guard let window else { return }
-        let pinned = PanelSettings.shared.isPanelPinned
-        // Allow dragging the panel by its header background when pinned.
-        // NSView.mouseDownCanMoveWindow = false on buttons and scroll views ensures
-        // existing controls remain fully interactive — only background areas drag.
-        window.isMovableByWindowBackground = pinned
-        if !pinned {
+        // The panel is edge-docked in both states — pinned only stops the
+        // auto-hide, it never turns the header/tab bar into a drag surface.
+        // Background dragging stays off so no region can move the window.
+        window.isMovableByWindowBackground = false
+        if !PanelSettings.shared.isPanelPinned {
             snapToEdge()
         }
     }

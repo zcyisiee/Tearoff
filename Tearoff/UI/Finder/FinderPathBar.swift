@@ -7,7 +7,9 @@ import SwiftUI
 ///
 /// Interaction mirrors Finder's own path bar:
 /// - Left-click a segment navigates the browser to that directory.
-/// - Right-click opens a menu: Copy Path / Show in Finder / Copy Name.
+/// - Right-click a segment: Copy Path / Show in Finder / Copy Name; right-click
+///   anywhere else on the bar falls back to the current directory's Copy Path
+///   / Show in Finder.
 /// - Each segment is a drop destination — dropped files move (or copy,
 ///   cross-volume / ⌥) into that directory.
 ///
@@ -53,6 +55,28 @@ struct FinderPathBar: View {
             .padding(.horizontal, Self.edgePad)
         }
         .frame(height: Self.barHeight)
+        // Bar-level fallback: right-clicking anywhere on the bar — the gaps
+        // between segments, the "…" marker, the trailing empty area — offers
+        // the current directory's path. A segment's own menu (deeper catcher
+        // wins) still covers clicks on the segment itself.
+        .nsContextMenu { barMenu }
+    }
+
+    // MARK: - Bar-level context menu
+
+    /// Actions on the currently browsed directory, for right-clicks that land
+    /// outside any single path segment.
+    private var barMenu: NSMenu {
+        let menu = NSMenu()
+        if let current = browser.currentURL {
+            menu.addActionItem(title: l10n["finder.file.copyPath"], icon: "link") {
+                FinderCardBrowser.copyPaths([current])
+            }
+            menu.addActionItem(title: l10n["finder.file.reveal"], icon: "folder") {
+                FinderCardBrowser.revealInFinder([current])
+            }
+        }
+        return menu
     }
 
     // MARK: - Segments
