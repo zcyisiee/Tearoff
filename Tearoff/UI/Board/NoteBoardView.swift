@@ -48,6 +48,9 @@ struct NoteBoardView: View {
     /// Last plain tap (note + time) for manual double-click classification —
     /// keeps single taps instant instead of waiting out a multi-tap window.
     @State private var lastCardTap: (id: UUID, at: Date)?
+    /// Finder card currently being renamed in place (board-owned, like note
+    /// rename) — `FinderCardView` shows the title editor when set.
+    @State private var renamingFinderCardID: UUID?
     /// Card that just received a dropped image — pulses its border so the
     /// append is discoverable. Cleared shortly after the drop.
     @State private var droppedFlashID: UUID?
@@ -65,17 +68,24 @@ struct NoteBoardView: View {
 
     // MARK: Derived data
 
-    /// Notes for the active tab (All → every note; folder tab → that folder only).
-    private var boardNotes: [Note] {
+    /// Board entries for the active tab (All → every note + Finder card;
+    /// folder tab → those in that folder only), interleaved by the shared
+    /// board ordering.
+    private var boardItems: [BoardItem] {
         frozenOrder(
-            noteStore.sortedNotes(noteStore.filteredNotes, by: appSettings.sortBy, ascending: appSettings.sortAscending),
+            noteStore.sortedBoardItems(
+                notes: noteStore.filteredNotes,
+                finderCards: noteStore.filteredFinderCards,
+                by: appSettings.sortBy,
+                ascending: appSettings.sortAscending,
+            ),
         )
     }
 
     /// While a card is being edited in place, keep the visible order frozen at
     /// the pre-edit arrangement so save-triggered date bumps can't reshuffle
     /// the list under the user's cursor.
-    private func frozenOrder(_ sorted: [Note]) -> [Note] {
+    private func frozenOrder(_ sorted: [BoardItem]) -> [BoardItem] {
         guard let snapshot = editOrderSnapshot else { return sorted }
         let byID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
         var result = snapshot.compactMap { byID[$0] }
@@ -98,30 +108,33 @@ struct NoteBoardView: View {
         noteStore.sortedFolders(noteStore.folders, by: .name, ascending: true)
     }
 
-    /// Sections for the collapsible-sections layout: one per folder with notes,
-    /// plus a root section. Empty folders are hidden to keep the board scannable.
-    private var sections: [(folder: String?, notes: [Note])] {
-        var result: [(String?, [Note])] = []
+    /// Sections for the collapsible-sections layout: one per folder with
+    /// notes or Finder cards, plus a root section. Empty folders are hidden
+    /// to keep the board scannable.
+    private var sections: [(folder: String?, items: [BoardItem])] {
+        var result: [(String?, [BoardItem])] = []
         let names = allFolders.map(\.name)
         for name in names {
             let notes = noteStore.notes.filter { $0.folder == name }
-            if !notes.isEmpty {
+            let cards = noteStore.finderCards.filter { $0.folder == name }
+            if !notes.isEmpty || !cards.isEmpty {
                 result.append(
-                    (name, frozenOrder(noteStore.sortedNotes(notes, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
+                    (name, frozenOrder(noteStore.sortedBoardItems(notes: notes, finderCards: cards, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
                 )
             }
         }
-        let root = noteStore.notes.filter(\.folder.isEmpty)
-        if !root.isEmpty {
+        let rootNotes = noteStore.notes.filter(\.folder.isEmpty)
+        let rootCards = noteStore.finderCards.filter(\.folder.isEmpty)
+        if !rootNotes.isEmpty || !rootCards.isEmpty {
             result.append(
-                (nil, frozenOrder(noteStore.sortedNotes(root, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
+                (nil, frozenOrder(noteStore.sortedBoardItems(notes: rootNotes, finderCards: rootCards, by: appSettings.sortBy, ascending: appSettings.sortAscending))),
             )
         }
         return result
     }
 
     private var isEmpty: Bool {
-        boardNotes.isEmpty && childFolders.isEmpty && !folderRename.isCreating
+        boardItems.isEmpty && childFolders.isEmpty && !folderRename.isCreating
     }
 
     // MARK: Search
@@ -151,7 +164,10 @@ struct NoteBoardView: View {
     }
 
     private struct ContentMatch: Identifiable {
-        var id: String { "content-\(note.id)" }
+        var id: String {
+            "content-\(note.id)"
+        }
+
         let note: Note
         let snippet: AttributedString
     }
@@ -218,7 +234,7 @@ struct NoteBoardView: View {
         .onChange(of: noteStore.inlineEditingNoteID) { _, editingID in
             if editingID != nil {
                 if editOrderSnapshot == nil {
-                    editOrderSnapshot = boardNotes.map(\.id)
+                    editOrderSnapshot = boardItems.map(\.id)
                 }
             } else {
                 editOrderSnapshot = nil
@@ -322,8 +338,13 @@ struct NoteBoardView: View {
                     startCreatingFolder()
                 }
                 HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
-                    createNote()
+                    if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
+                        createFinderCard()
+                    } else {
+                        createNote()
+                    }
                 }
+                .nsContextMenu { newItemsMenu() }
                 HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
                     noteStore.showSettings = true
                 }
@@ -437,26 +458,29 @@ struct NoteBoardView: View {
     private var boardContent: some View {
         GeometryReader { geo in
             ScrollView {
-            VStack(spacing: 0) {
-                if appSettings.boardLayout == .tabs {
-                    tabsBoard
-                } else {
-                    sectionsBoard
+                VStack(spacing: 0) {
+                    if appSettings.boardLayout == .tabs {
+                        tabsBoard
+                    } else {
+                        sectionsBoard
+                    }
                 }
-            }
-            .padding(.horizontal, DesignToken.Space.lg)
-            .padding(.vertical, DesignToken.Space.md)
-            .padding(.bottom, 44) // clearance for the floating selection toolbar
-            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-            // Clicking any blank area (card gaps, margins) dismisses the
-            // in-place card editor and an active selection — Finder-style.
-            .contentShape(Rectangle())
-            .onTapGesture { handleBackgroundTap() }
-            .coordinateSpace(name: BoardCardSpace.name)
-            .overlay(alignment: .topLeading) {
-                BoardDragReplica(session: dragSession)
-            }
-            .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
+                .padding(.horizontal, DesignToken.Space.lg)
+                .padding(.vertical, DesignToken.Space.md)
+                .padding(.bottom, 44) // clearance for the floating selection toolbar
+                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+                // Clicking any blank area (card gaps, margins) dismisses the
+                // in-place card editor and an active selection — Finder-style.
+                // Right-click on the same gaps opens the new-note/new-card menu;
+                // cards sit above and their own context menus win.
+                .contentShape(Rectangle())
+                .onTapGesture { handleBackgroundTap() }
+                .nsContextMenu { newItemsMenu() }
+                .coordinateSpace(name: BoardCardSpace.name)
+                .overlay(alignment: .topLeading) {
+                    BoardDragReplica(session: dragSession)
+                }
+                .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
             }
             .overlay(alignment: .bottom) {
                 SelectionToolbar()
@@ -483,8 +507,12 @@ struct NoteBoardView: View {
         guard let (noteID, _) = cardLayout.viewportFrames.first(where: { $0.value.contains(viewportPoint) })
         else { return }
 
+        // Only notes accept image drops — Finder cards are file browsers.
+        guard noteStore.finderCards.first(where: { $0.id == noteID }) == nil else { return }
+
         if noteID == noteStore.inlineEditingNoteID,
-           let note = noteStore.notes.first(where: { $0.id == noteID }) {
+           let note = noteStore.notes.first(where: { $0.id == noteID })
+        {
             // Route into the mounted inline editor — appending behind its back
             // would be lost on its next debounced flush.
             MarkdownEditorView.insertDroppedImageFile(url, for: note)
@@ -506,7 +534,9 @@ struct NoteBoardView: View {
             : "![\(alt)](\(result.relativePath))"
 
         var base = note.content
-        while base.hasSuffix("\n") { base.removeLast() }
+        while base.hasSuffix("\n") {
+            base.removeLast()
+        }
         let newContent = base.isEmpty ? markdown + "\n" : base + "\n\n" + markdown + "\n"
         noteStore.updateContent(for: note.id, content: newContent)
 
@@ -516,12 +546,15 @@ struct NoteBoardView: View {
         Task {
             try? await Task.sleep(for: .seconds(1.0))
             withAnimation(.easeInOut(duration: 0.4)) {
-                if droppedFlashID == note.id { droppedFlashID = nil }
+                if droppedFlashID == note.id {
+                    droppedFlashID = nil
+                }
             }
         }
     }
 
-    /// Tabs layout: subfolder chips (inside a folder), then the note grid.
+    /// Tabs layout: subfolder chips (inside a folder), then the board card
+    /// stream (notes + Finder cards).
     private var tabsBoard: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.sm) {
             if !childFolders.isEmpty {
@@ -573,7 +606,7 @@ struct NoteBoardView: View {
                 )
                 .padding(.top, DesignToken.Space.xl)
             } else {
-                noteGrid(boardNotes)
+                itemGrid(boardItems)
             }
         }
     }
@@ -609,7 +642,7 @@ struct NoteBoardView: View {
                                     .font(DesignToken.Typography.sectionHeader)
                                     .tracking(0.6)
                                     .foregroundStyle(DesignToken.muted)
-                                Text("\(section.notes.count)")
+                                Text("\(section.items.count)")
                                     .font(DesignToken.Typography.caption)
                                     .foregroundStyle(DesignToken.mutedSoft)
                                 Spacer()
@@ -619,7 +652,7 @@ struct NoteBoardView: View {
                         .buttonStyle(.plain)
 
                         if !collapsedSections.contains(key) {
-                            noteGrid(section.notes)
+                            itemGrid(section.items)
                         }
                     }
                 }
@@ -628,20 +661,32 @@ struct NoteBoardView: View {
     }
 
     /// Vertical card stream — SideNotes-style single column, card width fills
-    /// the panel minus the shared horizontal padding.
-    private func noteGrid(_ notes: [Note]) -> some View {
+    /// the panel minus the shared horizontal padding. One stream for notes and
+    /// Finder cards.
+    private func itemGrid(_ items: [BoardItem]) -> some View {
         LazyVStack(spacing: DesignToken.Space.lg) {
-            ForEach(notes) { note in
-                if noteRename.renamingNoteID == note.id {
-                    boardRenameCard(for: note)
-                } else {
-                    card(for: note, in: notes)
+            ForEach(items) { item in
+                switch item {
+                case let .note(note):
+                    if noteRename.renamingNoteID == note.id {
+                        boardRenameCard(for: note)
+                    } else {
+                        card(for: note, in: items)
+                    }
+                case let .finder(card):
+                    finderCard(for: card, in: items)
                 }
             }
         }
     }
 
-    private func card(for note: Note, in visible: [Note]) -> some View {
+    /// Notes-only thin wrapper kept for the search results list — search stays
+    /// notes-only by design, so Finder cards never appear there.
+    private func noteGrid(_ notes: [Note]) -> some View {
+        itemGrid(notes.map(BoardItem.note))
+    }
+
+    private func card(for note: Note, in visible: [BoardItem]) -> some View {
         BoardNoteCard(
             note: note,
             isSelected: noteStore.selection.contains(.note(note.id)),
@@ -660,7 +705,7 @@ struct NoteBoardView: View {
                 noteStore.updateContent(for: id, content: newContent)
             },
             onDragTick: { location, start in
-                handleDragTick(note, location: location, start: start, visible: visible)
+                handleDragTick(.note(note), location: location, start: start, visible: visible)
             },
             onDragEnded: { handleDragEnd() },
         )
@@ -681,6 +726,110 @@ struct NoteBoardView: View {
         }
     }
 
+    /// Finder card slot in the board stream — mirrors `card(for:in:)`.
+    /// Frame feedback, selection chrome, drag, rename, and the file drag-out
+    /// auto-hide suspension are owned by `FinderCardView` itself; the board
+    /// only wires callbacks to shared state.
+    private func finderCard(for card: FinderCard, in visible: [BoardItem]) -> some View {
+        FinderCardView(
+            card: card,
+            isSelected: noteStore.selection.contains(.finderCard(card.id)),
+            isDragging: dragSession.itemID == card.id,
+            hoverEnabled: dragSession.itemID == nil,
+            layout: cardLayout,
+            isRenamingTitle: renamingFinderCardID == card.id,
+            onTap: { flags in
+                handleFinderCardTap(card, flags: flags, visible: visible)
+            },
+            onTitleAreaTap: { flags in
+                handleFinderTitleAreaTap(card, flags: flags, visible: visible)
+            },
+            onPinToggle: { noteStore.togglePin(on: card) },
+            onDragTick: { location, start in
+                handleDragTick(.finder(card), location: location, start: start, visible: visible)
+            },
+            onDragEnded: { handleDragEnd() },
+            onRenameCommit: { title in
+                noteStore.renameFinderCard(card, to: title)
+                renamingFinderCardID = nil
+            },
+            onRenameCancel: { renamingFinderCardID = nil },
+            onFileDragSessionChanged: { active in
+                if active {
+                    AppDelegate.shared?.panelController?.suspendAutoHide()
+                } else {
+                    AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+                }
+            },
+        )
+        .nsContextMenu {
+            if noteStore.selection.contains(.finderCard(card.id)), noteStore.selection.count > 1 {
+                NoteListMenus.selectionMenu(noteStore: noteStore, l10n: l10n)
+            } else {
+                FinderCardMenus.cardMenu(card: card, noteStore: noteStore, l10n: l10n, onRename: {
+                    renamingFinderCardID = card.id
+                })
+            }
+        }
+    }
+
+    /// Reveal the Finder card's current directory in Finder. No-op when the
+    /// card has no favourites / current URL yet.
+    private func revealFinderCard(_ card: FinderCard) {
+        let urls = [card.currentURL].compactMap(\.self)
+        guard !urls.isEmpty else { return }
+        FinderCardBrowser.revealInFinder(urls)
+    }
+
+    /// Finder-style click semantics for the Finder card's body: the body is
+    /// mostly the AppKit file list which consumes its own clicks, so this
+    /// fires for chrome only. A quick second plain click reveals the card's
+    /// directory in Finder; ⌘-click toggles the card's selection, ⇧-click
+    /// selects the range to the anchor; a plain click clears an active
+    /// selection.
+    private func handleFinderCardTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        resignFinderListFocus()
+        let mods = flags.intersection([.command, .shift])
+        if mods.isEmpty, consumeDoubleClick(on: card.id) {
+            revealFinderCard(card)
+            return
+        }
+        let order = visible.map(\.selectableID)
+        if mods.contains(.command) {
+            noteStore.handleSelectionClick(
+                on: .finderCard(card.id),
+                isShift: false,
+                isCommand: true,
+                visibleOrder: order,
+            )
+        } else if mods.contains(.shift) {
+            noteStore.handleSelectionClick(
+                on: .finderCard(card.id),
+                isShift: true,
+                isCommand: false,
+                visibleOrder: order,
+            )
+        } else if !noteStore.selection.isEmpty {
+            noteStore.clearSelection()
+        }
+    }
+
+    /// Single click on the Finder card's title row: modifier clicks fall
+    /// through to the card body's selection semantics; a quick second plain
+    /// click reveals the card's directory in Finder; a plain click toggles
+    /// the card's tall/default height.
+    private func handleFinderTitleAreaTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        if !flags.intersection([.command, .shift]).isEmpty {
+            handleFinderCardTap(card, flags: flags, visible: visible)
+        } else if consumeDoubleClick(on: card.id) {
+            revealFinderCard(card)
+        } else {
+            withAnimation(.snappy(duration: 0.22)) {
+                noteStore.toggleExpanded(on: card)
+            }
+        }
+    }
+
     /// Finder-style click semantics for the card body: plain clicks never open
     /// the in-place editor — the body is reserved for task toggles (task rows
     /// carry their own buttons) and plain clicks only clear an active
@@ -688,13 +837,14 @@ struct NoteBoardView: View {
     /// and opens the full editor; ⌘-click toggles the card's selection,
     /// ⇧-click selects the range to the anchor. The in-place editor opens from
     /// the title row's trailing area (`handleTitleAreaTap`).
-    private func handleCardTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
+    private func handleCardTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        resignFinderListFocus()
         let mods = flags.intersection([.command, .shift])
         if mods.isEmpty, consumeDoubleClick(on: note.id) {
             openEditorFromCard(note)
             return
         }
-        let order = visible.map { NoteStore.SelectableID.note($0.id) }
+        let order = visible.map(\.selectableID)
         if mods.contains(.command) {
             noteStore.handleSelectionClick(
                 on: .note(note.id),
@@ -723,7 +873,7 @@ struct NoteBoardView: View {
     /// Modifier clicks fall through to the Finder-style selection semantics
     /// (⌘ toggles, ⇧ ranges), and an active selection is cleared first,
     /// matching a plain body click.
-    private func handleTitleAreaTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [Note]) {
+    private func handleTitleAreaTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
         if !flags.intersection([.command, .shift]).isEmpty {
             handleCardTap(note, flags: flags, visible: visible)
         } else if consumeDoubleClick(on: note.id) {
@@ -804,28 +954,39 @@ struct NoteBoardView: View {
         if noteStore.inlineEditingNoteID != nil {
             noteStore.endInlineEdit()
         }
+        renamingFinderCardID = nil
+        resignFinderListFocus()
         if !noteStore.selection.isEmpty {
             noteStore.clearSelection()
         }
+    }
+
+    /// A click on card chrome or blank board area hands keyboard focus back to
+    /// the board: a Finder list that kept first responder would otherwise keep
+    /// swallowing ↑/↓/Return and ⌘⇧N after the user moved on.
+    private func resignFinderListFocus() {
+        guard noteStore.focusedFinderCardID != nil else { return }
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     // MARK: Drag Reorder
 
     /// Live reorder while press-dragging: whichever visible card the pointer
     /// is over becomes the insertion point (upper half = above, lower half =
-    /// below). `reorderNote` commits immediately, so cards shuffle under the
-    /// cursor as it crosses neighbors — SideNotes-style. The dragged card
+    /// below). `reorderBoardItem` commits immediately, so cards shuffle under
+    /// the cursor as it crosses neighbors — SideNotes-style. The dragged card
     /// itself hides in its slot while the floating replica follows the
-    /// pointer, so these commits can never disturb the card in hand.
-    private func handleDragTick(_ note: Note, location: CGPoint, start: CGPoint, visible: [Note]) {
-        if dragSession.noteID != note.id {
+    /// pointer, so these commits can never disturb the card in hand. Works
+    /// for both notes and Finder cards via the shared `BoardItem` space.
+    private func handleDragTick(_ item: BoardItem, location: CGPoint, start: CGPoint, visible: [BoardItem]) {
+        if dragSession.itemID != item.id {
             // First tick of the gesture: capture where inside the card the
             // pointer grabbed and lift a replica under it.
-            guard let frame = cardLayout.frames[note.id] else { return }
+            guard let frame = cardLayout.frames[item.id] else { return }
             installDragMouseUpMonitor()
             withAnimation(.easeOut(duration: 0.12)) {
                 dragSession.begin(
-                    note: note,
+                    item: item,
                     grabOffset: CGSize(width: start.x - frame.minX, height: start.y - frame.minY),
                     size: frame.size,
                     pointer: location,
@@ -835,13 +996,13 @@ struct NoteBoardView: View {
         }
         dragSession.move(to: location)
 
-        for target in visible where target.id != note.id {
+        for target in visible where target.id != item.id {
             guard let frame = cardLayout.frames[target.id], frame.contains(location) else { continue }
             let above = location.y < frame.midY
             if lastReorder?.target != target.id || lastReorder?.above != above {
                 withAnimation(.snappy(duration: 0.22)) {
-                    noteStore.reorderNote(
-                        note.id,
+                    noteStore.reorderBoardItem(
+                        item.id,
                         dropTargetID: target.id,
                         above: above,
                         in: visible,
@@ -857,27 +1018,27 @@ struct NoteBoardView: View {
     private func handleDragEnd() {
         removeDragMouseUpMonitor()
         lastReorder = nil
-        guard let noteID = dragSession.noteID else { return }
+        guard let itemID = dragSession.itemID else { return }
         // The whole drag persisted nothing to disk — commit once here.
         try? SidecarStore.shared.save()
-        // Drop frames of notes that left the visible set while dragging.
-        let known = Set(noteStore.notes.map(\.id))
+        // Drop frames of cards that left the visible set while dragging.
+        let known = Set(noteStore.notes.map(\.id)).union(noteStore.finderCards.map(\.id))
         cardLayout.frames = cardLayout.frames.filter { known.contains($0.key) }
         cardLayout.viewportFrames = cardLayout.viewportFrames.filter { known.contains($0.key) }
 
         // Settle: the replica glides from under the pointer into the
         // committed slot, then crossfades back into the real card.
-        if let slot = cardLayout.frames[noteID] {
+        if let slot = cardLayout.frames[itemID] {
             withAnimation(.easeInOut(duration: 0.18)) {
                 dragSession.move(
                     to: CGPoint(
                         x: slot.minX + dragSession.grabOffset.width,
                         y: slot.minY + dragSession.grabOffset.height,
-                    )
+                    ),
                 )
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                guard dragSession.noteID == noteID else { return }
+                guard dragSession.itemID == itemID else { return }
                 withAnimation(.easeOut(duration: 0.12)) {
                     dragSession.end()
                 }
@@ -916,7 +1077,6 @@ struct NoteBoardView: View {
         NSEvent.removeMonitor(monitor)
         dragMouseUpMonitor = nil
     }
-
 
     /// Rename-in-place card: a small editor shaped like a board card.
     private func boardRenameCard(for note: Note) -> some View {
@@ -1217,6 +1377,27 @@ struct NoteBoardView: View {
         let folder = noteStore.selectedFolder?.name ?? ""
         let note = noteStore.createNote(in: folder)
         openEditorWithoutCard { noteStore.openNote(note) }
+    }
+
+    /// New Finder card in the current folder, selected and ready to rename
+    /// from its card menu (no scroll needed — creation is user-triggered).
+    private func createFinderCard() {
+        let card = noteStore.createFinderCard(in: noteStore.selectedFolder?.name ?? "")
+        renamingFinderCardID = nil
+        noteStore.replaceSelection(with: .finderCard(card.id))
+    }
+
+    /// Right-click menu shared by the header "+" button and the blank board
+    /// area: new note / new Finder card.
+    private func newItemsMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addActionItem(title: l10n["common.newNote"], icon: "square.and.pencil") {
+            createNote()
+        }
+        menu.addActionItem(title: l10n["finder.card.new"], icon: "rectangle.stack.badge.plus") {
+            createFinderCard()
+        }
+        return menu
     }
 
     private func startCreatingFolder() {

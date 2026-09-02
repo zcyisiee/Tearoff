@@ -39,8 +39,8 @@ final class BoardCardLayout {
 /// the whole board.
 @Observable
 final class BoardDragSession {
-    /// The note being dragged (`nil` = no active drag).
-    private(set) var note: Note?
+    /// The board item being dragged — note or Finder card (`nil` = no active drag).
+    private(set) var item: BoardItem?
     /// Where inside the card the pointer grabbed, in `BoardCardSpace`.
     private(set) var grabOffset: CGSize = .zero
     /// Captured card size — keeps the replica at the source card's footprint.
@@ -48,10 +48,18 @@ final class BoardDragSession {
     /// Current pointer position in `BoardCardSpace`.
     private(set) var pointer: CGPoint?
 
-    var noteID: UUID? { note?.id }
+    var itemID: UUID? {
+        item?.id
+    }
 
-    func begin(note: Note, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
-        self.note = note
+    /// Note id when dragging a note, nil for Finder cards (kept for callers
+    /// that only care about notes).
+    var noteID: UUID? {
+        item?.note?.id
+    }
+
+    func begin(item: BoardItem, grabOffset: CGSize, size: CGSize, pointer: CGPoint) {
+        self.item = item
         self.grabOffset = grabOffset
         self.size = size
         self.pointer = pointer
@@ -62,7 +70,7 @@ final class BoardDragSession {
     }
 
     func end() {
-        note = nil
+        item = nil
         pointer = nil
     }
 }
@@ -251,7 +259,9 @@ struct BoardNoteCard: View {
             )
             .onHover { hovering in
                 guard hoverEnabled, !isDragging else {
-                    if isHovered { isHovered = false }
+                    if isHovered {
+                        isHovered = false
+                    }
                     return
                 }
                 withAnimation(.easeInOut(duration: 0.12)) {
@@ -313,17 +323,17 @@ struct BoardNoteCard: View {
     @ViewBuilder
     private func blockView(_ block: CardPreviewBlock) -> some View {
         switch block.kind {
-        case .heading(let level, let text):
+        case let .heading(level, text):
             Text(text)
                 .font(level == 2 ? appSettings.boardHeadingFont : appSettings.boardSubheadingFont)
                 .foregroundStyle(level == 2 ? accentColor : accentColor.opacity(0.72))
                 .lineLimit(1)
                 .padding(.top, 2)
 
-        case .task(let lineIndex, let isChecked, let text):
+        case let .task(lineIndex, isChecked, text):
             taskRow(lineIndex: lineIndex, isChecked: isChecked, text: text)
 
-        case .bullet(let text):
+        case let .bullet(text):
             HStack(alignment: .top, spacing: 6) {
                 Text("•")
                     .font(appSettings.boardBodyFont)
@@ -333,7 +343,7 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.bodyText)
             }
 
-        case .quote(let text):
+        case let .quote(text):
             HStack(alignment: .top, spacing: 6) {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(DesignToken.hairline)
@@ -343,17 +353,17 @@ struct BoardNoteCard: View {
                     .foregroundStyle(DesignToken.muted)
             }
 
-        case .code(let text):
+        case let .code(text):
             Text(text)
                 .font(.system(size: appSettings.boardFontSize - 1, design: .monospaced))
                 .foregroundStyle(DesignToken.muted)
 
-        case .image(let path):
+        case let .image(path):
             CardImageThumbnail(
-                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder)
+                url: FileStorage.imageURL(forRelativePath: path, folder: note.folder),
             )
 
-        case .text(let text):
+        case let .text(text):
             Text(text)
                 .font(appSettings.boardBodyFont)
                 .foregroundStyle(DesignToken.bodyText)
@@ -531,15 +541,27 @@ struct BoardDragReplica: View {
     let session: BoardDragSession
 
     var body: some View {
-        if let note = session.note, let pointer = session.pointer {
-            BoardNoteCard(
-                note: note,
-                isSelected: false,
-                isEditing: false,
-                isDragging: true,
-                isReplica: true,
-                onTap: { _ in },
-            )
+        if let item = session.item, let pointer = session.pointer {
+            Group {
+                switch item {
+                case let .note(note):
+                    BoardNoteCard(
+                        note: note,
+                        isSelected: false,
+                        isEditing: false,
+                        isDragging: true,
+                        isReplica: true,
+                        onTap: { _ in },
+                    )
+                case let .finder(card):
+                    FinderCardView(
+                        card: card,
+                        isDragging: true,
+                        isReplica: true,
+                        onTap: { _ in },
+                    )
+                }
+            }
             // Pin to the captured source footprint. The board-content
             // overlay proposes its full height to the replica, and the
             // replica's natural height can also diverge from the slot (an
