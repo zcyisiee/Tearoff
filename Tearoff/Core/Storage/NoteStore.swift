@@ -147,7 +147,9 @@ final class NoteStore {
             if sortBy == .manual {
                 switch (a.sortOrder, b.sortOrder) {
                 case let (lhs?, rhs?):
-                    if lhs != rhs { return lhs < rhs }
+                    if lhs != rhs {
+                        return lhs < rhs
+                    }
                     return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
                 case (nil, _?):
                     return false // unpositioned notes sink below positioned ones
@@ -1192,6 +1194,64 @@ final class NoteStore {
             }
         }
         refreshFolders()
+    }
+
+    /// Move every note in `name` and its descendant folders into `target`,
+    /// auto-renaming on filename collision (keep-both, never queuing
+    /// `pendingNoteMoveConflicts`), then trash the leftover empty folder tree.
+    /// Backs the "move notes out, then delete folder" choice of the folder
+    /// delete flow.
+    func dissolveFolder(_ name: String, movingNotesTo target: String) {
+        guard !name.isEmpty else { return }
+        guard target != name, !target.hasPrefix(name + "/") else { return }
+
+        let prefix = name + "/"
+        let moving = notes.filter { $0.folder == name || $0.folder.hasPrefix(prefix) }
+
+        for note in moving {
+            guard let index = notes.firstIndex(where: { $0.id == note.id }) else { continue }
+            let originalFilename = notes[index].savedFilename ?? notes[index].filename
+
+            // Keep-both on collision: bump the title until neither the
+            // in-memory siblings nor the destination on disk collide.
+            var renamedFilename: String?
+            if noteFilenameWouldCollide(originalFilename, in: target, excluding: note.id) {
+                let baseTitle = notes[index].title
+                var counter = 2
+                var newTitle = "\(baseTitle) \(counter)"
+                var candidate = "\(FileStorage.sanitizeForFilename(newTitle)).md"
+                while noteFilenameWouldCollide(candidate, in: target, excluding: note.id) {
+                    counter += 1
+                    newTitle = "\(baseTitle) \(counter)"
+                    candidate = "\(FileStorage.sanitizeForFilename(newTitle)).md"
+                }
+                notes[index].title = newTitle
+                notes[index].modifiedAt = Date()
+                // Rewrite the H1 heading line to match.
+                var lines = notes[index].content.components(separatedBy: "\n")
+                if let headingIdx = lines.firstIndex(where: { $0.hasPrefix("#") }) {
+                    let headingPrefix = String(lines[headingIdx].prefix(while: { $0 == "#" }))
+                    lines[headingIdx] = "\(headingPrefix) \(newTitle)"
+                    notes[index].content = lines.joined(separator: "\n")
+                }
+                renamedFilename = candidate
+            }
+            performMoveNote(at: index, to: target, renamingTo: renamedFilename)
+        }
+
+        // Don't trash the tree if a move failed and left notes behind —
+        // trashFolder would otherwise take those notes with it.
+        let leftover = notes.contains { $0.folder == name || $0.folder.hasPrefix(prefix) }
+        if leftover {
+            Log.storage.error("[NoteStore] dissolveFolder — some notes failed to move; leaving '\(name, privacy: .public)' in place")
+            refreshFolders()
+            return
+        }
+
+        // The notes already left, so the folder tree is empty — this trashes
+        // the directories plus the sidecar folder color via the existing path.
+        trashFolder(name)
+        Log.storage.info("[NoteStore] dissolveFolder — moved \(moving.count) notes from '\(name, privacy: .public)' into '\(target, privacy: .public)', trashed empty tree")
     }
 
     func trashFolder(_ name: String) {

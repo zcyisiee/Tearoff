@@ -55,6 +55,9 @@ struct NoteBoardView: View {
     // Folder delete confirmation
     @State private var deletingFolderName: String?
     @State private var showDeleteFolderConfirm = false
+    /// Folder that still contains notes — the in-panel move-vs-trash choice
+    /// overlay is presented for it instead of the plain confirm alert.
+    @State private var deleteFolderFlow: PendingFolderDelete?
     @FocusState private var isSearchFieldFocused: Bool
     @FocusState private var isFolderFieldFocused: Bool
     @FocusState private var isNoteRenameFocused: Bool
@@ -93,7 +96,7 @@ struct NoteBoardView: View {
         )
     }
 
-    /// All folders sorted by path — tab bar entries.
+    /// Every folder path, used by the collapsible-sections layout.
     private var allFolders: [Folder] {
         noteStore.sortedFolders(noteStore.folders, by: .name, ascending: true)
     }
@@ -151,9 +154,18 @@ struct NoteBoardView: View {
     }
 
     private struct ContentMatch: Identifiable {
-        var id: String { "content-\(note.id)" }
+        var id: String {
+            "content-\(note.id)"
+        }
+
         let note: Note
         let snippet: AttributedString
+    }
+
+    /// Folder pending deletion with its live descendant note count.
+    private struct PendingFolderDelete {
+        let folderName: String
+        let noteCount: Int
     }
 
     private var hasAnyResults: Bool {
@@ -209,6 +221,17 @@ struct NoteBoardView: View {
             }
         }
         .moveConflictAlerts(noteStore: noteStore, l10n: l10n)
+        .overlay {
+            if let flow = deleteFolderFlow {
+                DeleteFolderSheet(
+                    folderName: flow.folderName,
+                    noteCount: flow.noteCount,
+                    noteStore: noteStore,
+                    l10n: l10n,
+                    onCancel: { deleteFolderFlow = nil },
+                )
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .panelPinStateChanged)) { _ in
             isPanelPinned = PanelSettings.shared.isPanelPinned
         }
@@ -235,13 +258,7 @@ struct NoteBoardView: View {
             }
         } message: { folderName in
             let displayName = (folderName as NSString).lastPathComponent
-            let prefix = folderName + "/"
-            let count = noteStore.notes.count(where: { $0.folder == folderName || $0.folder.hasPrefix(prefix) })
-            if count > 0 {
-                Text(l10n.t("alert.deleteFolder.withNotes", displayName, "\(count)"))
-            } else {
-                Text(l10n.t("alert.deleteFolder.empty", displayName))
-            }
+            Text(l10n.t("alert.deleteFolder.empty", displayName))
         }
         .onChange(of: noteStore.pendingNewFolder) { _, pending in
             guard pending else { return }
@@ -313,94 +330,111 @@ struct NoteBoardView: View {
         } else {
             HStack(spacing: DesignToken.Space.sm) {
                 tabBar
-                Spacer()
-                HeaderIconButton(systemName: "magnifyingglass", help: l10n["common.search"]) {
-                    isSearching = true
-                    isSearchFieldFocused = true
-                }
-                HeaderIconButton(systemName: "folder.badge.plus", help: l10n["common.newFolder"]) {
-                    startCreatingFolder()
-                }
-                HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
-                    createNote()
-                }
-                HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
-                    noteStore.showSettings = true
-                }
-                HeaderIconButton(
-                    systemName: isPanelPinned ? "pin.fill" : "pin",
-                    help: isPanelPinned ? l10n["panel.unlock"] : l10n["panel.lock"],
-                    tint: isPanelPinned ? DesignToken.accent : nil,
-                ) {
-                    let settings = PanelSettings.shared
-                    settings.isPanelPinned.toggle()
-                    if !settings.isPanelPinned {
-                        // Unlock + collapse in one gesture: the lit button is
-                        // the "leave locked mode" affordance.
-                        AppDelegate.shared?.panelController?.hidePanel()
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .clipped()
+                HStack(spacing: DesignToken.Space.sm) {
+                    HeaderIconButton(systemName: "magnifyingglass", help: l10n["common.search"]) {
+                        isSearching = true
+                        isSearchFieldFocused = true
+                    }
+                    HeaderIconButton(systemName: "folder.badge.plus", help: l10n["common.newFolder"]) {
+                        startCreatingFolder()
+                    }
+                    HeaderIconButton(systemName: "square.and.pencil", help: l10n["common.newNote"]) {
+                        createNote()
+                    }
+                    HeaderIconButton(systemName: "gearshape", help: l10n["settings.board.title"]) {
+                        noteStore.showSettings = true
+                    }
+                    HeaderIconButton(
+                        systemName: isPanelPinned ? "pin.fill" : "pin",
+                        help: isPanelPinned ? l10n["panel.unlock"] : l10n["panel.lock"],
+                        tint: isPanelPinned ? DesignToken.accent : nil,
+                    ) {
+                        let settings = PanelSettings.shared
+                        settings.isPanelPinned.toggle()
+                        if !settings.isPanelPinned {
+                            // Unlock + collapse in one gesture: the lit button is
+                            // the "leave locked mode" affordance.
+                            AppDelegate.shared?.panelController?.hidePanel()
+                        }
                     }
                 }
+                .layoutPriority(1)
             }
         }
     }
 
-    /// Folder tab strip + trash. Current tab is accent-tinted.
+    /// Folder tab strip + trash. Top-level folders only — nested folders get
+    /// their own chip row inside the board, and rendering every path here
+    /// wasted tab width. Current tab is accent-tinted.
     private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DesignToken.Space.xs) {
-                tabButton(
-                    title: l10n["home.title"],
-                    icon: "tray.full",
-                    isActive: noteStore.selectedFolder == nil,
-                ) {
-                    noteStore.navigateToHome()
-                }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignToken.Space.xs) {
+                    tabButton(
+                        title: l10n["home.title"],
+                        icon: "tray.full",
+                        isActive: noteStore.selectedFolder == nil,
+                    ) {
+                        noteStore.navigateToHome()
+                    }
 
-                ForEach(allFolders) { folder in
-                    if folderRename.renamingFolderName == folder.name {
-                        let isActive = noteStore.selectedFolder?.name == folder.name
-                        tabFolderEditor(
-                            iconColor: isActive
-                                ? DesignToken.onAccent
-                                : (folder.color?.color ?? DesignToken.muted),
-                            fill: isActive
-                                ? (folder.color?.color ?? DesignToken.accent)
-                                : DesignToken.surfaceInset,
-                            labelColor: isActive ? DesignToken.onAccent : DesignToken.bodyText,
-                        )
-                    } else {
-                        tabButton(
-                            title: (folder.name as NSString).lastPathComponent,
-                            icon: "folder.fill",
-                            isActive: noteStore.selectedFolder?.name == folder.name,
-                            iconColor: folder.color?.color,
-                        ) {
-                            noteStore.navigateToFolder(folder)
-                        }
-                        .nsContextMenu {
-                            NoteListMenus.folderMenu(
-                                folder: folder,
-                                noteStore: noteStore,
-                                l10n: l10n,
-                                onRename: { startRenamingFolder(folder.name) },
-                                onDelete: {
-                                    deletingFolderName = folder.name
-                                    showDeleteFolderConfirm = true
-                                },
+                    ForEach(topLevelFolders) { folder in
+                        if folderRename.renamingFolderName == folder.name {
+                            let isActive = noteStore.selectedFolder?.name == folder.name
+                            tabFolderEditor(
+                                iconColor: isActive
+                                    ? DesignToken.onAccent
+                                    : (folder.color?.color ?? DesignToken.muted),
+                                fill: isActive
+                                    ? (folder.color?.color ?? DesignToken.accent)
+                                    : DesignToken.surfaceInset,
+                                labelColor: isActive ? DesignToken.onAccent : DesignToken.bodyText,
                             )
+                        } else {
+                            tabButton(
+                                title: (folder.name as NSString).lastPathComponent,
+                                icon: "folder.fill",
+                                isActive: noteStore.selectedFolder?.name == folder.name,
+                                iconColor: folder.color?.color,
+                            ) {
+                                noteStore.navigateToFolder(folder)
+                            }
+                            .nsContextMenu {
+                                NoteListMenus.folderMenu(
+                                    folder: folder,
+                                    noteStore: noteStore,
+                                    l10n: l10n,
+                                    onRename: { startRenamingFolder(folder.name) },
+                                    onDelete: { requestDeleteFolder(folder) },
+                                )
+                            }
                         }
                     }
-                }
 
-                if folderRename.isCreating {
-                    tabFolderEditor(
-                        iconColor: DesignToken.accent,
-                        fill: DesignToken.surfaceInset,
-                        labelColor: DesignToken.bodyText,
-                    )
+                    // Header strip hosts the editor on home, and in sections
+                    // layout (no chip row). Nested creates in tabs live in the
+                    // chip row instead.
+                    if showsHeaderCreateEditor {
+                        tabFolderEditor(
+                            iconColor: DesignToken.accent,
+                            fill: DesignToken.surfaceInset,
+                            labelColor: DesignToken.bodyText,
+                        )
+                        .id(Self.folderCreateEditorID)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+            .onChange(of: folderRename.isCreating) { _, isCreating in
+                guard isCreating, showsHeaderCreateEditor else { return }
+                // The new field sits at the strip's trailing edge — pull it
+                // into view so the user actually sees it.
+                DispatchQueue.main.async {
+                    proxy.scrollTo(Self.folderCreateEditorID, anchor: .trailing)
                 }
             }
-            .padding(.vertical, 1)
         }
     }
 
@@ -437,26 +471,26 @@ struct NoteBoardView: View {
     private var boardContent: some View {
         GeometryReader { geo in
             ScrollView {
-            VStack(spacing: 0) {
-                if appSettings.boardLayout == .tabs {
-                    tabsBoard
-                } else {
-                    sectionsBoard
+                VStack(spacing: 0) {
+                    if appSettings.boardLayout == .tabs {
+                        tabsBoard
+                    } else {
+                        sectionsBoard
+                    }
                 }
-            }
-            .padding(.horizontal, DesignToken.Space.lg)
-            .padding(.vertical, DesignToken.Space.md)
-            .padding(.bottom, 44) // clearance for the floating selection toolbar
-            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-            // Clicking any blank area (card gaps, margins) dismisses the
-            // in-place card editor and an active selection — Finder-style.
-            .contentShape(Rectangle())
-            .onTapGesture { handleBackgroundTap() }
-            .coordinateSpace(name: BoardCardSpace.name)
-            .overlay(alignment: .topLeading) {
-                BoardDragReplica(session: dragSession)
-            }
-            .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
+                .padding(.horizontal, DesignToken.Space.lg)
+                .padding(.vertical, DesignToken.Space.md)
+                .padding(.bottom, 44) // clearance for the floating selection toolbar
+                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+                // Clicking any blank area (card gaps, margins) dismisses the
+                // in-place card editor and an active selection — Finder-style.
+                .contentShape(Rectangle())
+                .onTapGesture { handleBackgroundTap() }
+                .coordinateSpace(name: BoardCardSpace.name)
+                .overlay(alignment: .topLeading) {
+                    BoardDragReplica(session: dragSession)
+                }
+                .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
             }
             .overlay(alignment: .bottom) {
                 SelectionToolbar()
@@ -484,7 +518,8 @@ struct NoteBoardView: View {
         else { return }
 
         if noteID == noteStore.inlineEditingNoteID,
-           let note = noteStore.notes.first(where: { $0.id == noteID }) {
+           let note = noteStore.notes.first(where: { $0.id == noteID })
+        {
             // Route into the mounted inline editor — appending behind its back
             // would be lost on its next debounced flush.
             MarkdownEditorView.insertDroppedImageFile(url, for: note)
@@ -506,7 +541,9 @@ struct NoteBoardView: View {
             : "![\(alt)](\(result.relativePath))"
 
         var base = note.content
-        while base.hasSuffix("\n") { base.removeLast() }
+        while base.hasSuffix("\n") {
+            base.removeLast()
+        }
         let newContent = base.isEmpty ? markdown + "\n" : base + "\n\n" + markdown + "\n"
         noteStore.updateContent(for: note.id, content: newContent)
 
@@ -516,18 +553,59 @@ struct NoteBoardView: View {
         Task {
             try? await Task.sleep(for: .seconds(1.0))
             withAnimation(.easeInOut(duration: 0.4)) {
-                if droppedFlashID == note.id { droppedFlashID = nil }
+                if droppedFlashID == note.id {
+                    droppedFlashID = nil
+                }
             }
         }
     }
 
     /// Tabs layout: subfolder chips (inside a folder), then the note grid.
+    /// The chip row stays visible while creating a nested folder even when
+    /// there are no children yet — that's where the inline editor mounts.
+    private var showsChildFolderChips: Bool {
+        if !childFolders.isEmpty {
+            return true
+        }
+        if let name = folderRename.renamingFolderName {
+            return childFolders.contains { $0.name == name }
+        }
+        return folderRename.isCreating && noteStore.selectedFolder != nil
+    }
+
     private var tabsBoard: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.sm) {
-            if !childFolders.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: DesignToken.Space.xs) {
-                        ForEach(childFolders) { folder in
+            if showsChildFolderChips {
+                childFolderChipRow
+            }
+
+            if isEmpty {
+                EmptyStateView(
+                    icon: "note.text",
+                    title: l10n["noteList.empty.title"],
+                    subtitle: l10n["noteList.empty.subtitle"],
+                )
+                .padding(.top, DesignToken.Space.xl)
+            } else {
+                noteGrid(boardNotes)
+            }
+        }
+    }
+
+    /// Subfolder chip strip inside a folder — also hosts the inline editor
+    /// for renaming a child folder and creating a child folder here.
+    private var childFolderChipRow: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignToken.Space.xs) {
+                    ForEach(childFolders) { folder in
+                        if folderRename.renamingFolderName == folder.name {
+                            tabFolderEditor(
+                                iconColor: folder.color?.color ?? DesignToken.accent,
+                                fill: DesignToken.surfaceInset,
+                                labelColor: DesignToken.bodyText,
+                            )
+                        } else {
                             Button {
                                 noteStore.navigateToSubfolder(folder)
                             } label: {
@@ -554,26 +632,27 @@ struct NoteBoardView: View {
                                     noteStore: noteStore,
                                     l10n: l10n,
                                     onRename: { startRenamingFolder(folder.name) },
-                                    onDelete: {
-                                        deletingFolderName = folder.name
-                                        showDeleteFolderConfirm = true
-                                    },
+                                    onDelete: { requestDeleteFolder(folder) },
                                 )
                             }
                         }
                     }
+
+                    if showsChipCreateEditor {
+                        tabFolderEditor(
+                            iconColor: DesignToken.accent,
+                            fill: DesignToken.surfaceInset,
+                            labelColor: DesignToken.bodyText,
+                        )
+                        .id(Self.folderCreateEditorID)
+                    }
                 }
             }
-
-            if isEmpty {
-                EmptyStateView(
-                    icon: "note.text",
-                    title: l10n["noteList.empty.title"],
-                    subtitle: l10n["noteList.empty.subtitle"],
-                )
-                .padding(.top, DesignToken.Space.xl)
-            } else {
-                noteGrid(boardNotes)
+            .onChange(of: folderRename.isCreating) { _, isCreating in
+                guard isCreating, showsChipCreateEditor else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(Self.folderCreateEditorID, anchor: .trailing)
+                }
             }
         }
     }
@@ -873,7 +952,7 @@ struct NoteBoardView: View {
                     to: CGPoint(
                         x: slot.minX + dragSession.grabOffset.width,
                         y: slot.minY + dragSession.grabOffset.height,
-                    )
+                    ),
                 )
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -916,7 +995,6 @@ struct NoteBoardView: View {
         NSEvent.removeMonitor(monitor)
         dragMouseUpMonitor = nil
     }
-
 
     /// Rename-in-place card: a small editor shaped like a board card.
     private func boardRenameCard(for note: Note) -> some View {
@@ -1132,7 +1210,38 @@ struct NoteBoardView: View {
     // MARK: - Inline Folder Editor
 
     private var topLevelFolders: [Folder] {
-        noteStore.folders.filter(\.isTopLevel)
+        noteStore.sortedFolders(noteStore.folders.filter(\.isTopLevel), by: .name, ascending: true)
+    }
+
+    /// Header tab strip shows the create field on home, or whenever the chip
+    /// row isn't on screen (sections layout).
+    private var showsHeaderCreateEditor: Bool {
+        folderRename.isCreating && (noteStore.selectedFolder == nil || appSettings.boardLayout != .tabs)
+    }
+
+    /// Nested create field — only in the tabs-layout chip row inside a folder.
+    private var showsChipCreateEditor: Bool {
+        folderRename.isCreating && noteStore.selectedFolder != nil && appSettings.boardLayout == .tabs
+    }
+
+    /// Identifier of the inline new-folder field — ScrollViewReaders pull it
+    /// into view the moment it mounts at a strip's trailing edge.
+    private static let folderCreateEditorID = "folder-create-editor"
+
+    /// Folders the new folder's name must not clash with — those sharing its
+    /// parent: top-level on home, the current folder's children when nested.
+    private var createConflictSiblings: [Folder] {
+        guard let parent = noteStore.selectedFolder?.name else { return topLevelFolders }
+        return noteStore.childFolders(of: parent)
+    }
+
+    /// Folders the renamed folder's name must not clash with — those sharing
+    /// its parent. Never `allFolders`: that would wrongly flag unrelated
+    /// nested names elsewhere in the tree.
+    private func renameConflictSiblings(for folderName: String) -> [Folder] {
+        let parent = (folderName as NSString).deletingLastPathComponent
+        let parentPath = parent == "." ? "" : parent
+        return noteStore.childFolders(of: parentPath)
     }
 
     /// Compact tab-shaped field used for in-place rename and new-folder create
@@ -1174,19 +1283,20 @@ struct NoteBoardView: View {
     }
 
     private var folderEditorIsConflicting: Bool {
-        folderRename.renamingFolderName != nil
-            ? folderRename.isRenameConflicting(siblings: allFolders)
-            : folderRename.isCreateConflicting(siblings: topLevelFolders)
+        if let name = folderRename.renamingFolderName {
+            return folderRename.isRenameConflicting(siblings: renameConflictSiblings(for: name))
+        }
+        return folderRename.isCreateConflicting(siblings: createConflictSiblings)
     }
 
     private func commitFolderEditor() {
         if let name = folderRename.renamingFolderName {
-            folderRename.commitRename(name, noteStore: noteStore, siblings: allFolders)
+            folderRename.commitRename(name, noteStore: noteStore, siblings: renameConflictSiblings(for: name))
         } else {
             folderRename.commitCreate(
                 parent: noteStore.selectedFolder?.name ?? "",
                 noteStore: noteStore,
-                siblings: topLevelFolders,
+                siblings: createConflictSiblings,
             )
         }
     }
@@ -1200,13 +1310,20 @@ struct NoteBoardView: View {
     }
 
     private func focusLostFolderEditor() {
+        // The field was just inserted and may never have stably focused — a
+        // blur inside the grace window is layout noise, not the user clicking
+        // away. Re-assert focus instead of cancelling the create/rename.
+        if folderRename.shouldIgnoreFocusLoss {
+            DispatchQueue.main.async { isFolderFieldFocused = true }
+            return
+        }
         if let name = folderRename.renamingFolderName {
-            folderRename.commitOrCancelRename(name, noteStore: noteStore, siblings: allFolders)
+            folderRename.commitOrCancelRename(name, noteStore: noteStore, siblings: renameConflictSiblings(for: name))
         } else {
             folderRename.commitOrCancelCreate(
                 parent: noteStore.selectedFolder?.name ?? "",
                 noteStore: noteStore,
-                siblings: topLevelFolders,
+                siblings: createConflictSiblings,
             )
         }
     }
@@ -1217,6 +1334,20 @@ struct NoteBoardView: View {
         let folder = noteStore.selectedFolder?.name ?? ""
         let note = noteStore.createNote(in: folder)
         openEditorWithoutCard { noteStore.openNote(note) }
+    }
+
+    /// Folder delete entry point, shared by the tab-bar and chip-row context
+    /// menus: an empty tree keeps the plain confirm alert, a folder with notes
+    /// gets the in-panel move-vs-trash choice instead.
+    private func requestDeleteFolder(_ folder: Folder) {
+        let prefix = folder.name + "/"
+        let count = noteStore.notes.count(where: { $0.folder == folder.name || $0.folder.hasPrefix(prefix) })
+        if count == 0 {
+            deletingFolderName = folder.name
+            showDeleteFolderConfirm = true
+        } else {
+            deleteFolderFlow = PendingFolderDelete(folderName: folder.name, noteCount: count)
+        }
     }
 
     private func startCreatingFolder() {

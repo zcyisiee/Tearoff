@@ -13,11 +13,23 @@ final class FolderRenameCoordinator {
     var renamingFolderName: String?
     var renameText: String = ""
 
+    /// Grace window right after a create/rename begins: inserting the field
+    /// can trigger a spurious blur (layout pass, focus not settling yet), and
+    /// committing/cancelling on it would make the create look like a no-op.
+    /// Focus losses inside the window are ignored by the view.
+    private var ignoreFocusLossUntil: Date?
+
+    /// Whether a focus loss right now should be treated as spurious.
+    var shouldIgnoreFocusLoss: Bool {
+        (ignoreFocusLossUntil ?? .distantPast) > Date()
+    }
+
     // MARK: - Create
 
     func beginCreate() {
         creationText = ""
         isCreating = true
+        ignoreFocusLossUntil = Date().addingTimeInterval(0.45)
     }
 
     func isCreateConflicting(siblings: [Folder]) -> Bool {
@@ -55,6 +67,7 @@ final class FolderRenameCoordinator {
     func beginRename(folderName: String) {
         renamingFolderName = folderName
         renameText = (folderName as NSString).lastPathComponent
+        ignoreFocusLossUntil = Date().addingTimeInterval(0.45)
     }
 
     func isRenameConflicting(siblings: [Folder]) -> Bool {
