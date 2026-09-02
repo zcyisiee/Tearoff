@@ -343,5 +343,7 @@
   "finder.empty.selectFavorite": "Pick a favorite folder above",
   "finder.empty.folder": "Empty folder",
   "finder.error.notFound": "Folder not found",
-  "finder.error.notReadable": "No permission to read this folder"
+  "finder.error.notReadable": "No permission to read this folder",
+  "finder.viewMode.icon": "Icon view",
+  "finder.viewMode.list": "List view"
 }

@@ -50,6 +50,7 @@ final class SidecarStore {
         var color: String? // NoteColor rawValue
         var isExpanded: Bool? // v4 — legacy tall/default flag; migrated into `listHeight` (no longer written)
         var listHeight: Double? // v5 — file list height in points (nil = default 240)
+        var viewMode: String? // v6 — file list view: "icon" / "list" (nil = default icon)
         var createdAt: Date
         var modifiedAt: Date
     }

@@ -343,5 +343,7 @@
   "finder.empty.selectFavorite": "先在上方选择一个常用目录",
   "finder.empty.folder": "空文件夹",
   "finder.error.notFound": "找不到该文件夹",
-  "finder.error.notReadable": "没有读取该文件夹的权限"
+  "finder.error.notReadable": "没有读取该文件夹的权限",
+  "finder.viewMode.icon": "图标视图",
+  "finder.viewMode.list": "列表视图"
 }

@@ -1,50 +1,54 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// Caches small (16×16 pt) file icons for Finder card rows, keyed so that
-/// per-row rendering never calls `NSWorkspace` on a cache hit.
+/// Caches file icons for Finder card entries — the 16×16 variant for list rows
+/// and the 64×64 variant for icon-grid items — keyed so that per-row rendering
+/// never calls `NSWorkspace` on a cache hit. A single cache holds both sizes
+/// (the key embeds the size), so switching a card between list and icon view
+/// shares namespace but never cross-contaminates the two scales.
 final class FileIconCache {
     static let shared = FileIconCache()
 
     private let cache = NSCache<NSString, NSImage>()
 
     private init() {
-        cache.countLimit = 512
+        cache.countLimit = 2048
     }
 
-    /// Returns a 16×16-ready image for the entry. The cached image is a sized
-    /// copy so SwiftUI `Image(nsImage:)` renders crisp at row size.
-    func icon(for entry: FinderEntry) -> NSImage {
-        let key: NSString
+    /// Returns a `size`×`size`-ready image for the entry. The cached image is a
+    /// sized copy so it renders crisp at the requested size. Defaults to 16 for
+    /// the list view; the icon view requests 64.
+    func icon(for entry: FinderEntry, size: CGFloat = 16) -> NSImage {
+        let keyBase: String
         let unsized: NSImage
 
         if entry.isDirectory {
             // Plain directories and symlinks-to-directories share one icon.
             // (A symlink classified as a directory already resolved its target
             // during enumeration, so `entry.isDirectory` covers both cases.)
-            key = "dir"
+            keyBase = "dir"
             unsized = NSWorkspace.shared.icon(for: .folder)
         } else if entry.isPackage {
             // Packages (.app, .rtfd …) have custom per-item icons.
-            key = entry.url.path as NSString
+            keyBase = entry.url.path
             unsized = NSWorkspace.shared.icon(forFile: entry.url.path)
         } else if let identifier = entry.contentTypeIdentifier {
-            key = identifier as NSString
+            keyBase = identifier
             unsized = NSWorkspace.shared.icon(for: UTType(identifier) ?? .data)
         } else {
             // No UTType available — fall back to the file's own icon, cached
             // by extension so siblings share it.
-            let ext = entry.url.pathExtension.lowercased()
-            key = "ext:\(ext)" as NSString
+            keyBase = "ext:\(entry.url.pathExtension.lowercased())"
             unsized = NSWorkspace.shared.icon(forFile: entry.url.path)
         }
 
+        let key = "\(Int(size)):\(keyBase)" as NSString
         if let cached = cache.object(forKey: key) {
             return cached
         }
 
         let sized = unsized.copy() as! NSImage
-        sized.size = NSSize(width: 16, height: 16)
+        sized.size = NSSize(width: size, height: size)
         cache.setObject(sized, forKey: key)
         return sized
     }

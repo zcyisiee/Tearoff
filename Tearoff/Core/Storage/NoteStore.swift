@@ -919,6 +919,18 @@ final class NoteStore {
         }
     }
 
+    /// Switch a Finder card between its icon grid and list view. Persisted to
+    /// the sidecar immediately (view mode is a discrete, infrequent toggle).
+    func setFinderCardViewMode(_ mode: FinderCardViewMode, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].viewMode != mode
+        else { return }
+        finderCards[index].viewMode = mode
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
     /// Add a directory to the card's favourites and select it. Non-directories
     /// are rejected; re-adding an existing favourite just re-selects it.
     @discardableResult

@@ -231,6 +231,8 @@ struct FinderCardView: View {
 
                 titleEditToggleArea
             }
+
+            viewModeToggle
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -244,6 +246,25 @@ struct FinderCardView: View {
             .onTapGesture {
                 onTitleAreaTap?(NSApp.currentEvent?.modifierFlags ?? [])
             }
+    }
+
+    /// Switches the embedded file list between its icon grid and list view.
+    /// A single small toggle; the full header layout is reworked in a later
+    /// task, so this only needs to be usable.
+    private var viewModeToggle: some View {
+        Button {
+            let next: FinderCardViewMode = card.viewMode == .icon ? .list : .icon
+            noteStore.setFinderCardViewMode(next, for: card.id)
+        } label: {
+            Image(systemName: card.viewMode == .icon ? "list.bullet" : "square.grid.2x2")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DesignToken.muted)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, DesignToken.Space.xs)
+        .help(card.viewMode == .icon ? l10n["finder.viewMode.list"] : l10n["finder.viewMode.icon"])
     }
 
     // MARK: - Pin chrome
@@ -509,12 +530,23 @@ struct FinderCardView: View {
     // MARK: - File list
 
     private var fileList: some View {
-        FinderFileListView(
-            browser: browser,
-            appearance: appearance,
-            actions: makeActions(),
-            commands: commands,
-        )
+        Group {
+            if card.viewMode == .icon {
+                FinderIconListView(
+                    browser: browser,
+                    appearance: appearance,
+                    actions: makeActions(),
+                    commands: commands,
+                )
+            } else {
+                FinderFileListView(
+                    browser: browser,
+                    appearance: appearance,
+                    actions: makeActions(),
+                    commands: commands,
+                )
+            }
+        }
         .frame(height: card.listHeight ?? 240)
         .frame(maxWidth: .infinity)
         .background(DesignToken.surfaceInset.opacity(0.5))

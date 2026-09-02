@@ -1,5 +1,14 @@
 import Foundation
 
+/// How the embedded file list renders its entries. Persisted per card in the
+/// sidecar (v6).
+enum FinderCardViewMode: String, Codable, Hashable {
+    /// 64pt icon grid (Finder "icon view").
+    case icon
+    /// Single-column list (Finder "list view").
+    case list
+}
+
 /// A saved favourite (bookmark) inside a Finder card — one browsable directory.
 struct FinderFavorite: Identifiable, Hashable, Codable {
     let id: UUID
@@ -54,6 +63,10 @@ struct FinderCard: Identifiable, Hashable {
     /// the sidecar.
     var listHeight: Double?
 
+    /// How the embedded file list renders its entries. Persisted in the
+    /// sidecar (v6). Defaults to the icon grid.
+    var viewMode: FinderCardViewMode
+
     var createdAt: Date
     var modifiedAt: Date
 
@@ -90,6 +103,7 @@ struct FinderCard: Identifiable, Hashable {
         sortOrder: Int? = nil,
         color: NoteColor? = nil,
         listHeight: Double? = nil,
+        viewMode: FinderCardViewMode = .icon,
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
     ) {
@@ -103,6 +117,7 @@ struct FinderCard: Identifiable, Hashable {
         self.sortOrder = sortOrder
         self.color = color
         self.listHeight = listHeight
+        self.viewMode = viewMode
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
@@ -119,6 +134,7 @@ struct FinderCard: Identifiable, Hashable {
             && lhs.sortOrder == rhs.sortOrder
             && lhs.color == rhs.color
             && lhs.listHeight == rhs.listHeight
+            && lhs.viewMode == rhs.viewMode
     }
 }
 
@@ -153,6 +169,7 @@ extension FinderCard {
             sortOrder: entry.sortOrder,
             color: entry.color.flatMap(NoteColor.init),
             listHeight: entry.listHeight ?? (entry.isExpanded == true ? 480 : nil),
+            viewMode: entry.viewMode.flatMap(FinderCardViewMode.init(rawValue:)) ?? .icon,
             createdAt: entry.createdAt,
             modifiedAt: entry.modifiedAt,
         )
@@ -175,6 +192,7 @@ extension SidecarStore.FinderCardEntry {
             color: card.color?.rawValue,
             isExpanded: nil,
             listHeight: card.listHeight,
+            viewMode: card.viewMode.rawValue,
             createdAt: card.createdAt,
             modifiedAt: card.modifiedAt,
         )
