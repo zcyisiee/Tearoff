@@ -9,6 +9,9 @@ on:
       - "Tearoff.xcodeproj/project.pbxproj"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   check-version:
     runs-on: ubuntu-latest
