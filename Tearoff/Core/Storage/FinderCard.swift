@@ -9,6 +9,18 @@ enum FinderCardViewMode: String, Codable, Hashable {
     case list
 }
 
+/// The column the embedded file list sorts by, plus its direction. Persisted
+/// per card in the sidecar (v7). Directories are always grouped first; these
+/// keys order within the directories group and within the files group.
+enum FinderSortKey: String, Codable, CaseIterable, Hashable {
+    /// By name (`localizedStandardCompare`).
+    case name
+    /// By kind (file extension / UTI group), then by name.
+    case kind
+    /// By content modification date, then by name.
+    case modifiedDate
+}
+
 /// A saved favourite (bookmark) inside a Finder card — one browsable directory.
 struct FinderFavorite: Identifiable, Hashable, Codable {
     let id: UUID
@@ -67,6 +79,13 @@ struct FinderCard: Identifiable, Hashable {
     /// sidecar (v6). Defaults to the icon grid.
     var viewMode: FinderCardViewMode
 
+    /// Column the embedded file list sorts by. Persisted per card (v7).
+    /// Defaults to name ascending (Finder's default for name sort).
+    var sortKey: FinderSortKey
+
+    /// Direction of the sort. `true` = ascending. Persisted per card (v7).
+    var sortAscending: Bool
+
     var createdAt: Date
     var modifiedAt: Date
 
@@ -104,6 +123,8 @@ struct FinderCard: Identifiable, Hashable {
         color: NoteColor? = nil,
         listHeight: Double? = nil,
         viewMode: FinderCardViewMode = .icon,
+        sortKey: FinderSortKey = .name,
+        sortAscending: Bool = true,
         createdAt: Date = Date(),
         modifiedAt: Date = Date(),
     ) {
@@ -118,6 +139,8 @@ struct FinderCard: Identifiable, Hashable {
         self.color = color
         self.listHeight = listHeight
         self.viewMode = viewMode
+        self.sortKey = sortKey
+        self.sortAscending = sortAscending
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
@@ -135,6 +158,8 @@ struct FinderCard: Identifiable, Hashable {
             && lhs.color == rhs.color
             && lhs.listHeight == rhs.listHeight
             && lhs.viewMode == rhs.viewMode
+            && lhs.sortKey == rhs.sortKey
+            && lhs.sortAscending == rhs.sortAscending
     }
 }
 
@@ -170,6 +195,8 @@ extension FinderCard {
             color: entry.color.flatMap(NoteColor.init),
             listHeight: entry.listHeight ?? (entry.isExpanded == true ? 480 : nil),
             viewMode: entry.viewMode.flatMap(FinderCardViewMode.init(rawValue:)) ?? .icon,
+            sortKey: entry.sortKey.flatMap(FinderSortKey.init(rawValue:)) ?? .name,
+            sortAscending: entry.sortAscending ?? true,
             createdAt: entry.createdAt,
             modifiedAt: entry.modifiedAt,
         )
@@ -193,6 +220,8 @@ extension SidecarStore.FinderCardEntry {
             isExpanded: nil,
             listHeight: card.listHeight,
             viewMode: card.viewMode.rawValue,
+            sortKey: card.sortKey.rawValue,
+            sortAscending: card.sortAscending,
             createdAt: card.createdAt,
             modifiedAt: card.modifiedAt,
         )

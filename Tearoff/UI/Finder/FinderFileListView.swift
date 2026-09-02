@@ -1,4 +1,5 @@
 import AppKit
+import QuickLookUI
 import SwiftUI
 
 // MARK: - Appearance
@@ -47,6 +48,15 @@ struct FinderListActions {
     /// A drag-out session began (true) / ended (false) — the card suspends
     /// panel auto-hide for the duration.
     var onDragSessionChanged: (Bool) -> Void
+    /// Space / Quick Look on the selected entries (multi-select pages through
+    /// the panel). Suspends panel auto-hide for the panel's lifetime.
+    var onQuickLook: ([FinderEntry]) -> Void
+    /// ⌘I / Get Info on a single entry — opens Finder's Get Info window.
+    var onShowInfo: (FinderEntry) -> Void
+    /// ⌘⇧. / menu toggle — flips the app-wide hidden-file flag (all cards reload).
+    var onToggleHiddenFiles: () -> Void
+    /// Quick Look panel was dismissed (or lost control) — resume auto-hide.
+    var onQuickLookClosed: () -> Void
     /// Any failed file operation.
     var onError: (Error) -> Void
 }
@@ -64,6 +74,9 @@ struct FinderFileListView: NSViewRepresentable {
     /// The card creates one `FinderListCommands` per card and passes it here;
     /// the coordinator fills it once the table exists.
     let commands: FinderListCommands
+    /// Quick Look controller for this card — wired as the panel's data
+    /// source/delegate during `beginPreviewPanelControl`.
+    let quickLook: FinderQuickLookController
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -374,6 +387,21 @@ extension FinderFileListView {
             parent.actions.onActivate(selection)
         }
 
+        func quickLookSelection() {
+            let selection = selectedEntries()
+            guard !selection.isEmpty else { return }
+            parent.actions.onQuickLook(selection)
+        }
+
+        func showInfoSelection() {
+            guard let first = selectedEntries().first else { return }
+            parent.actions.onShowInfo(first)
+        }
+
+        func toggleHiddenFiles() {
+            parent.actions.onToggleHiddenFiles()
+        }
+
         @objc func doubleClicked(_: Any?) {
             guard let table else { return }
             let clicked = table.clickedRow
@@ -611,6 +639,11 @@ final class FinderTableView: NSTableView {
 
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers.contains(.command) {
+            // ⌘⇧. — toggle hidden files (app-wide; all cards reload)
+            if modifiers.contains(.shift), event.charactersIgnoringModifiers == "." {
+                coordinator.toggleHiddenFiles()
+                return
+            }
             switch event.keyCode {
             case 126: // ⌘↑ — navigate to the parent directory
                 coordinator.parent.actions.onGoUp()
@@ -628,6 +661,9 @@ final class FinderTableView: NSTableView {
                 break
             }
             switch event.charactersIgnoringModifiers {
+            case "i": // ⌘I — show info (Finder Get Info) on the selection
+                coordinator.showInfoSelection()
+                return
             case "o": // ⌘O — activate selection
                 coordinator.activateSelection()
                 return
@@ -648,6 +684,9 @@ final class FinderTableView: NSTableView {
         }
 
         switch event.keyCode {
+        case 49: // Space — Quick Look on the selection
+            coordinator.quickLookSelection()
+            return
         case 36, 76: // Return / numpad Enter — rename the single selected row
             if selectedRowIndexes.count == 1, let entry = coordinator.entry(at: selectedRowIndexes.first!) {
                 coordinator.beginRename(entry)
@@ -662,6 +701,28 @@ final class FinderTableView: NSTableView {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    // MARK: QLPreviewPanel control
+
+    /// The Quick Look panel finds its controller through the responder chain.
+    /// Accept control so the card's controller drives the panel.
+    override func acceptsPreviewPanelControl(_: QLPreviewPanel) -> Bool {
+        coordinator?.parent.quickLook != nil
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel) {
+        panel.dataSource = coordinator?.parent.quickLook
+        panel.delegate = coordinator?.parent.quickLook
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel) {
+        panel.dataSource = nil
+        panel.delegate = nil
+        // `previewPanelDidClose` may be suppressed once the delegate is nil'd,
+        // so resume auto-hide here too — it's idempotent and the panel is
+        // closing either way.
+        coordinator?.parent.actions.onQuickLookClosed()
     }
 
     override func rightMouseDown(with event: NSEvent) {

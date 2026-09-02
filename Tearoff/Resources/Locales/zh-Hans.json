@@ -355,5 +355,14 @@
   "finder.header.menu": "卡片菜单",
   "finder.header.favorites": "常用",
   "finder.header.noFavorites": "暂无常用",
-  "finder.favorite.select": "选择"
+  "finder.favorite.select": "选择",
+  "finder.sort.menu": "排序",
+  "finder.sort.name": "名称",
+  "finder.sort.kind": "种类",
+  "finder.sort.modified": "修改日期",
+  "finder.sort.ascending": "升序",
+  "finder.sort.descending": "降序",
+  "finder.file.showHidden": "显示隐藏文件",
+  "finder.file.quickLook": "快速查看",
+  "finder.file.getInfo": "显示简介"
 }

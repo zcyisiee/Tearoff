@@ -1,4 +1,5 @@
 import AppKit
+import QuickLookUI
 import SwiftUI
 
 // MARK: - Icon view layout
@@ -186,6 +187,9 @@ struct FinderIconListView: NSViewRepresentable {
     let appearance: FinderListAppearance
     let actions: FinderListActions
     let commands: FinderListCommands
+    /// Quick Look controller for this card — wired as the panel's data
+    /// source/delegate during `beginPreviewPanelControl`.
+    let quickLook: FinderQuickLookController
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -565,6 +569,21 @@ extension FinderIconListView {
             let selection = selectedEntries()
             guard !selection.isEmpty else { return }
             parent.actions.onActivate(selection)
+        }
+
+        func quickLookSelection() {
+            let selection = selectedEntries()
+            guard !selection.isEmpty else { return }
+            parent.actions.onQuickLook(selection)
+        }
+
+        func showInfoSelection() {
+            guard let first = selectedEntries().first else { return }
+            parent.actions.onShowInfo(first)
+        }
+
+        func toggleHiddenFiles() {
+            parent.actions.onToggleHiddenFiles()
         }
 
         /// Activates the item at `index` on a double-click — Finder semantics:
@@ -965,6 +984,11 @@ final class FinderIconCollectionView: NSCollectionView {
 
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers.contains(.command) {
+            // ⌘⇧. — toggle hidden files (app-wide; all cards reload)
+            if modifiers.contains(.shift), event.charactersIgnoringModifiers == "." {
+                coordinator.toggleHiddenFiles()
+                return
+            }
             switch event.keyCode {
             case 126: // ⌘↑ — navigate to the parent directory
                 coordinator.parent.actions.onGoUp()
@@ -982,6 +1006,9 @@ final class FinderIconCollectionView: NSCollectionView {
                 break
             }
             switch event.charactersIgnoringModifiers {
+            case "i": // ⌘I — show info (Finder Get Info) on the selection
+                coordinator.showInfoSelection()
+                return
             case "o": // ⌘O — activate selection
                 coordinator.activateSelection()
                 return
@@ -1002,6 +1029,9 @@ final class FinderIconCollectionView: NSCollectionView {
         }
 
         switch event.keyCode {
+        case 49: // Space — Quick Look on the selection
+            coordinator.quickLookSelection()
+            return
         case 36, 76: // Return / numpad Enter — rename the single selected item
             if selectionIndexPaths.count == 1, let index = selectionIndexPaths.first,
                let entry = coordinator.entry(at: index.item)
@@ -1036,6 +1066,28 @@ final class FinderIconCollectionView: NSCollectionView {
         if let target = coordinator.typeSelectMatch(typeSelectBuffer) {
             coordinator.selectToTypeSelect(target)
         }
+    }
+
+    // MARK: QLPreviewPanel control
+
+    /// The Quick Look panel finds its controller through the responder chain.
+    /// Accept control so the card's controller drives the panel.
+    override func acceptsPreviewPanelControl(_: QLPreviewPanel) -> Bool {
+        coordinator?.parent.quickLook != nil
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel) {
+        panel.dataSource = coordinator?.parent.quickLook
+        panel.delegate = coordinator?.parent.quickLook
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel) {
+        panel.dataSource = nil
+        panel.delegate = nil
+        // `previewPanelDidClose` may be suppressed once the delegate is nil'd,
+        // so resume auto-hide here too — it's idempotent and the panel is
+        // closing either way.
+        coordinator?.parent.actions.onQuickLookClosed()
     }
 
     override func rightMouseDown(with event: NSEvent) {

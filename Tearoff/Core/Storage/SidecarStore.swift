@@ -51,6 +51,8 @@ final class SidecarStore {
         var isExpanded: Bool? // v4 — legacy tall/default flag; migrated into `listHeight` (no longer written)
         var listHeight: Double? // v5 — file list height in points (nil = default 240)
         var viewMode: String? // v6 — file list view: "icon" / "list" (nil = default icon)
+        var sortKey: String? // v7 — file list sort column: "name" / "kind" / "modifiedDate" (nil = default name)
+        var sortAscending: Bool? // v7 — file list sort direction (nil = default ascending)
         var createdAt: Date
         var modifiedAt: Date
     }

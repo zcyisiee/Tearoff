@@ -43,6 +43,7 @@ struct FinderCardView: View {
 
     @State private var browser = FinderCardBrowser()
     @State private var commands = FinderListCommands()
+    @State private var quickLookController = FinderQuickLookController()
     @State private var isHovered = false
     @State private var isResizeHovered = false
     @State private var resizeOriginHeight: CGFloat?
@@ -152,6 +153,12 @@ struct FinderCardView: View {
         }
         .onChange(of: card.currentPath) { _, _ in
             syncBrowserWithURL()
+        }
+        .onChange(of: card.sortKey) { _, _ in
+            syncBrowserSort()
+        }
+        .onChange(of: card.sortAscending) { _, _ in
+            syncBrowserSort()
         }
         .onChange(of: isRenamingTitle) { _, renaming in
             if renaming {
@@ -268,14 +275,48 @@ struct FinderCardView: View {
         .help(card.viewMode == .icon ? l10n["finder.viewMode.list"] : l10n["finder.viewMode.icon"])
     }
 
-    /// Trailing header controls: the F2 view toggle and the "⋯" menu. The sort
-    /// control lands here in a later task, so this group is the single slot to
-    /// extend — no placeholder button is added yet.
+    /// Trailing header controls: the view toggle, the sort menu, and the "⋯"
+    /// menu.
     private var headerControls: some View {
         HStack(spacing: DesignToken.Space.xs) {
             viewModeToggle
+            sortMenuButton
             headerMenuButton
         }
+    }
+
+    /// Header sort button — pops the sort column/direction menu at the cursor.
+    private var sortMenuButton: some View {
+        Button {
+            showSortMenu()
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DesignToken.muted)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, DesignToken.Space.xs)
+        .help(l10n["finder.sort.menu"])
+    }
+
+    private func showSortMenu() {
+        let menu = FinderCardMenus.sortMenu(card: card, l10n: l10n) { key, ascending in
+            changeSort(key: key, ascending: ascending)
+        }
+        NSContextMenuModifier.isShowingMenu = true
+        menu.popUpAtScreenPoint(NSEvent.mouseLocation)
+        NSContextMenuModifier.isShowingMenu = false
+        NSContextMenuModifier.lastMenuDismissAt = Date()
+    }
+
+    /// Persists a new sort column/direction. The browser re-syncs (and reloads)
+    /// through `syncBrowserSort()` when the card's `sortKey` / `sortAscending`
+    /// change lands from the store.
+    private func changeSort(key: FinderSortKey, ascending: Bool) {
+        guard key != card.sortKey || ascending != card.sortAscending else { return }
+        noteStore.setFinderCardSort(key: key, ascending: ascending, for: card.id)
     }
 
     /// The header's "⋯" button — pops the card's header menu at the cursor.
@@ -485,6 +526,7 @@ struct FinderCardView: View {
                     appearance: appearance,
                     actions: makeActions(),
                     commands: commands,
+                    quickLook: quickLookController,
                 )
             } else {
                 FinderFileListView(
@@ -492,6 +534,7 @@ struct FinderCardView: View {
                     appearance: appearance,
                     actions: makeActions(),
                     commands: commands,
+                    quickLook: quickLookController,
                 )
             }
         }
@@ -570,15 +613,45 @@ struct FinderCardView: View {
                     commands: commands,
                     l10n: l10n,
                     onError: { handleError($0) },
+                    onQuickLook: { urls in
+                        showQuickLook(urls)
+                    },
+                    onGetInfo: { entry in
+                        FinderSystemBridge.presentGetInfo(for: entry.url)
+                    },
                 )
             },
             onDragSessionChanged: { active in
                 onFileDragSessionChanged?(active)
             },
+            onQuickLook: { entries in
+                showQuickLook(entries.map(\.url))
+            },
+            onShowInfo: { entry in
+                FinderSystemBridge.presentGetInfo(for: entry.url)
+            },
+            onToggleHiddenFiles: {
+                appSettings.showHiddenFiles.toggle()
+            },
+            onQuickLookClosed: {
+                AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+            },
             onError: { error in
                 handleError(error)
             },
         )
+    }
+
+    // MARK: - Quick Look
+
+    /// Opens Quick Look on `urls`, suspending the panel's auto-hide for the
+    /// panel's lifetime and resuming it on close.
+    private func showQuickLook(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        AppDelegate.shared?.panelController?.suspendAutoHide()
+        quickLookController.show(urls) {
+            AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+        }
     }
 
     // MARK: - Footer
@@ -689,6 +762,11 @@ struct FinderCardView: View {
             }
         }
 
+        // Seed the browser's sort from the card before the initial enumerate,
+        // so the first list is already in the card's order.
+        browser.sortKey = card.sortKey
+        browser.sortAscending = card.sortAscending
+
         browser.navigate(to: card.currentURL, recordsHistory: false)
         browser.startWatching()
     }
@@ -708,6 +786,16 @@ struct FinderCardView: View {
         let target = card.currentURL?.standardizedFileURL
         guard target?.path != browser.currentURL?.standardizedFileURL.path else { return }
         browser.navigate(to: target, recordsHistory: false)
+    }
+
+    /// Re-applies the card's sort column/direction to the browser and reloads.
+    /// Called on mount and whenever the card's sort settings change from the
+    /// store (header menu, external sidecar reload).
+    private func syncBrowserSort() {
+        guard browser.sortKey != card.sortKey || browser.sortAscending != card.sortAscending else { return }
+        browser.sortKey = card.sortKey
+        browser.sortAscending = card.sortAscending
+        browser.reload()
     }
 
     private func reportFrame(_ geo: GeometryProxy) {

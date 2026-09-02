@@ -111,6 +111,8 @@ enum FinderCardMenus {
         commands: FinderListCommands,
         l10n: L10n,
         onError: @escaping (Error) -> Void,
+        onQuickLook: @escaping ([URL]) -> Void,
+        onGetInfo: @escaping (FinderEntry) -> Void,
     ) -> NSMenu {
         let menu = NSMenu()
 
@@ -130,6 +132,16 @@ enum FinderCardMenus {
             item.image = NSImage(systemSymbolName: "app.gift", accessibilityDescription: nil)
             item.submenu = openWith
             menu.addItem(item)
+        }
+
+        menu.addActionItem(title: l10n["finder.file.quickLook"], icon: "eye") {
+            onQuickLook(urls)
+        }
+
+        if entries.count == 1 {
+            menu.addActionItem(title: l10n["finder.file.getInfo"], icon: "info.circle") {
+                onGetInfo(entries[0])
+            }
         }
 
         menu.addActionItem(title: l10n["finder.file.reveal"], icon: "folder") {
@@ -171,7 +183,8 @@ enum FinderCardMenus {
         return menu
     }
 
-    /// Blank-area (no row clicked) menu: New Folder / Reveal / Copy Path.
+    /// Blank-area (no row clicked) menu: New Folder / Reveal / Copy Path / Show
+    /// Hidden Files.
     private static func blankAreaMenu(
         into menu: NSMenu,
         browser: FinderCardBrowser,
@@ -188,6 +201,20 @@ enum FinderCardMenus {
             menu.addActionItem(title: l10n["finder.file.copyPath"], icon: "link") {
                 FinderCardBrowser.copyPaths([url])
             }
+        }
+
+        menu.addItem(.separator())
+        addShowHiddenFilesItem(to: menu, l10n: l10n)
+    }
+
+    /// "Show Hidden Files" check item — toggles the app-wide flag (all cards
+    /// reload). Checked while hidden files are visible.
+    private static func addShowHiddenFilesItem(to menu: NSMenu, l10n: L10n) {
+        let item = menu.addActionItem(title: l10n["finder.file.showHidden"], icon: "eye.slash") {
+            AppSettings.shared.showHiddenFiles.toggle()
+        }
+        if AppSettings.shared.showHiddenFiles {
+            item.state = .on
         }
     }
 
@@ -304,6 +331,49 @@ enum FinderCardMenus {
             }
         }
 
+        menu.addItem(.separator())
+        addShowHiddenFilesItem(to: menu, l10n: l10n)
+
+        return menu
+    }
+
+    // MARK: - Sort Menu
+
+    /// The header's sort dropdown: the three sort columns (current key checked),
+    /// a separator, then ascending / descending (current direction checked).
+    /// Changing an item fires `onSortChange` so the card can persist the
+    /// selection and re-sort its browser.
+    static func sortMenu(
+        card: FinderCard,
+        l10n: L10n,
+        onSortChange: @escaping (FinderSortKey, Bool) -> Void,
+    ) -> NSMenu {
+        let menu = NSMenu()
+
+        for key in FinderSortKey.allCases {
+            let item = menu.addActionItem(title: key.displayName(l10n), icon: key.menuIcon) {
+                onSortChange(key, card.sortAscending)
+            }
+            if card.sortKey == key {
+                item.state = .on
+            }
+        }
+
+        menu.addItem(.separator())
+
+        let directions: [(ascending: Bool, title: String)] = [
+            (true, l10n["finder.sort.ascending"]),
+            (false, l10n["finder.sort.descending"]),
+        ]
+        for direction in directions {
+            let item = menu.addActionItem(title: direction.title, icon: direction.ascending ? "arrow.up" : "arrow.down") {
+                onSortChange(card.sortKey, direction.ascending)
+            }
+            if card.sortAscending == direction.ascending {
+                item.state = .on
+            }
+        }
+
         return menu
     }
 
@@ -407,5 +477,27 @@ enum FinderCardMenus {
         NSAttributedString(string: title, attributes: [
             .foregroundColor: NSColor.systemRed,
         ])
+    }
+}
+
+// MARK: - Sort key display
+
+extension FinderSortKey {
+    /// Localized menu label for a sort column.
+    func displayName(_ l10n: L10n) -> String {
+        switch self {
+        case .name: l10n["finder.sort.name"]
+        case .kind: l10n["finder.sort.kind"]
+        case .modifiedDate: l10n["finder.sort.modified"]
+        }
+    }
+
+    /// SF Symbol for the sort column's menu item.
+    var menuIcon: String {
+        switch self {
+        case .name: "textformat"
+        case .kind: "doc.text"
+        case .modifiedDate: "calendar"
+        }
     }
 }

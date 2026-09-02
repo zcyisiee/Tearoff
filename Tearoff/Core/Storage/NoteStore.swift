@@ -931,6 +931,20 @@ final class NoteStore {
         try? SidecarStore.shared.save()
     }
 
+    /// Set a Finder card's sort column and direction. Persisted to the sidecar
+    /// immediately (sort is a discrete, infrequent toggle), mirroring
+    /// `setFinderCardViewMode`.
+    func setFinderCardSort(key: FinderSortKey, ascending: Bool, for cardID: UUID) {
+        guard let index = finderCards.firstIndex(where: { $0.id == cardID }),
+              finderCards[index].sortKey != key || finderCards[index].sortAscending != ascending
+        else { return }
+        finderCards[index].sortKey = key
+        finderCards[index].sortAscending = ascending
+        finderCards[index].modifiedAt = Date()
+        persistFinderCard(finderCards[index])
+        try? SidecarStore.shared.save()
+    }
+
     /// Add a directory to the card's favourites and select it. Non-directories
     /// are rejected; re-adding an existing favourite just re-selects it.
     @discardableResult

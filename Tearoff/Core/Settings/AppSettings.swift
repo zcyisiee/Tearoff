@@ -25,6 +25,20 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(sortAscending, forKey: "sortAscending") }
     }
 
+    // MARK: - Finder cards
+
+    /// Whether Finder cards show hidden files. App-wide shared state — every
+    /// mounted card browser reloads when this flips (they observe
+    /// `finderShowHiddenFilesChanged`). Persisted in UserDefaults.
+    var showHiddenFiles: Bool = false {
+        didSet {
+            if showHiddenFiles != oldValue {
+                UserDefaults.standard.set(showHiddenFiles, forKey: "showHiddenFiles")
+                NotificationCenter.default.post(name: .finderShowHiddenFilesChanged, object: nil)
+            }
+        }
+    }
+
     /// PostScript font name (e.g. "HelveticaNeue", "SFMono-Regular"). nil = system font.
     var editorFontName: String? {
         didSet {
@@ -275,6 +289,7 @@ final class AppSettings {
             sortBy = value
         }
         sortAscending = UserDefaults.standard.bool(forKey: "sortAscending")
+        showHiddenFiles = UserDefaults.standard.bool(forKey: "showHiddenFiles")
         // If the saved font is no longer installed (e.g. user uninstalled it),
         // drop it silently so the editor falls back to the system font.
         if let saved = UserDefaults.standard.string(forKey: "editorFontName"),
@@ -363,6 +378,9 @@ extension AppSettings.SortBy {
 
 extension Notification.Name {
     static let editorFontChanged = Notification.Name("editorFontChanged")
+    /// Fired when `AppSettings.showHiddenFiles` flips — mounted Finder card
+    /// browsers observe this to re-enumerate with the new hidden-file setting.
+    static let finderShowHiddenFilesChanged = Notification.Name("finderShowHiddenFilesChanged")
 }
 
 // MARK: - Board typography

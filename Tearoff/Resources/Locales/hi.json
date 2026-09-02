@@ -1,4 +1,13 @@
 {
+  "finder.sort.menu": "क्रमबद्ध करें",
+  "finder.sort.name": "नाम",
+  "finder.sort.kind": "प्रकार",
+  "finder.sort.modified": "संशोधित तिथि",
+  "finder.sort.ascending": "आरोही",
+  "finder.sort.descending": "अवरोही",
+  "finder.file.showHidden": "छिपी फ़ाइलें दिखाएँ",
+  "finder.file.quickLook": "त्वरित दृश्य",
+  "finder.file.getInfo": "जानकारी प्राप्त करें",
   "app.name": "Tearoff",
   "menu.toggle": "Tearoff दिखाएं/छिपाएं",
   "menu.settings": "सेटिंग्स…",

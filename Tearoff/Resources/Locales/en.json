@@ -355,5 +355,14 @@
   "finder.header.menu": "Card menu",
   "finder.header.favorites": "Favorites",
   "finder.header.noFavorites": "No favorites yet",
-  "finder.favorite.select": "Select"
+  "finder.favorite.select": "Select",
+  "finder.sort.menu": "Sort By",
+  "finder.sort.name": "Name",
+  "finder.sort.kind": "Kind",
+  "finder.sort.modified": "Date Modified",
+  "finder.sort.ascending": "Ascending",
+  "finder.sort.descending": "Descending",
+  "finder.file.showHidden": "Show Hidden Files",
+  "finder.file.quickLook": "Quick Look",
+  "finder.file.getInfo": "Get Info"
 }

@@ -50,10 +50,40 @@ final class FinderCardBrowser {
     /// count label.
     private(set) var totalCount = 0
 
+    /// Sort column applied on `reload()`. The card view syncs this from the
+    /// card's sidecar settings on mount and whenever they change; changing it
+    /// here does not re-enumerate on its own (call `reload()` for immediate
+    /// effect, or let the card's onChange drive it).
+    var sortKey: FinderSortKey = .name
+
+    /// Direction of the sort. `true` = ascending.
+    var sortAscending: Bool = true
+
+    /// Observer for the app-wide hidden-file toggle; reloads when it flips.
+    private var showHiddenFilesObserver: NSObjectProtocol?
+
     // MARK: - Watching
 
     private(set) var isWatching = false
     private var watcher: DirectoryWatcher?
+
+    init() {
+        // The hidden-file flag is app-wide shared state in `AppSettings`; each
+        // mounted browser reloads when it flips so all cards stay in sync.
+        showHiddenFilesObserver = NotificationCenter.default.addObserver(
+            forName: .finderShowHiddenFilesChanged,
+            object: nil,
+            queue: .main,
+        ) { [weak self] _ in
+            self?.reload()
+        }
+    }
+
+    deinit {
+        if let showHiddenFilesObserver {
+            NotificationCenter.default.removeObserver(showHiddenFilesObserver)
+        }
+    }
 
     // MARK: - History
 
@@ -178,11 +208,17 @@ final class FinderCardBrowser {
             return
         }
 
+        // Capture the sort + hidden-file settings off the main thread — the
+        // dispatched closure reads them off-main, so snapshot them here.
+        let sortKey = sortKey
+        let sortAscending = sortAscending
+        let showsHiddenFiles = AppSettings.shared.showHiddenFiles
+
         isLoading = true
         let startedAt = Date()
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.enumerate(url)
+            let result = Self.enumerate(url, sortKey: sortKey, sortAscending: sortAscending, showsHiddenFiles: showsHiddenFiles)
             Task { @MainActor in
                 // Stale: the user navigated away while we were enumerating.
                 guard generation == self.generation else { return }
@@ -210,10 +246,15 @@ final class FinderCardBrowser {
 
     /// Pure, Sendable in/out — runs entirely off the main thread. One
     /// `contentsOfDirectory` pass fetching every needed key at once; the
-    /// result comes back sorted (directories first, then
-    /// `localizedStandardCompare`), packages treated as file-like entries,
-    /// hidden items skipped.
-    nonisolated static func enumerate(_ url: URL) -> Result<[FinderEntry], LoadError> {
+    /// result comes back sorted (directories first, then by `sortKey` with the
+    /// given direction), packages treated as file-like entries, hidden items
+    /// skipped unless `showsHiddenFiles` is true.
+    nonisolated static func enumerate(
+        _ url: URL,
+        sortKey: FinderSortKey = .name,
+        sortAscending: Bool = true,
+        showsHiddenFiles: Bool = false,
+    ) -> Result<[FinderEntry], LoadError> {
         let keys: Set<URLResourceKey> = [
             .isDirectoryKey,
             .isPackageKey,
@@ -236,12 +277,12 @@ final class FinderCardBrowser {
 
             for itemURL in contents {
                 let name = itemURL.lastPathComponent
-                if name.hasPrefix(".") {
+                if !showsHiddenFiles, name.hasPrefix(".") {
                     continue
                 }
 
                 guard let values = try? itemURL.resourceValues(forKeys: keys) else { continue }
-                if values.isHidden == true {
+                if !showsHiddenFiles, values.isHidden == true {
                     continue
                 }
 
@@ -271,16 +312,77 @@ final class FinderCardBrowser {
                 )
             }
 
-            newEntries.sort { lhs, rhs in
-                if lhs.isDirectory != rhs.isDirectory {
-                    return lhs.isDirectory
-                }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
-            }
+            // Directories always group first, then files; within each group
+            // apply the card's sort column and direction.
+            let directories = newEntries.filter(\.isDirectory)
+            let files = newEntries.filter { !$0.isDirectory }
+            newEntries = Self.sort(directories, key: sortKey, ascending: sortAscending)
+                + Self.sort(files, key: sortKey, ascending: sortAscending)
             return .success(newEntries)
         } catch {
             return .failure(Self.loadError(for: error))
         }
+    }
+
+    /// Sorts a single group (all directories, or all files) by `sortKey` in the
+    /// given direction. Used only for the in-group ordering — directories are
+    /// always placed ahead of files by the caller.
+    private nonisolated static func sort(_ entries: [FinderEntry], key: FinderSortKey, ascending: Bool) -> [FinderEntry] {
+        switch key {
+        case .modifiedDate:
+            // Nil dates always sort last, independent of direction, so the
+            // same stable rule holds for both up and down.
+            entries.sorted { lhs, rhs in
+                switch (lhs.modifiedAt, rhs.modifiedAt) {
+                case let (left?, right?):
+                    if left != right {
+                        return ascending ? left < right : left > right
+                    }
+                    return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                case (nil, nil):
+                    return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                case (nil, _):
+                    return false
+                case (_, nil):
+                    return true
+                }
+            }
+        default:
+            entries.sorted { lhs, rhs in
+                let order = compare(lhs, rhs, key: key)
+                return ascending ? order == .orderedAscending : order == .orderedDescending
+            }
+        }
+    }
+
+    /// One-step ordering for name/kind. Returns `.orderedSame` to mean "equal
+    /// per this key, fall back to name" — the caller never needs to break the
+    /// tie itself.
+    private nonisolated static func compare(_ lhs: FinderEntry, _ rhs: FinderEntry, key: FinderSortKey) -> ComparisonResult {
+        switch key {
+        case .name:
+            return lhs.name.localizedStandardCompare(rhs.name)
+        case .kind:
+            let leftKind = kindLabel(lhs)
+            let rightKind = kindLabel(rhs)
+            let byKind = leftKind.localizedStandardCompare(rightKind)
+            if byKind != .orderedSame {
+                return byKind
+            }
+            return lhs.name.localizedStandardCompare(rhs.name)
+        case .modifiedDate:
+            // Handled by the dedicated `sort` branch; a fallback for safety.
+            return lhs.name.localizedStandardCompare(rhs.name)
+        }
+    }
+
+    /// The kind group a file belongs to — its lowercased extension ("txt",
+    /// "png"), or a placeholder for extension-less files so they group
+    /// together and sort after named ones. Directories are split out by the
+    /// caller and never reach here in practice.
+    private nonisolated static func kindLabel(_ entry: FinderEntry) -> String {
+        let ext = (entry.name as NSString).pathExtension.lowercased()
+        return ext.isEmpty ? "\u{10FFFF}" : ext
     }
 
     private nonisolated static func loadError(for error: Error) -> LoadError {

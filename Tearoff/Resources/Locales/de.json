@@ -1,4 +1,13 @@
 {
+  "finder.sort.menu": "Sortieren",
+  "finder.sort.name": "Name",
+  "finder.sort.kind": "Art",
+  "finder.sort.modified": "Änderungsdatum",
+  "finder.sort.ascending": "Aufsteigend",
+  "finder.sort.descending": "Absteigend",
+  "finder.file.showHidden": "Ausgeblendete Dateien anzeigen",
+  "finder.file.quickLook": "Quick Look",
+  "finder.file.getInfo": "Informationen",
   "app.name": "Tearoff",
   "menu.toggle": "Tearoff ein-/ausblenden",
   "menu.settings": "Einstellungen…",
