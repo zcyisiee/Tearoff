@@ -31,7 +31,14 @@
 
 ## 安装
 
-在 [Releases](https://github.com/zcyisiee/Tearoff/releases) 下载最新的 `.dmg`，拖入「应用程序」即可。应用未经签名，首次启动前需要在终端执行：
+**Homebrew**（推荐）：
+
+```bash
+brew tap zcyisiee/tap
+brew install --cask tearoff
+```
+
+或从 [Releases](https://github.com/zcyisiee/Tearoff/releases) 下载最新的 `.dmg`，拖入「应用程序」即可。应用未经签名，手动安装首次启动前需要在终端执行：
 
 ```bash
 xattr -cr /Applications/Tearoff.app

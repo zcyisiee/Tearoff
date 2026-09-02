@@ -31,7 +31,14 @@ You can use cards as a schedule, memo pad, journal, or scratch pad. I've optimiz
 
 ## Installation
 
-Download the latest `.dmg` from [Releases](https://github.com/zcyisiee/Tearoff/releases) and drag it into Applications. The app is not signed, so before the first launch, run this in Terminal:
+**Homebrew** (recommended):
+
+```bash
+brew tap zcyisiee/tap
+brew install --cask tearoff
+```
+
+Or download the latest `.dmg` from [Releases](https://github.com/zcyisiee/Tearoff/releases) and drag it into Applications. The app is not signed, so with a manual install, run this in Terminal before the first launch:
 
 ```bash
 xattr -cr /Applications/Tearoff.app
