@@ -104,6 +104,7 @@ final class SidePanelController: NSWindowController {
         contentHostingView = hostingView
         resizeHandleView = handle
 
+        handle.onDragBegan = { [weak self] in self?.suspendAutoHide() }
         handle.onDrag = { [weak self] newWidth in self?.panelDidResize(to: newWidth) }
         handle.onDragEnded = { [weak self] finalWidth in self?.panelResizeEnded(width: finalWidth) }
 
@@ -677,6 +678,9 @@ final class SidePanelController: NSWindowController {
     private func panelResizeEnded(width: CGFloat) {
         PanelSettings.shared.panelWidth = window?.frame.width ?? width
         Log.window.info("[SidePanelController] panel resized to \(PanelSettings.shared.panelWidth, privacy: .public)pt")
+        // Re-park auto-hide suspended for the drag; if the cursor ended up
+        // outside the panel the normal hide-delay path tidies it away.
+        resumeAutoHide(treatAsMouseExit: true)
     }
 
     // MARK: - Frame Calculation
@@ -856,6 +860,10 @@ private final class ResizeHandleView: NSView {
     static let minWidth: CGFloat = 400
 
     var side: EdgeSide = .right
+    /// Fired on mouseDown — the controller suspends auto-hide so a fast drag
+    /// that flings the cursor out of the window can't dismiss the panel
+    /// mid-resize.
+    var onDragBegan: (() -> Void)?
     var onDrag: ((CGFloat) -> Void)?
     var onDragEnded: ((CGFloat) -> Void)?
 
@@ -863,6 +871,7 @@ private final class ResizeHandleView: NSView {
     private var dragStartWidth: CGFloat = 0
 
     override func mouseDown(with _: NSEvent) {
+        onDragBegan?()
         dragStartX = NSEvent.mouseLocation.x
         dragStartWidth = window?.frame.width ?? PanelSettings.shared.panelWidth
         let w = dragStartWidth

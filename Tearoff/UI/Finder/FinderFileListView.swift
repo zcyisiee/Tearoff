@@ -48,6 +48,11 @@ struct FinderListActions {
     /// A drag-out session began (true) / ended (false) — the card suspends
     /// panel auto-hide for the duration.
     var onDragSessionChanged: (Bool) -> Void
+    /// Left mouse-down anywhere inside the embedded list (item or blank
+    /// area). SwiftUI tap gestures on the card still fire over this AppKit
+    /// content, so the card uses this to tell genuine chrome taps apart from
+    /// list clicks and skip board-level tap handling for the latter.
+    var onListMouseDown: () -> Void
     /// Space / Quick Look on the selected entries (multi-select pages through
     /// the panel). Suspends panel auto-hide for the panel's lifetime.
     var onQuickLook: ([FinderEntry]) -> Void
@@ -613,6 +618,11 @@ final class FinderTableView: NSTableView {
 
     override var acceptsFirstResponder: Bool {
         true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        coordinator?.parent.actions.onListMouseDown()
+        super.mouseDown(with: event)
     }
 
     override func becomeFirstResponder() -> Bool {

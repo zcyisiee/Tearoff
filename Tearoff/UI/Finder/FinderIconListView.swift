@@ -1133,6 +1133,7 @@ final class FinderIconCollectionView: NSCollectionView {
             super.mouseDown(with: event)
             return
         }
+        coordinator.parent.actions.onListMouseDown()
         let point = convert(event.locationInWindow, from: nil)
 
         // Double-click on an item activates it (Finder semantics — open a file

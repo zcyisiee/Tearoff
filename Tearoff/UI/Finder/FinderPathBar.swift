@@ -20,6 +20,10 @@ struct FinderPathBar: View {
     let browser: FinderCardBrowser
     /// Surfaces failed file operations (drop moves/copies) to the card.
     var onError: ((Error) -> Void)?
+    /// Fired on any tap inside the bar — the card uses it to keep these
+    /// clicks out of the board-level tap handling (same coverage as the
+    /// file list's own clicks).
+    var onInteraction: (() -> Void)?
 
     // MARK: - Appearance
 
@@ -252,6 +256,7 @@ struct FinderPathBar: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .onTapGesture {
+            onInteraction?()
             guard !segment.isCurrent else { return }
             browser.navigate(to: segment.url)
         }

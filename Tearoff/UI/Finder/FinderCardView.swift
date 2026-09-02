@@ -50,6 +50,12 @@ struct FinderCardView: View {
     @State private var titleDraft = ""
     @State private var errorMessage: String?
     @State private var persistDebouncer = Debouncer(delay: 1.0)
+    /// Last left-click inside the embedded file list or path bar. SwiftUI tap
+    /// gestures on the card still fire over those regions; taps arriving right
+    /// after such a click are list interactions, not chrome taps, and must not
+    /// reach the board's tap handling (double-click "reveal in Finder", focus
+    /// resignation).
+    @State private var lastEmbeddedInteraction = Date.distantPast
 
     /// Identity color drives the accent tiers; uncolored cards fall back to
     /// the theme accent.
@@ -98,7 +104,11 @@ struct FinderCardView: View {
                 emptyStateContent
             } else {
                 fileList
-                FinderPathBar(browser: browser) { handleError($0) }
+                FinderPathBar(
+                    browser: browser,
+                    onError: { handleError($0) },
+                    onInteraction: { lastEmbeddedInteraction = Date() },
+                )
                 footerRow
             }
         }
@@ -124,6 +134,12 @@ struct FinderCardView: View {
             }
         }
         .onTapGesture {
+            // Clicks inside the embedded file list / path bar surface here too
+            // (gesture recognizers see events AppKit content also consumed).
+            // Skip those — the list handles its own clicks, and forwarding
+            // them would misclassify a folder double-click as the chrome
+            // double-click that reveals the directory in Finder.
+            guard Date().timeIntervalSince(lastEmbeddedInteraction) > 0.35 else { return }
             onTap(NSApp.currentEvent?.modifierFlags ?? [])
         }
         .gesture(
@@ -623,6 +639,9 @@ struct FinderCardView: View {
             },
             onDragSessionChanged: { active in
                 onFileDragSessionChanged?(active)
+            },
+            onListMouseDown: {
+                lastEmbeddedInteraction = Date()
             },
             onQuickLook: { entries in
                 showQuickLook(entries.map(\.url))
