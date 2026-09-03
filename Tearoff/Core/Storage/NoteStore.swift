@@ -54,6 +54,12 @@ final class NoteStore {
     /// `selectedFolder` (which represent what's *open*). Empty after navigation.
     var selection: Set<SelectableID> = []
 
+    /// ID of note whose title is currently selected on the board card.
+    var selectedTitleNoteID: UUID?
+
+    /// True when the expanded editor's header title is currently selected.
+    var isEditorTitleSelected: Bool = false
+
     /// Anchor row for ⇧-click range selection.
     private var selectionAnchor: SelectableID?
 
@@ -286,6 +292,8 @@ final class NoteStore {
         let title = note.title
         Log.navigation.debug("[NoteStore] openNote — \(title, privacy: .public)")
         navigationDirection = .forward
+        selectedTitleNoteID = nil
+        isEditorTitleSelected = false
         // The collapsed card hides behind the morphing editor box, so clearing
         // the in-place edit here never renders as a visible small-card bounce.
         withAnimation(DesignToken.Motion.morph) {
@@ -303,6 +311,8 @@ final class NoteStore {
             selectedFolder = Folder(name: note.folder, noteCount: 0)
         }
         navigationDirection = .forward
+        selectedTitleNoteID = nil
+        isEditorTitleSelected = false
         withAnimation(DesignToken.Motion.morph) {
             selectedNote = note
         }
@@ -313,6 +323,8 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] closeNote — \(title, privacy: .public)")
         navigationDirection = .backward
         saveDirtyNotes()
+        isEditorTitleSelected = false
+        selectedTitleNoteID = nil
         withAnimation(DesignToken.Motion.morph) {
             selectedNote = nil
         }
@@ -1106,6 +1118,7 @@ final class NoteStore {
         selection.removeAll()
         selectionAnchor = nil
         selectionExtensionEnd = nil
+        selectedTitleNoteID = nil
     }
 
     // MARK: - Keyboard navigation
@@ -1368,6 +1381,9 @@ final class NoteStore {
     }
 
     func deleteNote(_ note: Note) {
+        if selectedTitleNoteID == note.id {
+            selectedTitleNoteID = nil
+        }
         notes.removeAll { $0.id == note.id }
         dirtyNoteIDs.remove(note.id)
         do {

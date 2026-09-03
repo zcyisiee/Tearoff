@@ -48,6 +48,8 @@ struct NoteBoardView: View {
     /// Last plain tap (note + time) for manual double-click classification —
     /// keeps single taps instant instead of waiting out a multi-tap window.
     @State private var lastCardTap: (id: UUID, at: Date)?
+    /// Last title tap (note + time) for card title double-click classification.
+    @State private var lastTitleTap: (id: UUID, at: Date)?
     /// Finder card currently being renamed in place (board-owned, like note
     /// rename) — `FinderCardView` shows the title editor when set.
     @State private var renamingFinderCardID: UUID?
@@ -777,6 +779,7 @@ struct NoteBoardView: View {
         BoardNoteCard(
             note: note,
             isSelected: noteStore.selection.contains(.note(note.id)),
+            isTitleSelected: noteStore.selectedTitleNoteID == note.id,
             isEditing: noteStore.inlineEditingNoteID == note.id,
             isNewlyCreated: newlyCreatedNoteID == note.id,
             isDragging: dragSession.noteID == note.id,
@@ -784,6 +787,7 @@ struct NoteBoardView: View {
             isDropped: droppedFlashID == note.id,
             layout: cardLayout,
             onTap: { flags in handleCardTap(note, flags: flags, visible: visible) },
+            onTitleTap: { handleTitleTap(note) },
             onTitleAreaTap: { flags in handleTitleAreaTap(note, flags: flags, visible: visible) },
             onPinToggle: { noteStore.togglePin(on: note) },
             onToggleTask: { lineIndex in
@@ -874,6 +878,8 @@ struct NoteBoardView: View {
     /// selection.
     private func handleFinderCardTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
         resignFinderListFocus()
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         let mods = flags.intersection([.command, .shift])
         if mods.isEmpty, consumeDoubleClick(on: card.id) {
             revealFinderCard(card)
@@ -908,6 +914,8 @@ struct NoteBoardView: View {
     /// the title row's trailing area (`handleTitleAreaTap`).
     private func handleCardTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
         resignFinderListFocus()
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         let mods = flags.intersection([.command, .shift])
         if mods.isEmpty, consumeDoubleClick(on: note.id) {
             openEditorFromCard(note)
@@ -943,6 +951,8 @@ struct NoteBoardView: View {
     /// (⌘ toggles, ⇧ ranges), and an active selection is cleared first,
     /// matching a plain body click.
     private func handleTitleAreaTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         if !flags.intersection([.command, .shift]).isEmpty {
             handleCardTap(note, flags: flags, visible: visible)
         } else if consumeDoubleClick(on: note.id) {
@@ -956,13 +966,31 @@ struct NoteBoardView: View {
         }
     }
 
-    /// Manual double-click classification: a second plain tap on the same card
-    /// inside the window counts as a double click. Capped below the system
-    /// double-click interval so quick toggle-clicks on the title area don't
-    /// turn into editor opens. Keeps single taps instant — no count-2 gesture
-    /// waiting out a multi-tap window.
+    /// Handles clicks on a card's title text:
+    /// - First click selects the title (visual highlight) without opening editor or inline editing.
+    /// - Second click within doubleClickWindow (or while selected) enters inline renaming.
+    private func handleTitleTap(_ note: Note) {
+        resignFinderListFocus()
+        let now = Date()
+        let clickCount = NSApp.currentEvent?.clickCount ?? 1
+        let isDoubleClick = clickCount >= 2
+            || (lastTitleTap?.id == note.id && now.timeIntervalSince(lastTitleTap!.at) < doubleClickWindow)
+            || noteStore.selectedTitleNoteID == note.id
+
+        if isDoubleClick {
+            lastTitleTap = nil
+            noteStore.selectedTitleNoteID = nil
+            startRenamingNote(note)
+            return
+        }
+
+        lastTitleTap = (note.id, now)
+        noteStore.selectedTitleNoteID = note.id
+    }
+
+    /// Double-click classification window matching the system setting.
     private var doubleClickWindow: TimeInterval {
-        min(NSEvent.doubleClickInterval, 0.3)
+        NSEvent.doubleClickInterval
     }
 
     /// Records a plain tap; returns true when it completes a double click.
@@ -1020,6 +1048,8 @@ struct NoteBoardView: View {
     /// own taps, so this only fires for genuinely empty space.
     private func handleBackgroundTap() {
         lastCardTap = nil
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         if noteStore.inlineEditingNoteID != nil {
             noteStore.endInlineEdit()
         }
@@ -1048,6 +1078,8 @@ struct NoteBoardView: View {
     /// pointer, so these commits can never disturb the card in hand. Works
     /// for both notes and Finder cards via the shared `BoardItem` space.
     private func handleDragTick(_ item: BoardItem, location: CGPoint, start: CGPoint, visible: [BoardItem]) {
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         if dragSession.itemID != item.id {
             // First tick of the gesture: capture where inside the card the
             // pointer grabbed and lift a replica under it.
@@ -1534,6 +1566,11 @@ struct NoteBoardView: View {
     }
 
     private func startRenamingNote(_ note: Note) {
+        if noteStore.inlineEditingNoteID == note.id {
+            noteStore.endInlineEdit()
+        }
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         noteRename.beginRename(note)
         DispatchQueue.main.async { isNoteRenameFocused = true }
     }
@@ -1544,6 +1581,8 @@ struct NoteBoardView: View {
     }
 
     private func dismissSearch() {
+        noteStore.selectedTitleNoteID = nil
+        lastTitleTap = nil
         isSearchFieldFocused = false
         isSearching = false
         searchQuery = ""

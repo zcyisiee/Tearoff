@@ -18,6 +18,7 @@ struct ExpandedNoteEditor: View {
     @State private var outline = OutlineState()
     @State private var isRenamingTitle = false
     @State private var titleDraft = ""
+    @State private var lastTitleTapTime: Date?
     @FocusState private var isTitleFocused: Bool
 
     let note: Note
@@ -29,13 +30,36 @@ struct ExpandedNoteEditor: View {
         noteStore.notes.first(where: { $0.id == note.id }) ?? noteStore.selectedNote ?? note
     }
 
+    private var accentColor: Color {
+        currentNote.color?.strip ?? DesignToken.accent
+    }
+
     private var isConflicting: Bool {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         return noteStore.noteTitleExists(trimmed, in: currentNote.folder, excluding: currentNote.id)
     }
 
+    private func handleTitleClick() {
+        let now = Date()
+        let clickCount = NSApp.currentEvent?.clickCount ?? 1
+        let isDoubleClick = clickCount >= 2
+            || (lastTitleTapTime != nil && now.timeIntervalSince(lastTitleTapTime!) < NSEvent.doubleClickInterval)
+            || noteStore.isEditorTitleSelected
+
+        if isDoubleClick {
+            lastTitleTapTime = nil
+            noteStore.isEditorTitleSelected = false
+            startRenamingTitle()
+            return
+        }
+
+        lastTitleTapTime = now
+        noteStore.isEditorTitleSelected = true
+    }
+
     private func startRenamingTitle() {
+        noteStore.isEditorTitleSelected = false
         titleDraft = currentNote.title
         isRenamingTitle = true
         DispatchQueue.main.async {
@@ -94,6 +118,13 @@ struct ExpandedNoteEditor: View {
 
             HStack(spacing: 0) {
                 editor(for: currentNote)
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            if noteStore.isEditorTitleSelected {
+                                noteStore.isEditorTitleSelected = false
+                            }
+                        },
+                    )
                 if showsOutlinePanel {
                     DesignToken.hairlineSoft.frame(width: 1)
                     OutlinePanelView(outline: outline)
@@ -118,6 +149,12 @@ struct ExpandedNoteEditor: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
         .nsContextMenuBarrier()
+        .onChange(of: currentNote.id) { _, _ in
+            noteStore.isEditorTitleSelected = false
+        }
+        .onDisappear {
+            noteStore.isEditorTitleSelected = false
+        }
         .alert(l10n["alert.deleteNote.title"], isPresented: $showDeleteConfirm) {
             Button(l10n["common.delete"], role: .destructive) {
                 noteStore.closeNote()
@@ -202,8 +239,24 @@ struct ExpandedNoteEditor: View {
                     .font(DesignToken.Typography.heading)
                     .foregroundStyle(DesignToken.bodyStrong)
                     .lineLimit(1)
-                    .onTapGesture(count: 2) {
-                        startRenamingTitle()
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background {
+                        if noteStore.isEditorTitleSelected {
+                            RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                                .fill(accentColor.opacity(0.18))
+                        }
+                    }
+                    .overlay {
+                        if noteStore.isEditorTitleSelected {
+                            RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                                .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                        }
+                    }
+                    .padding(.leading, -4)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleTitleClick()
                     }
             }
 
@@ -235,6 +288,7 @@ struct ExpandedNoteEditor: View {
                     systemName: "chevron.down",
                     help: l10n["common.back"],
                 ) {
+                    noteStore.isEditorTitleSelected = false
                     if let onRequestClose {
                         onRequestClose()
                     } else {
@@ -280,6 +334,12 @@ struct ExpandedNoteEditor: View {
         .padding(.horizontal, DesignToken.Space.lg)
         .padding(.top, DesignToken.Space.sm + 2)
         .padding(.bottom, DesignToken.Space.xs)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if noteStore.isEditorTitleSelected {
+                noteStore.isEditorTitleSelected = false
+            }
+        }
     }
 
     // MARK: - Editor
@@ -291,6 +351,9 @@ struct ExpandedNoteEditor: View {
             noteFolder: note.folder,
             initialContent: note.content,
             onContentChanged: { id, newContent in
+                if noteStore.isEditorTitleSelected {
+                    noteStore.isEditorTitleSelected = false
+                }
                 noteStore.updateContent(for: id, content: newContent)
             },
             pendingReload: $pendingEditorReload,

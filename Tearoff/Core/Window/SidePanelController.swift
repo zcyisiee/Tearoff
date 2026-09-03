@@ -180,12 +180,20 @@ final class SidePanelController: NSWindowController {
                 {
                     return nil
                 }
-                // Settings page closes first, then an active selection clears,
-                // then the full editor shrinks back into its card, then
-                // in-place card editing exits, then the panel hides —
-                // one Escape per layer.
+                // Settings page closes first, then active title selection clears,
+                // then an active selection clears, then the full editor shrinks
+                // back into its card, then in-place card editing exits, then
+                // the panel hides — one Escape per layer.
                 if let store = self?.noteStore, store.showSettings {
                     store.showSettings = false
+                    return nil
+                }
+                if let store = self?.noteStore, store.isEditorTitleSelected {
+                    store.isEditorTitleSelected = false
+                    return nil
+                }
+                if let store = self?.noteStore, store.selectedTitleNoteID != nil {
+                    store.selectedTitleNoteID = nil
                     return nil
                 }
                 if let store = self?.noteStore, !store.selection.isEmpty {

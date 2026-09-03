@@ -97,6 +97,8 @@ struct BoardNoteCard: View {
     @Environment(NoteStore.self) private var noteStore
     let note: Note
     var isSelected: Bool = false
+    /// True when the title text is clicked/selected on this card.
+    var isTitleSelected: Bool = false
     /// True while this card is expanded into its in-place editor.
     var isEditing: Bool = false
     /// True when this card was just created and should focus/select the title on mount.
@@ -118,6 +120,9 @@ struct BoardNoteCard: View {
     var layout: BoardCardLayout?
     /// Plain single click (modifiers included for ⌘/⇧ multi-select routing).
     var onTap: (NSEvent.ModifierFlags) -> Void
+    /// Single or double click on the card title text: single click selects,
+    /// double click enters inline rename.
+    var onTitleTap: (() -> Void)?
     /// Single click on the blank area trailing the title row — the dedicated
     /// toggle for the in-place editor, so body clicks can stay reserved for
     /// task toggles (modifiers included for ⌘/⇧ multi-select routing).
@@ -160,10 +165,7 @@ struct BoardNoteCard: View {
     private var cardFace: some View {
         VStack(alignment: .leading, spacing: DesignToken.Space.xs + 2) {
             HStack(spacing: 0) {
-                Text(title)
-                    .font(appSettings.boardTitleFont)
-                    .foregroundStyle(accentColor)
-                    .lineLimit(1)
+                titleView
 
                 titleEditToggleArea
             }
@@ -421,6 +423,36 @@ struct BoardNoteCard: View {
         )
         .frame(height: 280)
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Title
+
+    /// Card title text with dedicated tap handling and selection styling.
+    /// Single click selects the title; double click enters inline rename.
+    private var titleView: some View {
+        Text(title)
+            .font(appSettings.boardTitleFont)
+            .foregroundStyle(accentColor)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background {
+                if isTitleSelected {
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .fill(accentColor.opacity(0.18))
+                }
+            }
+            .overlay {
+                if isTitleSelected {
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                }
+            }
+            .padding(.leading, -4)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onTitleTap?()
+            }
     }
 
     // MARK: Title edit toggle
