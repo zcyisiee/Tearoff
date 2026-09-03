@@ -180,12 +180,20 @@ final class SidePanelController: NSWindowController {
                 {
                     return nil
                 }
-                // Settings page closes first, then an active selection clears,
-                // then the full editor shrinks back into its card, then
-                // in-place card editing exits, then the panel hides —
-                // one Escape per layer.
+                // Settings page closes first, then active title selection clears,
+                // then an active selection clears, then the full editor shrinks
+                // back into its card, then in-place card editing exits, then
+                // the panel hides — one Escape per layer.
                 if let store = self?.noteStore, store.showSettings {
                     store.showSettings = false
+                    return nil
+                }
+                if let store = self?.noteStore, store.isEditorTitleSelected {
+                    store.isEditorTitleSelected = false
+                    return nil
+                }
+                if let store = self?.noteStore, store.selectedTitleNoteID != nil {
+                    store.selectedTitleNoteID = nil
                     return nil
                 }
                 if let store = self?.noteStore, !store.selection.isEmpty {
@@ -282,8 +290,11 @@ final class SidePanelController: NSWindowController {
                 return nil
             }
             if s.newNoteShortcut?.matches(event) == true {
-                let note = noteStore.createNote(in: noteStore.selectedFolder?.name ?? "")
-                noteStore.pendingRenameNote = note
+                guard !noteStore.showTrash else { return event }
+                if noteStore.selectedNote != nil {
+                    noteStore.closeNote()
+                }
+                noteStore.pendingNewNote = true
                 return nil
             }
             if s.newFolderShortcut?.matches(event) == true {
@@ -581,7 +592,7 @@ final class SidePanelController: NSWindowController {
         // Leaving the panel ends an in-place card edit session (flushes its save).
         noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
-        noteStore.saveSidecar()
+        noteStore.saveSidecar(immediately: true)
         FinderBrowserRegistry.shared.suspendAllWatching()
         isShown = false
         let gen = animationGeneration &+ 1

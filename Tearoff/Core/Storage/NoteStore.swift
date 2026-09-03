@@ -54,6 +54,12 @@ final class NoteStore {
     /// `selectedFolder` (which represent what's *open*). Empty after navigation.
     var selection: Set<SelectableID> = []
 
+    /// ID of note whose title is currently selected on the board card.
+    var selectedTitleNoteID: UUID?
+
+    /// True when the expanded editor's header title is currently selected.
+    var isEditorTitleSelected: Bool = false
+
     /// Anchor row for ⇧-click range selection.
     private var selectionAnchor: SelectableID?
 
@@ -113,8 +119,8 @@ final class NoteStore {
     var pendingSearchOnHome = false
     /// Set to true by the shortcut handler to trigger "new folder" in the currently visible list view.
     var pendingNewFolder = false
-    /// Set by shortcut handler after creating a note to trigger inline rename in the list view.
-    var pendingRenameNote: Note?
+    /// Set to true by the shortcut handler to trigger note creation in the board view.
+    var pendingNewNote = false
     /// Set to true by the ⌘F shortcut handler when a note is open — consumed by EditorScreen
     /// to show the in-editor find bar.
     var pendingEditorFind: Bool = false
@@ -129,6 +135,10 @@ final class NoteStore {
     /// recomputation on every TagFilterBar render. Updated by the handful of
     /// mutators that touch tags.
     private(set) var allUsedTags: Set<TagColor> = []
+
+    /// Timestamp of recent rename operations per note. Used to guard `updateContent`
+    /// against stale editor debounced callbacks reverting the new title.
+    private var recentlyRenamedNotes: [UUID: Date] = [:]
 
     private func recomputeAllUsedTags() {
         allUsedTags = Set(notes.flatMap(\.tags))
@@ -286,6 +296,8 @@ final class NoteStore {
         let title = note.title
         Log.navigation.debug("[NoteStore] openNote — \(title, privacy: .public)")
         navigationDirection = .forward
+        selectedTitleNoteID = nil
+        isEditorTitleSelected = false
         // The collapsed card hides behind the morphing editor box, so clearing
         // the in-place edit here never renders as a visible small-card bounce.
         withAnimation(DesignToken.Motion.morph) {
@@ -303,6 +315,8 @@ final class NoteStore {
             selectedFolder = Folder(name: note.folder, noteCount: 0)
         }
         navigationDirection = .forward
+        selectedTitleNoteID = nil
+        isEditorTitleSelected = false
         withAnimation(DesignToken.Motion.morph) {
             selectedNote = note
         }
@@ -313,6 +327,8 @@ final class NoteStore {
         Log.navigation.debug("[NoteStore] closeNote — \(title, privacy: .public)")
         navigationDirection = .backward
         saveDirtyNotes()
+        isEditorTitleSelected = false
+        selectedTitleNoteID = nil
         withAnimation(DesignToken.Motion.morph) {
             selectedNote = nil
         }
@@ -383,111 +399,203 @@ final class NoteStore {
 
     // MARK: - Lifecycle
 
-    func loadFromDisk() {
-        do {
-            let loaded = try FileStorage.loadAllNotes()
-            // Auto-correct duplicate UUIDs — reassign a new UUID to any duplicate and re-save
-            // to disk so both notes survive (e.g. user copied a .md file in Finder)
-            var seen = Set<UUID>()
-            notes = loaded.map { note in
-                guard seen.insert(note.id).inserted else {
-                    let newID = UUID()
-                    Log.storage.warning("[NoteStore] duplicate UUID '\(note.id)' for '\(note.title, privacy: .public)' — reassigning to \(newID)")
-                    let fixed = Note(
-                        id: newID,
-                        title: note.title,
-                        content: note.content,
-                        createdAt: note.createdAt,
-                        modifiedAt: note.modifiedAt,
-                        savedAt: note.savedAt,
-                        folder: note.folder,
-                        trashedAt: note.trashedAt,
-                        savedFilename: note.savedFilename,
-                    )
-                    do {
-                        try FileStorage.writeNote(fixed) // return value intentionally discarded (dedup path)
-                    } catch {
-                        Log.storage.error("[NoteStore] failed to re-save deduped note — \(error)")
+    private var loadGeneration: Int = 0
+    private(set) var isLoadingNotes: Bool = false
+
+    func loadFromDisk(completion: (() -> Void)? = nil) {
+        loadGeneration &+= 1
+        let currentGen = loadGeneration
+        isLoadingNotes = true
+
+        let root = FileStorage.rootURL
+        let sidecar = SidecarStore.shared.data
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let loaded = try FileStorage.loadAllNotes(rootURL: root, sidecar: sidecar)
+                let trashedN = try FileStorage.loadTrashedNotes(rootURL: root, sidecar: sidecar)
+                let trashedF = try FileStorage.loadTrashedFolders(rootURL: root, sidecar: sidecar)
+                let folders = Set((try? FileStorage.discoverFolders(rootURL: root)) ?? [])
+                let finderCards = sidecar.finderCards.compactMap { uuidStr, entry -> FinderCard? in
+                    guard let id = UUID(uuidString: uuidStr) else { return nil }
+                    return FinderCard(id: id, entry: entry)
+                }.sorted { $0.createdAt < $1.createdAt }
+
+                await MainActor.run {
+                    guard self.loadGeneration == currentGen else {
+                        Log.storage.debug("[NoteStore] loadFromDisk generation mismatch (\(currentGen) vs \(self.loadGeneration)), skipping")
+                        return
                     }
-                    return fixed
+                    self.isLoadingNotes = false
+
+                    // Auto-correct duplicate UUIDs — reassign a new UUID to any duplicate and re-save
+                    // to disk so both notes survive (e.g. user copied a .md file in Finder)
+                    var seen = Set<UUID>()
+                    self.notes = loaded.map { note in
+                        guard seen.insert(note.id).inserted else {
+                            let newID = UUID()
+                            Log.storage.warning("[NoteStore] duplicate UUID '\(note.id)' for '\(note.title, privacy: .public)' — reassigning to \(newID)")
+                            let fixed = Note(
+                                id: newID,
+                                title: note.title,
+                                content: note.content,
+                                createdAt: note.createdAt,
+                                modifiedAt: note.modifiedAt,
+                                savedAt: note.savedAt,
+                                folder: note.folder,
+                                trashedAt: note.trashedAt,
+                                savedFilename: note.savedFilename,
+                            )
+                            do {
+                                try FileStorage.writeNote(fixed) // return value intentionally discarded (dedup path)
+                            } catch {
+                                Log.storage.error("[NoteStore] failed to re-save deduped note — \(error)")
+                            }
+                            return fixed
+                        }
+                        return note
+                    }
+                    self.trashedNotes = trashedN
+                    self.trashedFolders = trashedF
+                    self.autoPurgeExpiredTrash()
+                    self.diskFolderNames = folders
+                    self.refreshFolders()
+                    self.finderCards = finderCards
+                    self.focusedFinderCardID = nil
+                    let noteCount = self.notes.count
+                    let cardCount = self.finderCards.count
+                    let trashCount = self.trashedNotes.count + self.trashedFolders.count
+                    Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(cardCount) Finder cards, \(trashCount) trashed items")
+                    completion?()
                 }
-                return note
+            } catch {
+                await MainActor.run {
+                    guard self.loadGeneration == currentGen else { return }
+                    self.isLoadingNotes = false
+                    Log.storage.error("[NoteStore] loadFromDisk failed — \(error)")
+                    completion?()
+                }
             }
-            trashedNotes = try FileStorage.loadTrashedNotes()
-            trashedFolders = try FileStorage.loadTrashedFolders()
-            autoPurgeExpiredTrash()
-            diskFolderNames = Set((try? FileStorage.discoverFolders()) ?? [])
-            refreshFolders()
-            finderCards = SidecarStore.shared.allFinderCardEntries
-                .map { FinderCard(id: $0.id, entry: $0.entry) }
-                .sorted { $0.createdAt < $1.createdAt }
-            focusedFinderCardID = nil
-            let noteCount = notes.count
-            let cardCount = finderCards.count
-            let trashCount = trashedNotes.count + trashedFolders.count
-            Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(cardCount) Finder cards, \(trashCount) trashed items")
-        } catch {
-            Log.storage.error("[NoteStore] loadFromDisk failed — \(error)")
         }
     }
 
-    /// Called on every app foreground transition. Checks each note for external modifications
-    /// and reloads or prompts based on dirty state.
+    // MARK: - External Change Detection
+
+    private var isCheckingExternalChanges = false
+    private var needsExternalRecheck = false
+
+    private struct DetectedExternalChange {
+        let noteID: UUID
+        let diskDate: Date
+        let diskContent: String
+        let diskModifiedAt: Date
+        let diskSavedAt: Date
+        let diskTags: [TagColor]
+    }
+
+    /// Called on every app foreground transition / showPanel. Checks each note for external modifications
+    /// in the background and reloads or prompts based on dirty state.
     func checkForExternalChanges() {
-        let count = notes.count
-        Log.storage.debug("[ExternalSync] checking \(count) notes")
-        for i in notes.indices {
-            let note = notes[i]
-            guard let diskDate = FileStorage.modificationDate(for: note) else {
-                let t = note.title
-                Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — file not found on disk")
+        if isCheckingExternalChanges {
+            needsExternalRecheck = true
+            return
+        }
+        isCheckingExternalChanges = true
+        let snapshot = notes
+        let root = FileStorage.rootURL
+
+        Task.detached(priority: .utility) {
+            var changes: [DetectedExternalChange] = []
+            for note in snapshot {
+                guard let diskDate = FileStorage.modificationDate(for: note, rootURL: root) else {
+                    continue
+                }
+                // Compare file mtime against savedAt (last time Tearoff wrote this file).
+                // Using savedAt instead of modifiedAt prevents false positives from auto-saves
+                // that write the file without changing content.
+                let diff = diskDate.timeIntervalSince(note.savedAt)
+                guard diff > 1 else { continue }
+
+                guard let reloaded = FileStorage.reloadContent(for: note, rootURL: root) else { continue }
+                changes.append(DetectedExternalChange(
+                    noteID: note.id,
+                    diskDate: diskDate,
+                    diskContent: reloaded.content,
+                    diskModifiedAt: reloaded.modifiedAt,
+                    diskSavedAt: reloaded.savedAt,
+                    diskTags: reloaded.tags,
+                ))
+            }
+
+            await MainActor.run {
+                self.applyExternalChanges(changes)
+            }
+        }
+    }
+
+    private func applyExternalChanges(_ changes: [DetectedExternalChange]) {
+        defer {
+            isCheckingExternalChanges = false
+            if needsExternalRecheck {
+                needsExternalRecheck = false
+                checkForExternalChanges()
+            }
+        }
+
+        guard !changes.isEmpty else { return }
+
+        var sidecarChanged = false
+        for change in changes {
+            guard let i = notes.firstIndex(where: { $0.id == change.noteID }) else {
                 continue
             }
-            // Compare file mtime against savedAt (last time Tearoff wrote this file).
-            // Using savedAt instead of modifiedAt prevents false positives from auto-saves
-            // that write the file without changing content.
-            let diff = diskDate.timeIntervalSince(note.savedAt)
-            let t = note.title
-            Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — diff: \(String(format: "%.3f", diff))s")
-            guard diff > 1 else { continue }
 
-            let noteID = notes[i].id
+            let noteID = change.noteID
             let isOpen = selectedNote?.id == noteID
             let isDirty = dirtyNoteIDs.contains(noteID)
-
-            guard let reloaded = FileStorage.reloadContent(for: notes[i]) else { continue }
-            let diskContent = reloaded.content
-            let diskModifiedAt = reloaded.modifiedAt
-            let diskSavedAt = reloaded.savedAt
-            let diskTags = reloaded.tags
-
             let title = notes[i].title
-            if isOpen, isDirty {
-                // Both Tearoff and external have changes — prompt user
-                Log.storage.info("[NoteStore] external conflict on open note '\(title, privacy: .public)'")
-                pendingExternalChange = PendingExternalChange(noteID: noteID, diskContent: diskContent, diskDate: diskDate, diskTags: diskTags)
+
+            if isDirty {
+                if isOpen {
+                    // Both Tearoff and external have changes — prompt user
+                    Log.storage.info("[NoteStore] external conflict on open note '\(title, privacy: .public)'")
+                    pendingExternalChange = PendingExternalChange(
+                        noteID: noteID,
+                        diskContent: change.diskContent,
+                        diskDate: change.diskDate,
+                        diskTags: change.diskTags,
+                    )
+                } else {
+                    // Closed note has unsaved local edits — preserve local edits and do not overwrite
+                    Log.storage.info("[NoteStore] external change detected for closed dirty note '\(title, privacy: .public)' — preserving local edits")
+                }
             } else {
-                // Safe to auto-reload: note not open, or open but no Tearoff edits
+                // Safe to auto-reload: note not dirty
                 Log.storage.info("[NoteStore] auto-syncing '\(title, privacy: .public)' from external change")
-                notes[i].content = diskContent
-                notes[i].modifiedAt = diskModifiedAt
-                notes[i].savedAt = diskSavedAt
-                notes[i].tags = diskTags
+                notes[i].content = change.diskContent
+                notes[i].modifiedAt = change.diskModifiedAt
+                notes[i].savedAt = change.diskSavedAt
+                notes[i].tags = change.diskTags
                 dirtyNoteIDs.remove(noteID)
+
                 // Persist updated savedAt to sidecar so the watcher doesn't re-fire on next launch
                 if var entry = SidecarStore.shared.noteEntry(for: noteID) {
-                    entry.savedAt = diskSavedAt
-                    entry.modifiedAt = diskModifiedAt
-                    entry.tags = diskTags.map(\.rawValue)
+                    entry.savedAt = change.diskSavedAt
+                    entry.modifiedAt = change.diskModifiedAt
+                    entry.tags = change.diskTags.map(\.rawValue)
                     SidecarStore.shared.upsertNote(entry, for: noteID)
-                    try? SidecarStore.shared.save()
+                    sidecarChanged = true
                 }
                 if isOpen {
                     selectedNote = notes[i]
-                    onNeedEditorReload?(diskContent)
+                    onNeedEditorReload?(change.diskContent)
                 }
-                recomputeAllUsedTags()
             }
+        }
+
+        if sidecarChanged {
+            try? SidecarStore.shared.save()
+            recomputeAllUsedTags()
         }
     }
 
@@ -577,10 +685,11 @@ final class NoteStore {
     // MARK: - Note CRUD
 
     func createNote(in folder: String = "") -> Note {
-        var title = "Untitled"
+        let baseTitle = L10n.shared["common.untitled"]
+        var title = baseTitle
         var counter = 2
         while noteTitleExists(title, in: folder) {
-            title = "Untitled \(counter)"
+            title = "\(baseTitle) \(counter)"
             counter += 1
         }
         let now = Date()
@@ -607,16 +716,34 @@ final class NoteStore {
     func updateContent(for noteID: UUID, content: String) {
         guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return }
         guard notes[index].content != content else { return }
-        notes[index].content = content
-        notes[index].modifiedAt = Date()
+
+        let now = Date()
+        recentlyRenamedNotes = recentlyRenamedNotes.filter { now.timeIntervalSince($0.value) < 10.0 }
+
+        var effectiveContent = content
         // Only derive title from content when an explicit # heading is present.
         // Without this guard, a rename on a headingless note reverts within ~150ms
         // because the editor fires contentChanged on load and extractTitle returns
         // the raw first line, overwriting the manually-set title.
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         if firstLine.hasPrefix("#") {
-            notes[index].title = Self.extractTitle(from: content)
+            let extracted = Self.extractTitle(from: content)
+            let isRecentlyRenamed = recentlyRenamedNotes[noteID].map { now.timeIntervalSince($0) < 5.0 } ?? false
+            if isRecentlyRenamed, extracted != notes[index].title {
+                // Editor callback carrying a stale heading from before rename.
+                // Reconstruct the first heading line using the store's current title instead of reverting.
+                var lines = content.components(separatedBy: "\n")
+                if let headingIndex = lines.firstIndex(where: { $0.hasPrefix("#") }) {
+                    let prefix = String(lines[headingIndex].prefix(while: { $0 == "#" }))
+                    lines[headingIndex] = "\(prefix) \(notes[index].title)"
+                    effectiveContent = lines.joined(separator: "\n")
+                }
+            } else {
+                notes[index].title = extracted
+            }
         }
+        notes[index].content = effectiveContent
+        notes[index].modifiedAt = now
         dirtyNoteIDs.insert(noteID)
 
         // Also update selectedNote if it matches
@@ -631,8 +758,10 @@ final class NoteStore {
         guard !trimmed.isEmpty else { return }
         guard !noteTitleExists(trimmed, in: note.folder, excluding: note.id) else { return }
 
+        let now = Date()
         notes[index].title = trimmed
-        notes[index].modifiedAt = Date()
+        notes[index].modifiedAt = now
+        recentlyRenamedNotes[note.id] = now
 
         // Update the first # heading line in content to match the new title
         var lines = notes[index].content.components(separatedBy: "\n")
@@ -642,11 +771,14 @@ final class NoteStore {
             notes[index].content = lines.joined(separator: "\n")
         }
 
-        dirtyNoteIDs.insert(note.id)
-
         if selectedNote?.id == note.id {
             selectedNote = notes[index]
+            onNeedEditorReload?(notes[index].content)
         }
+
+        // Persist immediately on rename (disk file rename + sidecar save),
+        // consistent with renameFinderCard.
+        saveNoteImmediately(note.id)
     }
 
     /// Toggle a single tag on a note. Updates in-memory state and marks the note dirty.
@@ -817,10 +949,15 @@ final class NoteStore {
         SidecarStore.shared.upsertFinderCard(SidecarStore.FinderCardEntry(card), for: card.id)
     }
 
-    /// Flush pending sidecard metadata to disk — the escape hatch for callers
-    /// that batched cheap updates with `persist: false`.
-    func saveSidecar() {
-        try? SidecarStore.shared.save()
+    /// Save pending sidecar metadata to disk. When `immediately` is false (default),
+    /// saving is debounced and performed in the background.
+    /// When `immediately` is true, it synchronously flushes to disk (used on panel hide / app terminate).
+    func saveSidecar(immediately: Bool = false) {
+        if immediately {
+            try? SidecarStore.shared.save()
+        } else {
+            SidecarStore.shared.scheduleSave()
+        }
     }
 
     // MARK: - Finder Card CRUD
@@ -838,7 +975,7 @@ final class NoteStore {
         }
         finderCards.append(card)
         persistFinderCard(card)
-        try? SidecarStore.shared.save()
+        saveSidecar()
         Log.storage.info("[NoteStore] created Finder card \(card.id) in '\(folder, privacy: .public)'")
         return card
     }
@@ -852,7 +989,7 @@ final class NoteStore {
         if focusedFinderCardID == card.id {
             focusedFinderCardID = nil
         }
-        try? SidecarStore.shared.save()
+        saveSidecar()
         Log.storage.info("[NoteStore] deleted Finder card \(card.id)")
     }
 
@@ -866,7 +1003,7 @@ final class NoteStore {
         finderCards[index] = updated
         persistFinderCard(updated)
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -880,7 +1017,7 @@ final class NoteStore {
         finderCards[index].title = newTitle
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set (or clear) the card's identity color.
@@ -890,7 +1027,7 @@ final class NoteStore {
         finderCards[index].color = color
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Move a Finder card between folders. Cards can't collide — they have no
@@ -902,7 +1039,7 @@ final class NoteStore {
         finderCards[index].folder = folder
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set the card's file-list height in points. The view passes
@@ -915,7 +1052,7 @@ final class NoteStore {
         finderCards[index].listHeight = height
         persistFinderCard(finderCards[index])
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -928,7 +1065,7 @@ final class NoteStore {
         finderCards[index].viewMode = mode
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's sort column and direction. Persisted to the sidecar
@@ -942,7 +1079,7 @@ final class NoteStore {
         finderCards[index].sortAscending = ascending
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's icon-grid icon size in points. Persisted
@@ -955,7 +1092,7 @@ final class NoteStore {
         finderCards[index].iconSize = size
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's favourites chip font size in points. Persisted
@@ -967,7 +1104,7 @@ final class NoteStore {
         finderCards[index].chipFontSize = size
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Add a directory to the card's favourites and select it. Non-directories
@@ -985,7 +1122,7 @@ final class NoteStore {
             finderCards[index].selectedFavoriteID = existing.id
             finderCards[index].currentPath = nil
             persistFinderCard(finderCards[index])
-            try? SidecarStore.shared.save()
+            saveSidecar()
             return existing
         }
         let favorite = FinderFavorite(path: path)
@@ -994,7 +1131,7 @@ final class NoteStore {
         finderCards[index].currentPath = nil
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
         return favorite
     }
 
@@ -1012,7 +1149,7 @@ final class NoteStore {
         }
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Point the card's browser at a favourite as its home.
@@ -1024,7 +1161,7 @@ final class NoteStore {
         finderCards[index].selectedFavoriteID = favoriteID
         finderCards[index].currentPath = nil
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Record where the browser currently sits. Navigation is cheap, so this
@@ -1037,7 +1174,7 @@ final class NoteStore {
         finderCards[index].currentPath = path
         persistFinderCard(finderCards[index])
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -1105,6 +1242,7 @@ final class NoteStore {
         selection.removeAll()
         selectionAnchor = nil
         selectionExtensionEnd = nil
+        selectedTitleNoteID = nil
     }
 
     // MARK: - Keyboard navigation
@@ -1367,6 +1505,9 @@ final class NoteStore {
     }
 
     func deleteNote(_ note: Note) {
+        if selectedTitleNoteID == note.id {
+            selectedTitleNoteID = nil
+        }
         notes.removeAll { $0.id == note.id }
         dirtyNoteIDs.remove(note.id)
         do {
@@ -1996,40 +2137,56 @@ final class NoteStore {
 
     // MARK: - Save
 
+    /// Persist a single note to disk immediately (including file rename, asset directory move,
+    /// and sidecar entry update) and clear its dirty flag.
+    @discardableResult
+    func saveNoteImmediately(_ noteID: UUID, deferSidecarSave: Bool = false) -> Bool {
+        guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        do {
+            let result = try FileStorage.writeNote(notes[index], deferSidecarSave: deferSidecarSave)
+            notes[index].savedFilename = result.filename
+            notes[index].savedAt = result.savedAt
+            if let updated = result.updatedContent {
+                notes[index].content = updated
+                if selectedNote?.id == noteID {
+                    selectedNote?.content = updated
+                    let noteTitle = notes[index].title
+                    Log.storage.info("[Image] reloading editor after image path rewrite for '\(noteTitle, privacy: .public)'")
+                    onNeedEditorReload?(updated)
+                }
+            }
+            if selectedNote?.id == noteID {
+                selectedNote?.savedFilename = result.filename
+                selectedNote?.savedAt = result.savedAt
+            }
+            // Clean up orphaned images (deleted from body but file still on disk).
+            // Shared-assets mode keeps files until explicitly deleted (Typora-like).
+            if AppSettings.shared.imageStorageMode == .hiddenDirectory {
+                FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
+            }
+            dirtyNoteIDs.remove(noteID)
+            return true
+        } catch {
+            Log.storage.error("[NoteStore] saveNoteImmediately failed for \(noteID) — \(error)")
+            return false
+        }
+    }
+
     func saveDirtyNotes() {
         if !dirtyNoteIDs.isEmpty {
             let count = dirtyNoteIDs.count
             Log.storage.debug("[NoteStore] saving \(count) dirty notes")
         }
-        for noteID in dirtyNoteIDs {
-            guard let index = notes.firstIndex(where: { $0.id == noteID }) else { continue }
-            do {
-                let result = try FileStorage.writeNote(notes[index])
-                notes[index].savedFilename = result.filename
-                notes[index].savedAt = result.savedAt
-                if let updated = result.updatedContent {
-                    notes[index].content = updated
-                    if selectedNote?.id == noteID {
-                        selectedNote?.content = updated
-                        let noteTitle = notes[index].title
-                        Log.storage.info("[Image] reloading editor after image path rewrite for '\(noteTitle, privacy: .public)'")
-                        onNeedEditorReload?(updated)
-                    }
-                }
-                if selectedNote?.id == noteID {
-                    selectedNote?.savedFilename = result.filename
-                    selectedNote?.savedAt = result.savedAt
-                }
-                // Clean up orphaned images (deleted from body but file still on disk).
-                // Shared-assets mode keeps files until explicitly deleted (Typora-like).
-                if AppSettings.shared.imageStorageMode == .hiddenDirectory {
-                    FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
-                }
-            } catch {
-                Log.storage.error("[NoteStore] saveDirtyNotes failed for \(noteID) — \(error)")
+        let idsToSave = dirtyNoteIDs
+        var didSave = false
+        for noteID in idsToSave {
+            if saveNoteImmediately(noteID, deferSidecarSave: true) {
+                didSave = true
             }
         }
-        dirtyNoteIDs.removeAll()
+        if didSave {
+            saveSidecar(immediately: true)
+        }
     }
 
     // MARK: - Private
@@ -2077,6 +2234,6 @@ final class NoteStore {
     private static func extractTitle(from content: String) -> String {
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         let stripped = firstLine.drop { $0 == "#" || $0 == " " }
-        return stripped.isEmpty ? "Untitled" : String(stripped)
+        return stripped.isEmpty ? L10n.shared["common.untitled"] : String(stripped)
     }
 }

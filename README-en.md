@@ -2,7 +2,7 @@
 
 <b><font>Tearoff</font></b>
 
- A sticky note app for jotting things down on the fly.
+ Jot down thoughts, grab your files.
 
 <br clear="all" />
 
@@ -19,12 +19,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**Tearoff** brings back the feel of scribbling on a torn-off piece of paper — right on your Mac. Its biggest advantage is convenience: just slide your mouse to the screen edge to summon Tearoff. Each card is a markdown file — single-click to edit in place, double-click to open the full editor.
+**Tearoff** aims to bring back the feel of **jotting things down** on torn-off paper. Its biggest advantage is convenience: just slide your mouse to the screen edge to summon Tearoff. The core object in Tearoff is the card, which now comes in two kinds: **note cards** and **folder cards**. A note card maps to a markdown file — single-click to edit in place, double-click to open the full editor. A folder card works with your files directly, with familiar drag-and-drop, delete, and file browsing built in.
 
 You can use cards as a schedule, memo pad, journal, or scratch pad. I've optimized for the schedule use case — click a to-do (`- [ ]`) directly on a card to check or uncheck it.
 
 <p align="center">
-  <img alt="Tearoff Card View" src=".github/assets/screenshot-cards.png" width="800" />
+  <img alt="Tearoff Card View" src=".github/assets/screenshot-cards.gif" width="800" />
 </p>
 
 ---
@@ -75,6 +75,7 @@ The **main view** is a card list — each card corresponds to a markdown file an
 - Click the blank area to the right of a card's title to enter **quick edit** — an inline input field, great for a one-liner.
 - Double-click a card to open the **editor** for longer writing.
 - Click a to-do item directly on a card to check or uncheck it without entering the editor — this is my optimization for the schedule use case.
+- Right-click empty space (or right-click the "New Card" button) to create a **folder card**: drag your favorite folders onto its top bar, and the card becomes a mini Finder — browse, open, rename, and drag files in and out without leaving the panel.
 
 The top row has folder tabs; on the right are search, new folder, new card, and settings. The **pin** button on the far right keeps the panel open — by default Tearoff auto-hides when your mouse leaves, but pinning it lets you copy-paste between windows. Click the pin again to restore auto-hide.
 

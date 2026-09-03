@@ -28,6 +28,7 @@ struct FinderCardView: View {
     var layout: BoardCardLayout?
     /// Card is being renamed in place (board-owned state, like note rename).
     var isRenamingTitle: Bool = false
+    var titleDraft: Binding<String>?
     var onTap: (NSEvent.ModifierFlags) -> Void
     var onPinToggle: (() -> Void)?
     /// Press-drag tick (≥8pt movement): (pointer, press start) in
@@ -46,7 +47,14 @@ struct FinderCardView: View {
     @State private var isHovered = false
     @State private var isResizeHovered = false
     @State private var resizeOriginHeight: CGFloat?
-    @State private var titleDraft = ""
+    @State private var internalTitleDraft = ""
+    @FocusState private var isTitleFocused: Bool
+    @State private var isCancelled = false
+
+    private var currentDraft: Binding<String> {
+        titleDraft ?? $internalTitleDraft
+    }
+
     @State private var errorMessage: String?
     @State private var persistDebouncer = Debouncer(delay: 1.0)
     /// Last left-click inside the embedded file list or path bar. SwiftUI tap
@@ -176,7 +184,22 @@ struct FinderCardView: View {
         }
         .onChange(of: isRenamingTitle) { _, renaming in
             if renaming {
-                titleDraft = card.title ?? ""
+                isCancelled = false
+                currentDraft.wrappedValue = card.title ?? card.displayTitle
+                DispatchQueue.main.async {
+                    isTitleFocused = true
+                }
+            } else {
+                isTitleFocused = false
+            }
+        }
+        .onAppear {
+            if isRenamingTitle {
+                isCancelled = false
+                currentDraft.wrappedValue = card.title ?? card.displayTitle
+                DispatchQueue.main.async {
+                    isTitleFocused = true
+                }
             }
         }
     }
@@ -220,6 +243,15 @@ struct FinderCardView: View {
 
     // MARK: - Header row
 
+    private func commitRename() {
+        guard isRenamingTitle, !isCancelled else { return }
+        onRenameCommit?(currentDraft.wrappedValue)
+    }
+
+    private func cancelRename() {
+        onRenameCancel?()
+    }
+
     /// Top row of the card: the wrapping favourite chips on the left and the
     /// header controls (view toggle / sort / ⋯) on the right, so the controls
     /// stay visible no matter how many chips wrap. A card being renamed swaps
@@ -228,15 +260,26 @@ struct FinderCardView: View {
     private var headerRow: some View {
         HStack(alignment: .top, spacing: 0) {
             if isRenamingTitle {
-                TextField(card.displayTitle, text: $titleDraft)
+                TextField(card.displayTitle, text: currentDraft)
                     .textFieldStyle(.plain)
                     .font(appSettings.boardTitleFont)
                     .foregroundStyle(accentColor)
+                    .focused($isTitleFocused)
                     .onSubmit {
-                        onRenameCommit?(titleDraft)
+                        commitRename()
                     }
                     .onExitCommand {
-                        onRenameCancel?()
+                        isCancelled = true
+                        cancelRename()
+                    }
+                    .onChange(of: isTitleFocused) { _, focused in
+                        if focused {
+                            DispatchQueue.main.async {
+                                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                            }
+                        } else if isRenamingTitle, !isCancelled {
+                            commitRename()
+                        }
                     }
             } else if !card.favorites.isEmpty {
                 favoritesBar
@@ -538,8 +581,10 @@ struct FinderCardView: View {
     /// the browser directly so the list fills in with no "empty folder" flash.
     private func addFavoriteAndSelect(_ url: URL) {
         guard let favorite = noteStore.addFavorite(url, to: card) else { return }
-        noteStore.selectFavorite(id: favorite.id, in: card)
-        browser.navigate(to: favorite.url, recordsHistory: false)
+        let browser = browser
+        Task { @MainActor in
+            browser.navigate(to: favorite.url, recordsHistory: false)
+        }
     }
 
     /// Presents the folder picker for the empty state's primary button.
@@ -801,16 +846,19 @@ struct FinderCardView: View {
         let store = noteStore
         let cardID = card.id
         browser.onCurrentURLChanged = { url in
-            guard let current = store.finderCards.first(where: { $0.id == cardID }) else { return }
-            let storedPath: String? = {
-                guard let url else { return nil }
-                let path = url.standardizedFileURL.path
-                let home = current.selectedFavorite?.url.standardizedFileURL.path
-                return path == home ? nil : path
-            }()
-            store.setCurrentPath(storedPath, for: current, persist: false)
-            persistDebouncer.call {
-                store.saveSidecar()
+            Task { @MainActor in
+                guard let current = store.finderCards.first(where: { $0.id == cardID }) else { return }
+                let storedPath: String? = {
+                    guard let url else { return nil }
+                    let path = url.standardizedFileURL.path
+                    let home = current.selectedFavorite?.url.standardizedFileURL.path
+                    return path == home ? nil : path
+                }()
+                guard current.currentPath != storedPath else { return }
+                store.setCurrentPath(storedPath, for: current, persist: false)
+                persistDebouncer.call {
+                    store.saveSidecar()
+                }
             }
         }
 
@@ -819,8 +867,11 @@ struct FinderCardView: View {
         browser.sortKey = card.sortKey
         browser.sortAscending = card.sortAscending
 
-        browser.navigate(to: card.currentURL, recordsHistory: false)
-        browser.startWatching()
+        Task { @MainActor in
+            guard let live = store.finderCards.first(where: { $0.id == cardID }) else { return }
+            browser.navigate(to: live.currentURL, recordsHistory: false)
+            browser.startWatching()
+        }
     }
 
     private func unmountBrowser() {
@@ -858,13 +909,17 @@ struct FinderCardView: View {
     }
 
     /// Re-applies the card's sort column/direction to the browser and reloads.
-    /// Called on mount and whenever the card's sort settings change from the
-    /// store (header menu, external sidecar reload).
+    /// Deferred to the main actor to avoid mutating @Observable state mid-update.
     private func syncBrowserSort() {
-        guard browser.sortKey != card.sortKey || browser.sortAscending != card.sortAscending else { return }
-        browser.sortKey = card.sortKey
-        browser.sortAscending = card.sortAscending
-        browser.reload()
+        let cardSortKey = card.sortKey
+        let cardSortAscending = card.sortAscending
+        let browser = browser
+        Task { @MainActor in
+            guard browser.sortKey != cardSortKey || browser.sortAscending != cardSortAscending else { return }
+            browser.sortKey = cardSortKey
+            browser.sortAscending = cardSortAscending
+            browser.reload()
+        }
     }
 
     private func reportFrame(_ geo: GeometryProxy) {

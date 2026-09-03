@@ -109,11 +109,12 @@ struct FinderFileListView: NSViewRepresentable {
         table.gridStyleMask = []
         table.focusRingType = .none
         table.registerForDraggedTypes([.fileURL])
-        // External destinations only get a copy — allowing `.move` makes Finder
-        // choose move for iCloud-synced sources, which triggers the system
-        // "remove from iCloud Drive" confirmation. The card-internal drag
-        // (`forLocal: true`) keeps move so items can be reordered/filed.
-        table.setDraggingSourceOperationMask([.copy], forLocal: false)
+        // External destinations allow both move and copy ([.move, .copy]). Finder
+        // defaults to move on the same volume (with ⌥ forcing a copy).
+        // Note: For iCloud-synced sources, moving out of the card triggers macOS's
+        // system "remove from iCloud Drive" confirmation dialog; this side effect
+        // is accepted to ensure consistent move-by-default drag semantics.
+        table.setDraggingSourceOperationMask([.move, .copy], forLocal: false)
         table.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("finder.file"))
@@ -512,10 +513,11 @@ extension FinderFileListView {
             guard let plan, !plan.urls.isEmpty else { return false }
 
             do {
+                let window = table?.window
                 if plan.isCopy {
-                    try parent.browser.copy(plan.urls, into: plan.target)
+                    try parent.browser.copy(plan.urls, into: plan.target, window: window)
                 } else {
-                    try parent.browser.move(plan.urls, into: plan.target)
+                    try parent.browser.move(plan.urls, into: plan.target, window: window)
                 }
             } catch {
                 parent.actions.onError(error)
@@ -859,8 +861,20 @@ final class FinderCellView: NSTableCellView {
         fatalError("FinderCellView is created in code only")
     }
 
+    private var configuredURL: URL?
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        configuredURL = nil
+        iconView.image = nil
+    }
+
     func configure(entry: FinderEntry, appearance: FinderListAppearance) {
-        iconView.image = FileIconCache.shared.icon(for: entry)
+        configuredURL = entry.url
+        iconView.image = FileIconCache.shared.icon(for: entry) { [weak self, entryURL = entry.url] image in
+            guard let self, configuredURL == entryURL else { return }
+            iconView.image = image
+        }
         nameField.stringValue = entry.name
         nameField.font = appearance.nameFont
         nameField.textColor = appearance.primaryText

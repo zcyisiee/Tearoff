@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_: Notification) {
         Log.app.info("[AppDelegate] terminating")
         panelController?.noteStore.saveDirtyNotes()
+        panelController?.noteStore.saveSidecar(immediately: true)
     }
 
     func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {

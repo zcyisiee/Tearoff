@@ -105,9 +105,18 @@ struct MarkdownEditorView: View {
     var onNavigatePrevious: (() -> Void)?
     /// Outline state fed from the editor text; nil disables outline tracking.
     var outline: OutlineState?
+    /// When true, the editor body contains the full markdown text including the
+    /// leading "# Title" heading line (used for card inline editing so users can
+    /// edit the title in place).
+    /// When false (default), the leading heading line is stripped into `hiddenHeadingLine`
+    /// in WYSIWYG mode (used for ExpandedNoteEditor so the body does not duplicate the title
+    /// already shown in the editor header).
+    var showsHeadingLineInBody: Bool = false
+    var focusTitleOnAppear: Bool = false
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
+    @State private var didFocusTitle = false
     @State private var saveDebouncer = Debouncer(delay: 1.0)
     @State private var slashHandler = SlashCommandHandler()
     @State private var noteNavMonitor: Any?
@@ -136,6 +145,8 @@ struct MarkdownEditorView: View {
         onNavigateNext: (() -> Void)? = nil,
         onNavigatePrevious: (() -> Void)? = nil,
         outline: OutlineState? = nil,
+        showsHeadingLineInBody: Bool = false,
+        focusTitleOnAppear: Bool = false,
     ) {
         self.noteID = noteID
         self.noteTitle = noteTitle
@@ -147,9 +158,21 @@ struct MarkdownEditorView: View {
         self.onNavigateNext = onNavigateNext
         self.onNavigatePrevious = onNavigatePrevious
         self.outline = outline
-        let (heading, body) = Self.splitHeading(initialContent)
-        _text = State(initialValue: body)
-        _hiddenHeadingLine = State(initialValue: heading)
+        self.showsHeadingLineInBody = showsHeadingLineInBody
+        self.focusTitleOnAppear = focusTitleOnAppear
+        if showsHeadingLineInBody {
+            _text = State(initialValue: initialContent)
+            _hiddenHeadingLine = State(initialValue: "")
+        } else {
+            if AppSettings.shared.editorRawSourceMode {
+                _text = State(initialValue: initialContent)
+                _hiddenHeadingLine = State(initialValue: "")
+            } else {
+                let (heading, body) = Self.splitHeading(initialContent)
+                _text = State(initialValue: body)
+                _hiddenHeadingLine = State(initialValue: heading)
+            }
+        }
         _stableNoteID = State(initialValue: noteID)
     }
 
@@ -276,6 +299,7 @@ struct MarkdownEditorView: View {
                 // the complete on-disk file verbatim. Always cancel the pending
                 // debounce first so the swap can't flush a half-converted state.
                 saveDebouncer.cancel()
+                guard !showsHeadingLineInBody else { return }
                 if raw {
                     let heading = hiddenHeadingLine
                     hiddenHeadingLine = ""
@@ -287,27 +311,46 @@ struct MarkdownEditorView: View {
                 }
             }
             .onChange(of: text) { _, newText in
-                outline?.update(body: newText, hiddenHeading: hiddenHeadingLine)
+                outline?.update(body: newText, hiddenHeading: showsHeadingLineInBody ? nil : hiddenHeadingLine)
                 let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
                 slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
-                let heading = hiddenHeadingLine
                 let noteIDSnapshot = stableNoteID
-                saveDebouncer.call { [onContentChanged] in
-                    let full = heading.isEmpty ? newText : heading + "\n\n" + newText
-                    onContentChanged(noteIDSnapshot, full)
+                if showsHeadingLineInBody {
+                    saveDebouncer.call { [onContentChanged] in
+                        onContentChanged(noteIDSnapshot, newText)
+                    }
+                } else {
+                    let heading = hiddenHeadingLine
+                    saveDebouncer.call { [onContentChanged] in
+                        let full = heading.isEmpty ? newText : heading + "\n\n" + newText
+                        onContentChanged(noteIDSnapshot, full)
+                    }
+                }
+            }
+            .onChange(of: noteTitle) { _, newTitle in
+                guard !showsHeadingLineInBody, !AppSettings.shared.editorRawSourceMode else { return }
+                saveDebouncer.cancel()
+                if let prefix = hiddenHeadingLine.components(separatedBy: " ").first, prefix.hasPrefix("#") {
+                    hiddenHeadingLine = "\(prefix) \(newTitle)"
+                } else {
+                    hiddenHeadingLine = "# \(newTitle)"
                 }
             }
             .onChange(of: pendingReload) { _, newContent in
                 guard let newContent else { return }
                 saveDebouncer.cancel()
-                if AppSettings.shared.editorRawSourceMode {
-                    // Raw mode shows the complete file — no heading split.
-                    hiddenHeadingLine = ""
+                if showsHeadingLineInBody {
                     text = newContent
                 } else {
-                    let (heading, body) = Self.splitHeading(newContent)
-                    hiddenHeadingLine = heading
-                    text = body
+                    if AppSettings.shared.editorRawSourceMode {
+                        // Raw mode shows the complete file — no heading split.
+                        hiddenHeadingLine = ""
+                        text = newContent
+                    } else {
+                        let (heading, body) = Self.splitHeading(newContent)
+                        hiddenHeadingLine = heading
+                        text = body
+                    }
                 }
                 pendingReload = nil
             }
@@ -326,7 +369,13 @@ struct MarkdownEditorView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
-            outline?.update(body: text, hiddenHeading: hiddenHeadingLine)
+            outline?.update(body: text, hiddenHeading: showsHeadingLineInBody ? nil : hiddenHeadingLine)
+            if focusTitleOnAppear, !didFocusTitle {
+                didFocusTitle = true
+                DispatchQueue.main.async {
+                    focusAndSelectTitle()
+                }
+            }
             // Warm the decode cache off-main so the first style pass (and
             // first scroll to an image) hits cache instead of decoding on the
             // main thread. Capped — a note can reference far more images than
@@ -381,12 +430,61 @@ struct MarkdownEditorView: View {
             // always holds the note that was active when this view was first inserted.
             let capturedID = stableNoteID
             saveDebouncer.cancel()
-            let full = hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
+            let full: String = if showsHeadingLineInBody {
+                text
+            } else {
+                hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
+            }
             onContentChanged(capturedID, full)
             slashHandler.dismiss()
             if let m = noteNavMonitor {
                 NSEvent.removeMonitor(m); noteNavMonitor = nil
             }
+        }
+    }
+
+    private func focusAndSelectTitle() {
+        let window = NSApp.keyWindow
+        guard let tv = (window?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: window?.contentView)
+        else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                focusAndSelectTitleNow()
+            }
+            return
+        }
+        focusAndSelectTitleIn(tv: tv, window: window)
+    }
+
+    private func focusAndSelectTitleNow() {
+        let window = NSApp.keyWindow
+        guard let tv = (window?.firstResponder as? NSTextView)
+            ?? findEditorTextView(in: window?.contentView)
+        else { return }
+        focusAndSelectTitleIn(tv: tv, window: window)
+    }
+
+    private func focusAndSelectTitleIn(tv: NSTextView, window: NSWindow?) {
+        let targetWindow = tv.window ?? window ?? NSApp.keyWindow
+        targetWindow?.makeFirstResponder(tv)
+        let s = tv.string as NSString
+        let firstLine = (s as String).split(separator: "\n", maxSplits: 1).first.map(String.init) ?? (s as String)
+        if let match = firstLine.range(of: #"^#+\s+"#, options: .regularExpression) {
+            let prefixLength = firstLine[match].utf16.count
+            let titleLength = (firstLine as NSString).length - prefixLength
+            if titleLength > 0 {
+                let range = NSRange(location: prefixLength, length: titleLength)
+                tv.setSelectedRange(range)
+                tv.scrollRangeToVisible(range)
+            } else {
+                let range = NSRange(location: prefixLength, length: 0)
+                tv.setSelectedRange(range)
+                tv.scrollRangeToVisible(range)
+            }
+        } else {
+            let range = NSRange(location: 0, length: (firstLine as NSString).length)
+            tv.setSelectedRange(range)
+            tv.scrollRangeToVisible(range)
         }
     }
 

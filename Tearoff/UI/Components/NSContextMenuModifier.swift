@@ -44,6 +44,7 @@ private final class MenuDispatch: NSObject {
 /// Attaches an NSMenu as the right-click context menu for any SwiftUI view.
 /// Unlike SwiftUI's `.contextMenu`, NSMenu items reliably show SF Symbol icons on macOS.
 struct NSContextMenuModifier: ViewModifier {
+    var isEnabled: Bool = true
     let menuBuilder: () -> NSMenu
 
     /// True while one of our NSContextMenuModifier menus is tracking.
@@ -77,22 +78,55 @@ struct NSContextMenuModifier: ViewModifier {
         // front. (As an `.overlay` the catcher DID receive right-clicks, but
         // it sat topmost and shadowed every deeper menu in its frame.)
         content.background {
-            NSContextMenuCatcherView(menuBuilder: menuBuilder)
+            NSContextMenuCatcherView(isEnabled: isEnabled, menuBuilder: menuBuilder)
         }
     }
 }
 
 extension View {
     /// Attach an NSMenu as the right-click context menu (icons render reliably).
-    func nsContextMenu(_ menuBuilder: @escaping () -> NSMenu) -> some View {
-        modifier(NSContextMenuModifier(menuBuilder: menuBuilder))
+    func nsContextMenu(isEnabled: Bool = true, _ menuBuilder: @escaping () -> NSMenu) -> some View {
+        modifier(NSContextMenuModifier(isEnabled: isEnabled, menuBuilder: menuBuilder))
+    }
+
+    /// Prevents right-click context menu routing from penetrating behind this view.
+    /// Underlying catchers occluded by this view are ignored during right-click dispatch.
+    func nsContextMenuBarrier() -> some View {
+        modifier(NSContextMenuBarrierModifier())
+    }
+}
+
+// MARK: - Context Menu Barrier
+
+/// Transparent NSView marking an occlusion boundary for right-click context menu routing.
+private final class ContextMenuBarrier: NSView {
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+private struct NSContextMenuBarrierView: NSViewRepresentable {
+    func makeNSView(context _: Context) -> ContextMenuBarrier {
+        let barrier = ContextMenuBarrier()
+        ContextMenuRouter.registerBarrier(barrier)
+        return barrier
+    }
+
+    func updateNSView(_: ContextMenuBarrier, context _: Context) {}
+}
+
+struct NSContextMenuBarrierModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background {
+            NSContextMenuBarrierView()
+        }
     }
 }
 
 // MARK: - Right-click routing
 
 /// Routes right-clicks that land on pure SwiftUI content to the deepest
-/// catcher under the pointer.
+/// unoccluded catcher under the pointer.
 ///
 /// SwiftUI's `NSHostingView` swallows the hit-test for representables mounted
 /// behind content (`.background`): the catcher's `hitTest` may be consulted,
@@ -105,15 +139,24 @@ extension View {
 /// A process-wide local monitor intercepts right-clicks before dispatch:
 /// - clicks that hit-test to an embedded platform view dispatch normally, so
 ///   the file lists' own menus keep winning over any enclosing catcher;
-/// - otherwise the deepest catcher containing the point pops its menu — a
-///   path segment beats the bar's fallback menu, a card beats the board-wide
-///   new-items menu.
+/// - otherwise active barriers check for visual occlusion, and the topmost
+///   unoccluded catcher containing the point pops its menu.
 private enum ContextMenuRouter {
     private static let catchers = NSHashTable<ContextMenuCatcher>.weakObjects()
+    private static let barriers = NSHashTable<ContextMenuBarrier>.weakObjects()
     private static var monitor: Any?
 
     static func register(_ catcher: ContextMenuCatcher) {
         catchers.add(catcher)
+        ensureMonitor()
+    }
+
+    static func registerBarrier(_ barrier: ContextMenuBarrier) {
+        barriers.add(barrier)
+        ensureMonitor()
+    }
+
+    private static func ensureMonitor() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { event in
             route(event)
@@ -127,10 +170,33 @@ private enum ContextMenuRouter {
         // clicks that would land on pure SwiftUI content are rerouted.
         guard let hit = contentView.hitTest(location), isSwiftUIRegion(hit) else { return event }
 
-        let candidates = catchers.allObjects.filter {
+        // Find active barriers in this window containing the click location
+        let activeBarriers = barriers.allObjects.filter {
             $0.window === window && $0.convert($0.bounds, to: nil).contains(location)
         }
-        guard let best = candidates.min(by: Self.isDeeper) else { return event }
+
+        // Find candidate catchers in this window containing the click location
+        var candidates = catchers.allObjects.filter {
+            $0.isEnabled && $0.window === window && $0.convert($0.bounds, to: nil).contains(location)
+        }
+
+        // Discard any candidate catcher positioned behind any active barrier
+        if !activeBarriers.isEmpty {
+            candidates.removeAll { catcher in
+                activeBarriers.contains { barrier in
+                    isViewAbove(barrier, than: catcher)
+                }
+            }
+        }
+
+        guard let best = candidates.min(by: Self.isDeeper) else {
+            // Click landed on an active barrier covering this region, but no unoccluded
+            // catcher was registered here — consume the event so background views never receive it.
+            if !activeBarriers.isEmpty {
+                return nil
+            }
+            return event
+        }
         best.popMenu(for: event)
         return nil
     }
@@ -153,9 +219,69 @@ private enum ContextMenuRouter {
         return false
     }
 
-    /// Deeper catchers are more specific (segment > bar, card > board); at
-    /// equal depth the smaller frame wins.
+    /// Returns true if viewA is rendered in front of viewB in the same window.
+    private static func isViewAbove(_ viewA: NSView, than viewB: NSView) -> Bool {
+        guard viewA !== viewB else { return false }
+        guard viewA.window === viewB.window else { return false }
+
+        // If one is an ancestor of the other: a descendant view is on top of its ancestor.
+        var p: NSView? = viewA.superview
+        while let cur = p {
+            if cur === viewB {
+                return true
+            }
+            p = cur.superview
+        }
+        p = viewB.superview
+        while let cur = p {
+            if cur === viewA {
+                return false
+            }
+            p = cur.superview
+        }
+
+        // Trace superview paths to root
+        var pathA: [NSView] = []
+        var curA: NSView? = viewA
+        while let c = curA {
+            pathA.append(c)
+            curA = c.superview
+        }
+
+        var pathB: [NSView] = []
+        var curB: NSView? = viewB
+        while let c = curB {
+            pathB.append(c)
+            curB = c.superview
+        }
+
+        var i = pathA.count - 1
+        var j = pathB.count - 1
+        while i >= 0, j >= 0, pathA[i] === pathB[j] {
+            i -= 1
+            j -= 1
+        }
+        guard i >= 0, j >= 0 else { return false }
+        let lca = pathA[i + 1]
+        let childA = pathA[i]
+        let childB = pathB[j]
+
+        guard let idxA = lca.subviews.firstIndex(where: { $0 === childA }),
+              let idxB = lca.subviews.firstIndex(where: { $0 === childB })
+        else {
+            return false
+        }
+        return idxA > idxB
+    }
+
+    /// Views rendered in front take priority; at equal hierarchy, deeper/smaller wins.
     private static func isDeeper(_ lhs: ContextMenuCatcher, _ rhs: ContextMenuCatcher) -> Bool {
+        if isViewAbove(lhs, than: rhs) {
+            return true
+        }
+        if isViewAbove(rhs, than: lhs) {
+            return false
+        }
         if lhs.depth != rhs.depth {
             return lhs.depth > rhs.depth
         }
@@ -166,15 +292,19 @@ private enum ContextMenuRouter {
 // MARK: - NSViewRepresentable background catcher
 
 private struct NSContextMenuCatcherView: NSViewRepresentable {
+    var isEnabled: Bool = true
     let menuBuilder: () -> NSMenu
 
     func makeNSView(context _: Context) -> ContextMenuCatcher {
         let catcher = ContextMenuCatcher()
+        catcher.isEnabled = isEnabled
+        catcher.menuBuilder = menuBuilder
         ContextMenuRouter.register(catcher)
         return catcher
     }
 
     func updateNSView(_ nsView: ContextMenuCatcher, context _: Context) {
+        nsView.isEnabled = isEnabled
         nsView.menuBuilder = menuBuilder
     }
 }
@@ -183,6 +313,7 @@ private struct NSContextMenuCatcherView: NSViewRepresentable {
 /// participates in hit-testing (right-clicks reach it through
 /// ContextMenuRouter, everything else flows to the SwiftUI content in front).
 private final class ContextMenuCatcher: NSView {
+    var isEnabled: Bool = true
     var menuBuilder: (() -> NSMenu)?
 
     /// Superview-chain length, for the router's deepest-wins comparison.
@@ -201,11 +332,12 @@ private final class ContextMenuCatcher: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         popMenu(for: event)
     }
 
     func popMenu(for event: NSEvent) {
-        guard let menu = menuBuilder?() else { return }
+        guard isEnabled, let menu = menuBuilder?() else { return }
         NSContextMenuModifier.menuGeneration += 1
         let generation = NSContextMenuModifier.menuGeneration
         NSContextMenuModifier.isShowingMenu = true

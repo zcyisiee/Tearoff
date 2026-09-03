@@ -1,21 +1,13 @@
 import Foundation
 
-/// Manages the inline note rename / create-and-name flow.
-/// Shared by HomeFolderView and NoteListView. Caller is responsible for
-/// setting @FocusState after calling beginCreate / beginRename.
+/// Manages the inline note rename flow for board cards.
+/// Caller is responsible for setting @FocusState after calling beginRename.
 @Observable
 final class NoteRenameCoordinator {
     var renamingNoteID: UUID?
     var text: String = ""
-    private(set) var newlyCreatedNoteID: UUID?
 
     // MARK: - Begin
-
-    func beginCreate(note: Note) {
-        newlyCreatedNoteID = note.id
-        renamingNoteID = note.id
-        text = ""
-    }
 
     func beginRename(_ note: Note) {
         renamingNoteID = note.id
@@ -39,24 +31,16 @@ final class NoteRenameCoordinator {
         if !trimmed.isEmpty, trimmed != note.title {
             noteStore.renameNote(note, to: trimmed)
         }
-        let isNew = newlyCreatedNoteID == note.id
         clear()
-        if isNew, let opened = noteStore.notes.first(where: { $0.id == note.id }) {
-            noteStore.openNote(opened)
-        }
     }
 
-    func cancel(noteStore: NoteStore) {
-        if let id = newlyCreatedNoteID, let note = noteStore.notes.first(where: { $0.id == id }) {
-            noteStore.deleteNote(note)
-        }
+    func cancel(noteStore _: NoteStore) {
         clear()
     }
 
     func commitOrCancel(note: Note, noteStore: NoteStore) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isNew = newlyCreatedNoteID == note.id
-        if (trimmed.isEmpty && !isNew) || isConflicting(in: noteStore) {
+        if trimmed.isEmpty || isConflicting(in: noteStore) {
             cancel(noteStore: noteStore)
         } else {
             commit(note: note, noteStore: noteStore)
@@ -68,6 +52,5 @@ final class NoteRenameCoordinator {
     private func clear() {
         renamingNoteID = nil
         text = ""
-        newlyCreatedNoteID = nil
     }
 }

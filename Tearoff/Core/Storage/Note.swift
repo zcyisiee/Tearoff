@@ -149,12 +149,117 @@ extension Note {
     }
 }
 
+// MARK: - Note Text Conversion Cache
+
+final class NoteTextCache {
+    static let shared = NoteTextCache()
+
+    private let plainTextCache = NSCache<NSString, NSString>()
+    private let rtfDataCache = NSCache<NSString, NSData>()
+
+    init() {
+        plainTextCache.countLimit = 100
+        rtfDataCache.countLimit = 50
+    }
+
+    private func cacheKey(for text: String) -> NSString {
+        "\(text.utf8.count)_\(text.hashValue)" as NSString
+    }
+
+    func plainText(for markdown: String) -> String? {
+        plainTextCache.object(forKey: cacheKey(for: markdown)) as String?
+    }
+
+    func setPlainText(_ plainText: String, for markdown: String) {
+        plainTextCache.setObject(plainText as NSString, forKey: cacheKey(for: markdown))
+    }
+
+    func rtfData(for markdown: String) -> Data? {
+        rtfDataCache.object(forKey: cacheKey(for: markdown)) as Data?
+    }
+
+    func setRtfData(_ data: Data, for markdown: String) {
+        rtfDataCache.setObject(data as NSData, forKey: cacheKey(for: markdown))
+    }
+
+    func clear() {
+        plainTextCache.removeAllObjects()
+        rtfDataCache.removeAllObjects()
+    }
+}
+
 // MARK: - Static text conversion helpers (used by Coordinator for selection copy)
 
 extension Note {
+    private struct TextRegexRule {
+        let regex: NSRegularExpression
+        let template: String
+    }
+
+    private static let plainTextRules: [TextRegexRule] = [
+        ("^```[^\\n]*$", ""),
+        ("(?m)^#{1,6}\\s+", ""),
+        ("\\*{3}([^*]+)\\*{3}", "$1"),
+        ("_{3}([^_]+)_{3}", "$1"),
+        ("\\*{2}([^*]+)\\*{2}", "$1"),
+        ("_{2}([^_]+)_{2}", "$1"),
+        ("\\*([^*]+)\\*", "$1"),
+        ("(?<=\\s|^)_([^_]+)_(?=\\s|$)", "$1"),
+        ("~~([^~]+)~~", "$1"),
+        ("\\[([^\\]]+)\\]\\([^)]+\\)", "$1"),
+        ("!\\[([^\\]]*)]\\([^)]+\\)", "$1"),
+        ("`([^`]+)`", "$1"),
+        ("(?m)^>\\s?", ""),
+        ("(?m)^[-*_]{3,}\\s*$", ""),
+        ("(?m)^\\s*[-*+]\\s+\\[[ xX]\\]\\s", ""),
+        ("(?m)^\\s*[-*+]\\s+", ""),
+        ("(?m)^\\s*\\d+\\.\\s+", ""),
+        ("\\n{3,}", "\n\n"),
+    ].compactMap { pattern, template in
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        return TextRegexRule(regex: regex, template: template)
+    }
+
+    private static let inlineHTMLRules: [TextRegexRule] = [
+        ("\\*{3}(.+?)\\*{3}", "<strong><em>$1</em></strong>"),
+        ("_{3}(.+?)_{3}", "<strong><em>$1</em></strong>"),
+        ("\\*{2}(.+?)\\*{2}", "<strong>$1</strong>"),
+        ("_{2}(.+?)_{2}", "<strong>$1</strong>"),
+        ("\\*([^*\\n]+)\\*", "<em>$1</em>"),
+        ("~~(.+?)~~", "<del>$1</del>"),
+        ("`([^`]+)`", "<code>$1</code>"),
+        ("\\[([^\\]]+)\\]\\(([^)]+)\\)", "<a href=\"$2\">$1</a>"),
+    ].compactMap { pattern, template in
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        return TextRegexRule(regex: regex, template: template)
+    }
+
+    private static let taskListRegex = try? NSRegularExpression(pattern: "^\\s*[-*+]\\s+\\[[xX ]\\]")
+    private static let unorderedListRegex = try? NSRegularExpression(pattern: "^\\s*[-*+]\\s")
+    private static let orderedListRegex = try? NSRegularExpression(pattern: "^\\s*\\d+\\.\\s")
+    private static let hrRegex = try? NSRegularExpression(pattern: "^[-*_]{3,}\\s*$")
+    private static let taskStripRegex = try? NSRegularExpression(pattern: "^\\s*[-*+]\\s+\\[[xX ]?\\]\\s*")
+    private static let unorderedStripRegex = try? NSRegularExpression(pattern: "^\\s*[-*+]\\s+")
+    private static let orderedStripRegex = try? NSRegularExpression(pattern: "^\\s*\\d+\\.\\s+")
+
+    private static func hasRegexMatch(_ regex: NSRegularExpression?, in text: String) -> Bool {
+        guard let regex else { return false }
+        let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+        return regex.firstMatch(in: text, options: [], range: range) != nil
+    }
+
+    private static func replaceRegex(_ regex: NSRegularExpression?, in text: String, with template: String) -> String {
+        guard let regex else { return text }
+        let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: template)
+    }
+
     /// Convert markdown to RTF data using the HTML → NSAttributedString pipeline.
     /// Must be called on the main thread (NSAttributedString HTML parsing uses WebKit).
     static func rtfData(from markdown: String) -> Data? {
+        if let cached = NoteTextCache.shared.rtfData(for: markdown) {
+            return cached
+        }
         let html = markdownToHTML(markdown)
         guard let htmlData = html.data(using: .utf8),
               let attrStr = try? NSAttributedString(
@@ -166,34 +271,29 @@ extension Note {
                   documentAttributes: nil,
               )
         else { return nil }
-        return attrStr.rtf(
+        let data = attrStr.rtf(
             from: NSRange(location: 0, length: attrStr.length),
             documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf],
         )
+        if let data {
+            NoteTextCache.shared.setRtfData(data, for: markdown)
+        }
+        return data
     }
 
     /// Strip all Markdown syntax and return plain text.
     static func plainText(from markdown: String) -> String {
-        markdown
-            .replacingOccurrences(of: "^```[^\\n]*$", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^#{1,6}\\s+", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\*{3}([^*]+)\\*{3}", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "_{3}([^_]+)_{3}", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "\\*{2}([^*]+)\\*{2}", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "_{2}([^_]+)_{2}", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "\\*([^*]+)\\*", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "(?<=\\s|^)_([^_]+)_(?=\\s|$)", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "~~([^~]+)~~", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]+\\)", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "!\\[([^\\]]*)]\\([^)]+\\)", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^>\\s?", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^[-*_]{3,}\\s*$", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^\\s*[-*+]\\s+\\[[ xX]\\]\\s", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^\\s*[-*+]\\s+", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "(?m)^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = NoteTextCache.shared.plainText(for: markdown) {
+            return cached
+        }
+        var text = markdown
+        for rule in plainTextRules {
+            let range = NSRange(text.startIndex ..< text.endIndex, in: text)
+            text = rule.regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: rule.template)
+        }
+        let result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        NoteTextCache.shared.setPlainText(result, for: markdown)
+        return result
     }
 
     // MARK: - HTML conversion for RTF pipeline
@@ -237,8 +337,8 @@ extension Note {
 
             // Close open list unless this line continues it or is blank
             if !openList.isEmpty, !line.isEmpty,
-               line.range(of: "^\\s*[-*+]\\s", options: .regularExpression) == nil,
-               line.range(of: "^\\s*\\d+\\.\\s", options: .regularExpression) == nil
+               !hasRegexMatch(unorderedListRegex, in: line),
+               !hasRegexMatch(orderedListRegex, in: line)
             {
                 html += "</\(openList)>"; openList = ""
             }
@@ -253,26 +353,26 @@ extension Note {
                 html += "<h4>" + inlineHTML(String(line.dropFirst(5))) + "</h4>"
             } else if line.hasPrefix("> ") {
                 html += "<blockquote><p>" + inlineHTML(String(line.dropFirst(2))) + "</p></blockquote>"
-            } else if line.range(of: "^\\s*[-*+]\\s+\\[[xX ]\\]", options: .regularExpression) != nil {
+            } else if hasRegexMatch(taskListRegex, in: line) {
                 let checked = line.contains("[x]") || line.contains("[X]")
-                let content = line.replacingOccurrences(of: "^\\s*[-*+]\\s+\\[[xX ]?\\]\\s*", with: "", options: .regularExpression)
+                let content = replaceRegex(taskStripRegex, in: line, with: "")
                 if openList != "ul" {
                     html += "<ul>"; openList = "ul"
                 }
                 html += "<li>" + (checked ? "&#x2611; " : "&#x2610; ") + inlineHTML(content) + "</li>"
-            } else if line.range(of: "^\\s*[-*+]\\s", options: .regularExpression) != nil {
-                let content = line.replacingOccurrences(of: "^\\s*[-*+]\\s+", with: "", options: .regularExpression)
+            } else if hasRegexMatch(unorderedListRegex, in: line) {
+                let content = replaceRegex(unorderedStripRegex, in: line, with: "")
                 if openList != "ul" {
                     html += "<ul>"; openList = "ul"
                 }
                 html += "<li>" + inlineHTML(content) + "</li>"
-            } else if line.range(of: "^\\s*\\d+\\.\\s", options: .regularExpression) != nil {
-                let content = line.replacingOccurrences(of: "^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
+            } else if hasRegexMatch(orderedListRegex, in: line) {
+                let content = replaceRegex(orderedStripRegex, in: line, with: "")
                 if openList != "ol" {
                     html += "<ol>"; openList = "ol"
                 }
                 html += "<li>" + inlineHTML(content) + "</li>"
-            } else if line.range(of: "^[-*_]{3,}\\s*$", options: .regularExpression) != nil {
+            } else if hasRegexMatch(hrRegex, in: line) {
                 html += "<hr>"
             } else if line.isEmpty {
                 html += "<p>&nbsp;</p>"
@@ -300,14 +400,10 @@ extension Note {
 
     private static func inlineHTML(_ text: String) -> String {
         var s = escapeHTML(text)
-        s = s.replacingOccurrences(of: "\\*{3}(.+?)\\*{3}", with: "<strong><em>$1</em></strong>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "_{3}(.+?)_{3}", with: "<strong><em>$1</em></strong>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "\\*{2}(.+?)\\*{2}", with: "<strong>$1</strong>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "_{2}(.+?)_{2}", with: "<strong>$1</strong>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "\\*([^*\\n]+)\\*", with: "<em>$1</em>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "~~(.+?)~~", with: "<del>$1</del>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "`([^`]+)`", with: "<code>$1</code>", options: .regularExpression)
-        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\(([^)]+)\\)", with: "<a href=\"$2\">$1</a>", options: .regularExpression)
+        for rule in inlineHTMLRules {
+            let range = NSRange(s.startIndex ..< s.endIndex, in: s)
+            s = rule.regex.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: rule.template)
+        }
         return s
     }
 }

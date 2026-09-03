@@ -83,7 +83,7 @@ struct FinderPathBar: View {
 
     /// One rendered path component (the volume root, or a directory on the way
     /// down to the current location).
-    private struct PathSegment: Identifiable, Hashable {
+    fileprivate struct PathSegment: Identifiable, Hashable {
         let label: String
         let url: URL
         let isCurrent: Bool
@@ -101,69 +101,10 @@ struct FinderPathBar: View {
 
     /// The ordered path from the volume root to the current directory, each
     /// component labelled with its display name. Empty when there's no URL.
+    /// Uses PathSegmentCache to avoid repeating filesystem volume/resource calls on every render.
     private var resolvedSegments: [PathSegment] {
         guard let current = browser.currentURL?.standardizedFileURL else { return [] }
-
-        // Volume root hosting the current path — "/" on the boot volume (the
-        // API reports it as "/", not the APFS data volume), or "/Volumes/<Name>"
-        // for an external drive. `volumeName` gives the Finder display name.
-        if let values = try? current.resourceValues(forKeys: [.volumeURLKey, .volumeNameKey]),
-           let volumeURL = values.volume?.standardizedFileURL
-        {
-            let volumeComponents = volumeURL.pathComponents
-            let currentComponents = current.pathComponents
-            if currentComponents.count >= volumeComponents.count,
-               Array(currentComponents.prefix(volumeComponents.count)) == volumeComponents
-            {
-                let relative = Array(currentComponents[volumeComponents.count...])
-                let volumeName = values.volumeName ?? volumeURL.lastPathComponent
-
-                var segments: [PathSegment] = []
-                var running = volumeURL
-                segments.append(
-                    PathSegment(
-                        label: volumeName,
-                        url: running,
-                        isCurrent: relative.isEmpty,
-                    ),
-                )
-                for (index, name) in relative.enumerated() {
-                    running = running.appendingPathComponent(name)
-                    segments.append(
-                        PathSegment(
-                            label: name,
-                            url: running,
-                            isCurrent: index == relative.count - 1,
-                        ),
-                    )
-                }
-                return segments
-            }
-        }
-
-        // Fallback — live on "/" and walk the components directly.
-        let components = Array(current.pathComponents[1...])
-        if components.isEmpty {
-            return [PathSegment(label: volumeRootName, url: URL(fileURLWithPath: "/"), isCurrent: true)]
-        }
-
-        var segments: [PathSegment] = []
-        var running = URL(fileURLWithPath: "/", isDirectory: true)
-        segments.append(PathSegment(label: volumeRootName, url: running, isCurrent: false))
-        for (index, name) in components.enumerated() {
-            running = running.appendingPathComponent(name)
-            segments.append(
-                PathSegment(label: name, url: running, isCurrent: index == components.count - 1),
-            )
-        }
-        return segments
-    }
-
-    /// Display name for the boot volume ("/") when `volumeURL` can't be read.
-    private var volumeRootName: String {
-        let root = URL(fileURLWithPath: "/", isDirectory: true)
-        let name = (try? root.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
-        return name ?? root.lastPathComponent
+        return PathSegmentCache.segments(for: current)
     }
 
     // MARK: - Collapse
@@ -339,10 +280,11 @@ struct FinderPathBar: View {
         }
 
         do {
+            let window = NSApp.keyWindow ?? AppDelegate.shared?.panelController?.window
             if copy {
-                try browser.copy(urls, into: target)
+                try browser.copy(urls, into: target, window: window)
             } else {
-                try browser.move(urls, into: target)
+                try browser.move(urls, into: target, window: window)
             }
         } catch {
             onError?(error)
@@ -355,5 +297,87 @@ struct FinderPathBar: View {
               let right = try? rhs.resourceValues(forKeys: keys).volumeIdentifier as? NSObject
         else { return true }
         return left == right
+    }
+}
+
+// MARK: - Path Segment Cache
+
+private enum PathSegmentCache {
+    private static var cache: [URL: [FinderPathBar.PathSegment]] = [:]
+    private static let lock = NSLock()
+    private static let bootVolumeName: String = {
+        let root = URL(fileURLWithPath: "/", isDirectory: true)
+        return (try? root.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? root.lastPathComponent
+    }()
+
+    static func segments(for current: URL) -> [FinderPathBar.PathSegment] {
+        lock.lock()
+        if let cached = cache[current] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let computed = computeSegments(for: current)
+        lock.lock()
+        if cache.count > 256 {
+            cache.removeAll(keepingCapacity: true)
+        }
+        cache[current] = computed
+        lock.unlock()
+        return computed
+    }
+
+    private static func computeSegments(for current: URL) -> [FinderPathBar.PathSegment] {
+        if let values = try? current.resourceValues(forKeys: [.volumeURLKey, .volumeNameKey]),
+           let volumeURL = values.volume?.standardizedFileURL
+        {
+            let volumeComponents = volumeURL.pathComponents
+            let currentComponents = current.pathComponents
+            if currentComponents.count >= volumeComponents.count,
+               Array(currentComponents.prefix(volumeComponents.count)) == volumeComponents
+            {
+                let relative = Array(currentComponents[volumeComponents.count...])
+                let volumeName = values.volumeName ?? volumeURL.lastPathComponent
+
+                var segments: [FinderPathBar.PathSegment] = []
+                var running = volumeURL
+                segments.append(
+                    FinderPathBar.PathSegment(
+                        label: volumeName,
+                        url: running,
+                        isCurrent: relative.isEmpty,
+                    ),
+                )
+                for (index, name) in relative.enumerated() {
+                    running = running.appendingPathComponent(name)
+                    segments.append(
+                        FinderPathBar.PathSegment(
+                            label: name,
+                            url: running,
+                            isCurrent: index == relative.count - 1,
+                        ),
+                    )
+                }
+                return segments
+            }
+        }
+
+        // Fallback — live on "/" and walk the components directly.
+        let components = Array(current.pathComponents[1...])
+        if components.isEmpty {
+            return [FinderPathBar.PathSegment(label: bootVolumeName, url: URL(fileURLWithPath: "/"), isCurrent: true)]
+        }
+
+        var segments: [FinderPathBar.PathSegment] = []
+        var running = URL(fileURLWithPath: "/", isDirectory: true)
+        segments.append(FinderPathBar.PathSegment(label: bootVolumeName, url: running, isCurrent: false))
+        for (index, name) in components.enumerated() {
+            running = running.appendingPathComponent(name)
+            segments.append(
+                FinderPathBar.PathSegment(label: name, url: running, isCurrent: index == components.count - 1),
+            )
+        }
+        return segments
     }
 }

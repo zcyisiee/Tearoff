@@ -62,6 +62,7 @@ struct DeleteFolderSheet: View {
                 .shadow(color: DesignToken.ink.opacity(0.18), radius: 12, y: 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .nsContextMenuBarrier()
         .onExitCommand(perform: onCancel)
     }
 

@@ -46,11 +46,21 @@ final class FinderBrowserRegistry {
     }
 
     /// Panel shown: re-enumerate once and re-arm watchers for registered (mounted) cards.
+    /// Staggers subsequent cards slightly to avoid concurrent enumeration and UI reload storms.
     func resumeAllWatching() {
+        var delay: TimeInterval = 0
         for box in boxes.values {
-            guard let browser = box.browser else { continue }
-            browser.reload()
-            browser.startWatching()
+            guard let browser = box.browser, browser.currentURL != nil else { continue }
+            if delay == 0 {
+                browser.reload()
+                browser.startWatching()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak browser] in
+                    browser?.reload()
+                    browser?.startWatching()
+                }
+            }
+            delay += 0.05
         }
     }
 

@@ -96,7 +96,7 @@ enum FileStorage {
         try FileManager.default.removeItem(at: url)
     }
 
-    static func discoverFolders() throws -> [String] {
+    static func discoverFolders(rootURL: URL = rootURL) throws -> [String] {
         let fm = FileManager.default
         try ensureRootExists()
         guard let enumerator = fm.enumerator(
@@ -137,14 +137,18 @@ enum FileStorage {
     }
 
     /// Returns the filesystem modification date of a note's file, or nil if the file doesn't exist.
-    static func modificationDate(for note: Note) -> Date? {
-        let url = rootURL.appendingPathComponent(diskRelativePath(for: note))
+    static func modificationDate(for note: Note, rootURL: URL = rootURL) -> Date? {
+        let actualFilename = note.savedFilename ?? note.filename
+        let relativePath = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
+        let url = rootURL.appendingPathComponent(relativePath)
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     /// Reloads a note's content + tags from disk after an external change is detected.
-    static func reloadContent(for note: Note) -> (content: String, modifiedAt: Date, savedAt: Date, tags: [TagColor])? {
-        let url = rootURL.appendingPathComponent(diskRelativePath(for: note))
+    static func reloadContent(for note: Note, rootURL: URL = rootURL) -> (content: String, modifiedAt: Date, savedAt: Date, tags: [TagColor])? {
+        let actualFilename = note.savedFilename ?? note.filename
+        let relativePath = note.folder.isEmpty ? actualFilename : "\(note.folder)/\(actualFilename)"
+        let url = rootURL.appendingPathComponent(relativePath)
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let diskDate = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date) ?? Date()
 
@@ -152,7 +156,9 @@ enum FileStorage {
         let (metadata, body) = parseFrontMatter(text)
         let content = metadata.isEmpty ? text : body
 
-        let tags: [TagColor] = if let entry = SidecarStore.shared.noteEntry(for: note.id) {
+        let tags: [TagColor] = if !note.tags.isEmpty {
+            note.tags
+        } else if let entry = SidecarStore.shared.noteEntry(for: note.id) {
             entry.tags.compactMap { TagColor(rawValue: $0) }
         } else {
             parseTagList(metadata["tags"] ?? "")
@@ -394,7 +400,7 @@ enum FileStorage {
 
     static func sanitizeForFilename(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Untitled" }
+        guard !trimmed.isEmpty else { return L10n.shared["common.untitled"] }
 
         let illegal = CharacterSet(charactersIn: "/\\:*?\"<>|\0")
         let cleaned = trimmed.unicodeScalars
@@ -412,19 +418,21 @@ enum FileStorage {
         }
         result = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 
-        return result.isEmpty ? "Untitled" : result
+        return result.isEmpty ? L10n.shared["common.untitled"] : result
     }
 
     // MARK: - Note I/O
 
-    static func loadAllNotes() throws -> [Note] {
-        try ensureRootExists()
-        var notes = try loadNotes(in: rootURL, folder: "")
-        for folderName in try discoverFolders() {
+    static func loadAllNotes(rootURL: URL = rootURL, sidecar: SidecarStore.Payload? = nil) throws -> [Note] {
+        let fm = FileManager.default
+        try fm.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let notesByPath = sidecar?.makeNotesByPath()
+        var notes = try loadNotes(in: rootURL, folder: "", rootURL: rootURL, sidecar: sidecar, notesByPath: notesByPath)
+        for folderName in try discoverFolders(rootURL: rootURL) {
             let folderURL = rootURL.appendingPathComponent(folderName, isDirectory: true)
-            notes += try loadNotes(in: folderURL, folder: folderName)
+            notes += try loadNotes(in: folderURL, folder: folderName, rootURL: rootURL, sidecar: sidecar, notesByPath: notesByPath)
         }
-        let resolved = try resolveDuplicateFilenames(notes)
+        let resolved = try resolveDuplicateFilenames(notes, rootURL: rootURL)
         let count = resolved.count
         Log.storage.info("[FileStorage] loaded \(count) notes from disk")
         return resolved
@@ -435,7 +443,7 @@ enum FileStorage {
     /// Also renames the co-located asset directory and rewrites image paths in the body.
     /// Returns the new filename and, if image paths were rewritten, the updated content.
     @discardableResult
-    static func writeNote(_ note: Note) throws -> (filename: String, updatedContent: String?, savedAt: Date) {
+    static func writeNote(_ note: Note, deferSidecarSave: Bool = false) throws -> (filename: String, updatedContent: String?, savedAt: Date) {
         try ensureRootExists()
         if !note.folder.isEmpty {
             try ensureFolderExists(note.folder)
@@ -453,7 +461,7 @@ enum FileStorage {
             let currentRelative = note.folder.isEmpty ? savedFilename : "\(note.folder)/\(savedFilename)"
             let currentURL = rootURL.appendingPathComponent(currentRelative)
             try Data(note.content.utf8).write(to: currentURL, options: .atomic)
-            upsertSidecarEntry(for: note, filename: savedFilename)
+            upsertSidecarEntry(for: note, filename: savedFilename, deferSidecarSave: deferSidecarSave)
             return (filename: savedFilename, updatedContent: nil, savedAt: modificationDate(for: note) ?? Date())
         }
 
@@ -516,14 +524,14 @@ enum FileStorage {
         if updatedContent != nil {
             noteForSidecar.content = bodyToWrite
         }
-        upsertSidecarEntry(for: noteForSidecar, filename: newFilename)
+        upsertSidecarEntry(for: noteForSidecar, filename: newFilename, deferSidecarSave: deferSidecarSave)
 
         let savedAt = modificationDate(for: noteForSidecar) ?? Date()
         return (filename: newFilename, updatedContent: updatedContent, savedAt: savedAt)
     }
 
     /// Update (or insert) the sidecar entry for a note after writing its file.
-    private static func upsertSidecarEntry(for note: Note, filename: String) {
+    private static func upsertSidecarEntry(for note: Note, filename: String, deferSidecarSave: Bool = false) {
         let relativePath = note.folder.isEmpty ? filename : "\(note.folder)/\(filename)"
         let savedAt = (try? FileManager.default.attributesOfItem(
             atPath: rootURL.appendingPathComponent(relativePath).path,
@@ -542,7 +550,9 @@ enum FileStorage {
             ),
             for: note.id,
         )
-        try? SidecarStore.shared.save()
+        if !deferSidecarSave {
+            try? SidecarStore.shared.save()
+        }
     }
 
     static func deleteNote(_ note: Note) throws {
@@ -751,16 +761,18 @@ enum FileStorage {
     }
 
     /// Load individually trashed notes from `.trash/` (top-level `.md` files only).
-    static func loadTrashedNotes() throws -> [Note] {
-        try ensureTrashExists()
+    static func loadTrashedNotes(rootURL: URL = rootURL, sidecar: SidecarStore.Payload? = nil) throws -> [Note] {
+        let trashDir = rootURL.appendingPathComponent(".trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
         let contents = try FileManager.default.contentsOfDirectory(
-            at: trashURL,
+            at: trashDir,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles],
         )
+        let trashByFilename = sidecar?.makeTrashByFilename()
         let notes = contents.compactMap { url -> Note? in
             guard url.pathExtension == "md", !url.hasDirectoryPath else { return nil }
-            return readNote(at: url, folder: "")
+            return readNote(at: url, folder: "", rootURL: rootURL, sidecar: sidecar, trashByFilename: trashByFilename)
         }
         let count = notes.count
         Log.storage.debug("[FileStorage] loaded \(count) trashed notes")
@@ -880,15 +892,18 @@ enum FileStorage {
     }
 
     /// Load trashed folders from `.trash/` (directories with `.folder.md` metadata).
-    static func loadTrashedFolders() throws -> [TrashedFolder] {
-        try ensureTrashExists()
+    static func loadTrashedFolders(rootURL: URL = rootURL, sidecar: SidecarStore.Payload? = nil) throws -> [TrashedFolder] {
+        let trashDir = rootURL.appendingPathComponent(".trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: trashDir, withIntermediateDirectories: true)
         let contents = try FileManager.default.contentsOfDirectory(
-            at: trashURL,
+            at: trashDir,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [],
         )
 
         var folders: [TrashedFolder] = []
+        let notesByPath = sidecar?.makeNotesByPath()
+        let trashByFilename = sidecar?.makeTrashByFilename()
         for url in contents {
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             guard isDir else { continue }
@@ -917,7 +932,14 @@ enum FileStorage {
             let displayName = (originalPath as NSString).lastPathComponent
 
             // Load all notes inside this trashed folder (recursive)
-            let notes = loadNotesRecursively(in: url, baseFolder: originalPath)
+            let notes = loadNotesRecursively(
+                in: url,
+                baseFolder: originalPath,
+                rootURL: rootURL,
+                sidecar: sidecar,
+                notesByPath: notesByPath,
+                trashByFilename: trashByFilename,
+            )
 
             folders.append(TrashedFolder(
                 id: id,
@@ -934,7 +956,14 @@ enum FileStorage {
     }
 
     /// Recursively load notes from a directory tree (used for trashed folders).
-    private static func loadNotesRecursively(in directoryURL: URL, baseFolder: String) -> [Note] {
+    private static func loadNotesRecursively(
+        in directoryURL: URL,
+        baseFolder: String,
+        rootURL: URL = rootURL,
+        sidecar: SidecarStore.Payload? = nil,
+        notesByPath: [String: (id: UUID, entry: SidecarStore.NoteEntry)]? = nil,
+        trashByFilename: [String: (id: UUID, entry: SidecarStore.TrashEntry)]? = nil,
+    ) -> [Note] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: directoryURL,
@@ -955,7 +984,14 @@ enum FileStorage {
                     ""
                 }
                 let folder = relativePart.isEmpty ? baseFolder : "\(baseFolder)/\(relativePart)"
-                if let note = readNote(at: url, folder: folder) {
+                if let note = readNote(
+                    at: url,
+                    folder: folder,
+                    rootURL: rootURL,
+                    sidecar: sidecar,
+                    notesByPath: notesByPath,
+                    trashByFilename: trashByFilename,
+                ) {
                     notes.append(note)
                 }
             }
@@ -965,7 +1001,13 @@ enum FileStorage {
 
     // MARK: - Private Helpers
 
-    private static func loadNotes(in directoryURL: URL, folder: String) throws -> [Note] {
+    private static func loadNotes(
+        in directoryURL: URL,
+        folder: String,
+        rootURL: URL = rootURL,
+        sidecar: SidecarStore.Payload? = nil,
+        notesByPath: [String: (id: UUID, entry: SidecarStore.NoteEntry)]? = nil,
+    ) throws -> [Note] {
         let contents = try FileManager.default.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey],
@@ -973,23 +1015,37 @@ enum FileStorage {
         )
         return contents.compactMap { url -> Note? in
             guard url.pathExtension == "md" else { return nil }
-            return readNote(at: url, folder: folder)
+            return readNote(
+                at: url,
+                folder: folder,
+                rootURL: rootURL,
+                sidecar: sidecar,
+                notesByPath: notesByPath,
+            )
         }
     }
 
-    private static func readNote(at url: URL, folder: String) -> Note? {
+    private static func readNote(
+        at url: URL,
+        folder: String,
+        rootURL: URL = rootURL,
+        sidecar: SidecarStore.Payload? = nil,
+        notesByPath: [String: (id: UUID, entry: SidecarStore.NoteEntry)]? = nil,
+        trashByFilename: [String: (id: UUID, entry: SidecarStore.TrashEntry)]? = nil,
+    ) -> Note? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let filename = url.lastPathComponent
 
         // Determine relative path for sidecar lookup.
         // Trash files live under trashURL, active notes under rootURL.
-        let isTrash = url.path.hasPrefix(trashURL.path)
+        let resolvedTrashURL = rootURL.appendingPathComponent(".trash", isDirectory: true)
+        let isTrash = url.path.hasPrefix(resolvedTrashURL.path)
         // Full path relative to its storage root (.trash/ or rootURL) so sidecar
         // lookups work for both bare files ("UUID_Title.md") and folder-nested files
         // ("UUID_Projects/SubFolder/Note.md").
         let relativePath: String
         if isTrash {
-            let prefix = trashURL.path
+            let prefix = resolvedTrashURL.path
             relativePath = url.path.hasPrefix(prefix)
                 ? String(url.path.dropFirst(prefix.count + 1))
                 : filename
@@ -1002,7 +1058,14 @@ enum FileStorage {
 
         // --- Sidecar path (preferred) ---
         if isTrash {
-            if let (id, entry) = SidecarStore.shared.trashEntry(forFilename: relativePath) {
+            let trashLookup: (id: UUID, entry: SidecarStore.TrashEntry)? = if let trashByFilename {
+                trashByFilename[relativePath]
+            } else if let sidecar {
+                sidecar.trashEntry(forFilename: relativePath)
+            } else {
+                SidecarStore.shared.trashEntry(forFilename: relativePath)
+            }
+            if let (id, entry) = trashLookup {
                 let (_, body) = parseFrontMatter(text) // strip any residual YAML
                 let content = text.hasPrefix("---") ? body : text
                 let tags = entry.tags.compactMap { TagColor(rawValue: $0) }
@@ -1023,7 +1086,14 @@ enum FileStorage {
                 )
             }
         } else {
-            if let (id, entry) = SidecarStore.shared.noteEntry(forPath: relativePath) {
+            let noteLookup: (id: UUID, entry: SidecarStore.NoteEntry)? = if let notesByPath {
+                notesByPath[relativePath]
+            } else if let sidecar {
+                sidecar.noteEntry(forPath: relativePath)
+            } else {
+                SidecarStore.shared.noteEntry(forPath: relativePath)
+            }
+            if let (id, entry) = noteLookup {
                 let (_, body) = parseFrontMatter(text)
                 let content = text.hasPrefix("---") ? body : text
                 let tags = entry.tags.compactMap { TagColor(rawValue: $0) }
@@ -1203,7 +1273,7 @@ enum FileStorage {
 
     /// Resolve duplicate filenames after loading. Oldest note (by createdAt) keeps its name;
     /// newer duplicates get a number suffix ("Title 2", "Title 3", etc.).
-    private static func resolveDuplicateFilenames(_ notes: [Note]) throws -> [Note] {
+    private static func resolveDuplicateFilenames(_ notes: [Note], rootURL: URL = rootURL) throws -> [Note] {
         var groups: [String: [Int]] = [:]
         for (i, note) in notes.enumerated() {
             let key = "\(note.folder)/\(note.filename.lowercased())"
@@ -1211,6 +1281,7 @@ enum FileStorage {
         }
 
         var result = notes
+        var changed = false
         for (_, indices) in groups where indices.count > 1 {
             let sorted = indices.sorted { result[$0].createdAt < result[$1].createdAt }
             for duplicateIndex in sorted.dropFirst() {
@@ -1246,11 +1317,14 @@ enum FileStorage {
                 if var entry = SidecarStore.shared.noteEntry(for: note.id) {
                     entry.path = note.relativePath
                     SidecarStore.shared.upsertNote(entry, for: note.id)
+                    changed = true
                 }
                 result[duplicateIndex] = note
             }
         }
-        try? SidecarStore.shared.save()
+        if changed {
+            try? SidecarStore.shared.save()
+        }
         return result
     }
 
@@ -1258,6 +1332,6 @@ enum FileStorage {
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         // Strip leading # for markdown headings
         let stripped = firstLine.drop { $0 == "#" || $0 == " " }
-        return stripped.isEmpty ? "Untitled" : String(stripped)
+        return stripped.isEmpty ? L10n.shared["common.untitled"] : String(stripped)
     }
 }

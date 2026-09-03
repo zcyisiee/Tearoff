@@ -95,6 +95,7 @@ struct TrashView: View {
             }
         }
         .clipped()
+        .nsContextMenuBarrier()
     }
 
     // MARK: - Trash List

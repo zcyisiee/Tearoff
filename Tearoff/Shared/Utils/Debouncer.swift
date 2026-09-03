@@ -10,9 +10,11 @@ final class Debouncer {
 
     func call(action: @escaping () -> Void) {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+        let t = Timer(timeInterval: delay, repeats: false) { _ in
             action()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func cancel() {

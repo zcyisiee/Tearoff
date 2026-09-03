@@ -178,7 +178,10 @@ final class FinderIconItem: NSCollectionViewItem {
         backdropHeightConstraint.constant = backdropSize
         iconWidthConstraint.constant = iconSize
         iconHeightConstraint.constant = iconSize
-        iconView.image = FileIconCache.shared.icon(for: entry, size: iconSize)
+        iconView.image = FileIconCache.shared.icon(for: entry, size: iconSize) { [weak self, entryURL = entry.url] image in
+            guard let self, self.entry?.url == entryURL else { return }
+            iconView.image = image
+        }
         nameField.stringValue = entry.name
         nameField.font = appearance.nameFont
         nameField.textColor = appearance.primaryText
@@ -196,6 +199,7 @@ final class FinderIconItem: NSCollectionViewItem {
         super.prepareForReuse()
         entry = nil
         appearance = nil
+        iconView.image = nil
         // Clear any lingering rename state so a recycled cell starts clean.
         nameField.isEditable = false
         nameField.isSelectable = false
@@ -265,11 +269,12 @@ struct FinderIconListView: NSViewRepresentable {
         collection.focusRingType = .none
         collection.register(FinderIconItem.self, forItemWithIdentifier: FinderIconItem.reuseIdentifier)
         collection.registerForDraggedTypes([.fileURL])
-        // External destinations only get a copy — allowing `.move` makes Finder
-        // choose move for iCloud-synced sources, which triggers the system
-        // "remove from iCloud Drive" confirmation. The card-internal drag
-        // (`forLocal: true`) keeps move so items can be reordered/filed.
-        collection.setDraggingSourceOperationMask([.copy], forLocal: false)
+        // External destinations allow both move and copy ([.move, .copy]). Finder
+        // defaults to move on the same volume (with ⌥ forcing a copy).
+        // Note: For iCloud-synced sources, moving out of the card triggers macOS's
+        // system "remove from iCloud Drive" confirmation dialog; this side effect
+        // is accepted to ensure consistent move-by-default drag semantics.
+        collection.setDraggingSourceOperationMask([.move, .copy], forLocal: false)
         collection.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
         collection.delegate = context.coordinator
@@ -805,10 +810,11 @@ extension FinderIconListView {
             guard let plan, !plan.urls.isEmpty else { return false }
 
             do {
+                let window = collection?.window
                 if plan.isCopy {
-                    try parent.browser.copy(plan.urls, into: plan.target)
+                    try parent.browser.copy(plan.urls, into: plan.target, window: window)
                 } else {
-                    try parent.browser.move(plan.urls, into: plan.target)
+                    try parent.browser.move(plan.urls, into: plan.target, window: window)
                 }
             } catch {
                 parent.actions.onError(error)

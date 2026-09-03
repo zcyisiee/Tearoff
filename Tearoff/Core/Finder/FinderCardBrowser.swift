@@ -589,22 +589,51 @@ final class FinderCardBrowser {
         }
     }
 
-    /// Moves items into `directory`, giving each a unique destination name.
+    /// Moves items into `directory`. When a destination item with the same
+    /// name already exists, prompts the user (Replace, Keep Both, Stop).
     /// Refuses to move a directory into itself or its descendant
     /// (`.invalidDestination`); moving within the same directory is a silent
     /// no-op for that item.
-    func move(_ urls: [URL], into directory: URL) throws {
-        try transfer(urls, into: directory, copying: false)
+    func move(_ urls: [URL], into directory: URL, window: NSWindow? = nil) throws {
+        try transfer(urls, into: directory, copying: false, window: window)
     }
 
-    /// Copies items into `directory`, giving each a unique destination name.
-    func copy(_ urls: [URL], into directory: URL) throws {
-        try transfer(urls, into: directory, copying: true)
+    /// Copies items into `directory`. When a destination item with the same
+    /// name already exists, prompts the user (Replace, Keep Both, Stop).
+    func copy(_ urls: [URL], into directory: URL, window: NSWindow? = nil) throws {
+        try transfer(urls, into: directory, copying: true, window: window)
     }
 
-    private func transfer(_ urls: [URL], into directory: URL, copying: Bool) throws {
+    private enum ConflictResolution {
+        case replace
+        case keepBoth
+        case stop
+    }
+
+    private func transfer(_ urls: [URL], into directory: URL, copying: Bool, window: NSWindow? = nil) throws {
+        guard Thread.isMainThread else {
+            var transferError: Error?
+            DispatchQueue.main.sync {
+                do {
+                    try self.transfer(urls, into: directory, copying: copying, window: window)
+                } catch {
+                    transferError = error
+                }
+            }
+            if let transferError {
+                throw transferError
+            }
+            return
+        }
+
         let destinationDirectory = directory.standardizedFileURL
+        let targetWindow = window
+            ?? NSApp.keyWindow
+            ?? NSApp.windows.first(where: { $0.isVisible && $0 is KeyableWindow })
+            ?? AppDelegate.shared?.panelController?.window
+
         var firstError: Error?
+        var rememberedResolution: ConflictResolution?
 
         for url in urls {
             let source = url.standardizedFileURL
@@ -626,14 +655,74 @@ final class FinderCardBrowser {
                 }
             }
 
-            let destination = uniqueDestinationURL(
-                for: destinationDirectory.appendingPathComponent(source.lastPathComponent),
-            )
-            do {
-                if copying {
-                    try FileManager.default.copyItem(at: source, to: destination)
+            let itemName = source.lastPathComponent
+            let proposedDestination = destinationDirectory.appendingPathComponent(itemName)
+            let fileManager = FileManager.default
+
+            let destinationURL: URL
+            let isReplacing: Bool
+
+            if fileManager.fileExists(atPath: proposedDestination.path) {
+                let resolution: ConflictResolution
+                if let remembered = rememberedResolution {
+                    resolution = remembered
                 } else {
-                    try FileManager.default.moveItem(at: source, to: destination)
+                    let result = promptConflict(
+                        for: itemName,
+                        copying: copying,
+                        canApplyToAll: urls.count > 1,
+                        window: targetWindow,
+                    )
+                    resolution = result.resolution
+                    if result.applyToAll {
+                        rememberedResolution = resolution
+                    }
+                }
+
+                switch resolution {
+                case .stop:
+                    // Stop transferring remaining items immediately.
+                    // Completed items are not rolled back; remaining are skipped.
+                    reload()
+                    if let firstError {
+                        throw firstError
+                    }
+                    return
+
+                case .keepBoth:
+                    destinationURL = uniqueDestinationURL(for: proposedDestination)
+                    isReplacing = false
+
+                case .replace:
+                    destinationURL = proposedDestination
+                    isReplacing = true
+                }
+            } else {
+                destinationURL = proposedDestination
+                isReplacing = false
+            }
+
+            do {
+                if isReplacing {
+                    let backupURL = destinationDirectory.appendingPathComponent(".tearoff_replace_\(UUID().uuidString)")
+                    try fileManager.moveItem(at: destinationURL, to: backupURL)
+                    do {
+                        if copying {
+                            try fileManager.copyItem(at: source, to: destinationURL)
+                        } else {
+                            try fileManager.moveItem(at: source, to: destinationURL)
+                        }
+                        try? fileManager.removeItem(at: backupURL)
+                    } catch {
+                        try? fileManager.moveItem(at: backupURL, to: destinationURL)
+                        throw error
+                    }
+                } else {
+                    if copying {
+                        try fileManager.copyItem(at: source, to: destinationURL)
+                    } else {
+                        try fileManager.moveItem(at: source, to: destinationURL)
+                    }
                 }
             } catch {
                 if firstError == nil {
@@ -646,6 +735,59 @@ final class FinderCardBrowser {
         if let firstError {
             throw firstError
         }
+    }
+
+    private func promptConflict(
+        for name: String,
+        copying: Bool,
+        canApplyToAll: Bool,
+        window: NSWindow?,
+    ) -> (resolution: ConflictResolution, applyToAll: Bool) {
+        AppDelegate.shared?.panelController?.suspendAutoHide()
+        defer {
+            AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        let l10n = L10n.shared
+        alert.messageText = l10n.t("finder.conflict.message", name)
+        alert.informativeText = copying
+            ? l10n["finder.conflict.informative.copy"]
+            : l10n["finder.conflict.informative.move"]
+
+        alert.addButton(withTitle: l10n["finder.conflict.replace"])
+        alert.addButton(withTitle: l10n["finder.conflict.keepBoth"])
+        let stopButton = alert.addButton(withTitle: l10n["finder.conflict.stop"])
+        stopButton.keyEquivalent = "\u{1b}"
+
+        if canApplyToAll {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = l10n["finder.conflict.applyToAll"]
+            alert.suppressionButton?.state = .off
+        }
+
+        let response: NSApplication.ModalResponse
+        if let window, window.isVisible, window.attachedSheet == nil {
+            alert.beginSheetModal(for: window) { resp in
+                NSApp.stopModal(withCode: resp)
+            }
+            response = NSApp.runModal(for: alert.window)
+        } else {
+            response = alert.runModal()
+        }
+
+        let applyToAll = (alert.showsSuppressionButton && alert.suppressionButton?.state == .on)
+        let resolution: ConflictResolution = switch response {
+        case .alertFirstButtonReturn:
+            .replace
+        case .alertSecondButtonReturn:
+            .keepBoth
+        default:
+            .stop
+        }
+        return (resolution, applyToAll)
     }
 
     private nonisolated static func isDirectory(at url: URL) -> Bool {
