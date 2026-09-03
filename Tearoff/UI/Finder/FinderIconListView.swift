@@ -178,7 +178,10 @@ final class FinderIconItem: NSCollectionViewItem {
         backdropHeightConstraint.constant = backdropSize
         iconWidthConstraint.constant = iconSize
         iconHeightConstraint.constant = iconSize
-        iconView.image = FileIconCache.shared.icon(for: entry, size: iconSize)
+        iconView.image = FileIconCache.shared.icon(for: entry, size: iconSize) { [weak self, entryURL = entry.url] image in
+            guard let self, self.entry?.url == entryURL else { return }
+            iconView.image = image
+        }
         nameField.stringValue = entry.name
         nameField.font = appearance.nameFont
         nameField.textColor = appearance.primaryText
@@ -196,6 +199,7 @@ final class FinderIconItem: NSCollectionViewItem {
         super.prepareForReuse()
         entry = nil
         appearance = nil
+        iconView.image = nil
         // Clear any lingering rename state so a recycled cell starts clean.
         nameField.isEditable = false
         nameField.isSelectable = false

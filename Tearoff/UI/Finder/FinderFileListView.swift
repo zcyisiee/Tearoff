@@ -861,8 +861,20 @@ final class FinderCellView: NSTableCellView {
         fatalError("FinderCellView is created in code only")
     }
 
+    private var configuredURL: URL?
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        configuredURL = nil
+        iconView.image = nil
+    }
+
     func configure(entry: FinderEntry, appearance: FinderListAppearance) {
-        iconView.image = FileIconCache.shared.icon(for: entry)
+        configuredURL = entry.url
+        iconView.image = FileIconCache.shared.icon(for: entry) { [weak self, entryURL = entry.url] image in
+            guard let self, configuredURL == entryURL else { return }
+            iconView.image = image
+        }
         nameField.stringValue = entry.name
         nameField.font = appearance.nameFont
         nameField.textColor = appearance.primaryText
