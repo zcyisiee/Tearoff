@@ -16,11 +16,62 @@ struct ExpandedNoteEditor: View {
     @State private var pendingEditorReload: String? = nil
     @State private var isFindBarShowing = false
     @State private var outline = OutlineState()
+    @State private var isRenamingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var isTitleFocused: Bool
 
     let note: Note
     /// Close path supplied by the board — plays the shrink-into-card morph
     /// before the store closes the note. Falls back to a direct close.
     var onRequestClose: (() -> Void)?
+
+    private var currentNote: Note {
+        noteStore.notes.first(where: { $0.id == note.id }) ?? noteStore.selectedNote ?? note
+    }
+
+    private var isConflicting: Bool {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return noteStore.noteTitleExists(trimmed, in: currentNote.folder, excluding: currentNote.id)
+    }
+
+    private func startRenamingTitle() {
+        titleDraft = currentNote.title
+        isRenamingTitle = true
+        DispatchQueue.main.async {
+            isTitleFocused = true
+        }
+    }
+
+    private func commitRename() {
+        guard !isConflicting else { return }
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed != currentNote.title {
+            noteStore.renameNote(currentNote, to: trimmed)
+            if let updated = noteStore.notes.first(where: { $0.id == currentNote.id }),
+               updated.content != currentNote.content
+            {
+                pendingEditorReload = updated.content
+            }
+        }
+        isRenamingTitle = false
+        isTitleFocused = false
+    }
+
+    private func cancelRename() {
+        isRenamingTitle = false
+        isTitleFocused = false
+        titleDraft = ""
+    }
+
+    private func commitOrCancelRename() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || isConflicting {
+            cancelRename()
+        } else {
+            commitRename()
+        }
+    }
 
     private var showsOutlinePanel: Bool {
         appSettings.outlineVisible && appSettings.outlinePosition == .right
@@ -42,7 +93,7 @@ struct ExpandedNoteEditor: View {
             DesignToken.hairlineSoft.frame(height: 1)
 
             HStack(spacing: 0) {
-                editor(for: note)
+                editor(for: currentNote)
                 if showsOutlinePanel {
                     DesignToken.hairlineSoft.frame(width: 1)
                     OutlinePanelView(outline: outline)
@@ -66,10 +117,11 @@ struct ExpandedNoteEditor: View {
                 .strokeBorder(DesignToken.hairlineSoft, lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.card))
+        .nsContextMenuBarrier()
         .alert(l10n["alert.deleteNote.title"], isPresented: $showDeleteConfirm) {
             Button(l10n["common.delete"], role: .destructive) {
                 noteStore.closeNote()
-                noteStore.deleteNote(note)
+                noteStore.deleteNote(currentNote)
             }
             Button(l10n["common.cancel"], role: .cancel) {}
         }
@@ -97,6 +149,85 @@ struct ExpandedNoteEditor: View {
 
     // MARK: - Header
 
+    private var titleView: some View {
+        HStack(spacing: DesignToken.Space.xs) {
+            if isRenamingTitle {
+                TextField(
+                    currentNote.title.isEmpty ? l10n["common.untitled"] : currentNote.title,
+                    text: $titleDraft,
+                )
+                .textFieldStyle(.plain)
+                .font(DesignToken.Typography.heading)
+                .foregroundStyle(DesignToken.bodyStrong)
+                .focused($isTitleFocused)
+                .frame(minWidth: 120, maxWidth: 280, alignment: .leading)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .fill(DesignToken.surfaceInset),
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .strokeBorder(isConflicting ? DesignToken.error : DesignToken.accent, lineWidth: 1.5)
+                }
+                .overlay(alignment: .trailing) {
+                    if isConflicting {
+                        Text(l10n["common.nameTaken"])
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(.background.opacity(0.9), in: RoundedRectangle(cornerRadius: 3))
+                            .padding(.trailing, 4)
+                    }
+                }
+                .onSubmit {
+                    commitRename()
+                }
+                .onExitCommand {
+                    cancelRename()
+                }
+                .onChange(of: isTitleFocused) { _, focused in
+                    if focused {
+                        DispatchQueue.main.async {
+                            NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                        }
+                    } else if isRenamingTitle {
+                        commitOrCancelRename()
+                    }
+                }
+            } else {
+                Text(currentNote.title.isEmpty ? l10n["common.untitled"] : currentNote.title)
+                    .font(DesignToken.Typography.heading)
+                    .foregroundStyle(DesignToken.bodyStrong)
+                    .lineLimit(1)
+                    .onTapGesture(count: 2) {
+                        startRenamingTitle()
+                    }
+            }
+
+            Text(currentNote.displayDirectory)
+                .font(DesignToken.Typography.caption)
+                .foregroundStyle(DesignToken.mutedSoft)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .nsContextMenu(isEnabled: !isRenamingTitle) {
+            NoteListMenus.noteMenu(
+                note: currentNote,
+                noteStore: noteStore,
+                l10n: l10n,
+                onRename: {
+                    startRenamingTitle()
+                },
+                onSetColor: { color in
+                    noteStore.setNoteColor(color, on: currentNote)
+                },
+            )
+        }
+    }
+
     private var header: some View {
         VStack(spacing: DesignToken.Space.xs) {
             HStack(spacing: DesignToken.Space.xs) {
@@ -111,26 +242,17 @@ struct ExpandedNoteEditor: View {
                     }
                 }
 
-                Text(note.title.isEmpty ? l10n["common.untitled"] : note.title)
-                    .font(DesignToken.Typography.heading)
-                    .foregroundStyle(DesignToken.bodyStrong)
-                    .lineLimit(1)
-
-                Text(note.displayDirectory)
-                    .font(DesignToken.Typography.caption)
-                    .foregroundStyle(DesignToken.mutedSoft)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                titleView
 
                 Spacer()
 
-                NoteColorMenuButton(note: note)
+                NoteColorMenuButton(note: currentNote)
 
                 RawSourceToggleButton()
 
                 OutlineToggleButton()
 
-                CopyMenuButton(note: note)
+                CopyMenuButton(note: currentNote)
 
                 DeleteIconButton {
                     showDeleteConfirm = true
@@ -142,14 +264,14 @@ struct ExpandedNoteEditor: View {
             HStack(spacing: DesignToken.Space.md) {
                 DateLabelView(
                     systemName: "clock",
-                    date: note.modifiedAt.homeDisplayFormat,
-                    tooltip: L10n.shared.t("editor.modifiedAt", note.modifiedAt.homeDisplayFormat),
+                    date: currentNote.modifiedAt.homeDisplayFormat,
+                    tooltip: L10n.shared.t("editor.modifiedAt", currentNote.modifiedAt.homeDisplayFormat),
                 )
 
                 DateLabelView(
                     systemName: "calendar",
-                    date: note.createdAt.homeDisplayFormat,
-                    tooltip: L10n.shared.t("editor.createdAt", note.createdAt.homeDisplayFormat),
+                    date: currentNote.createdAt.homeDisplayFormat,
+                    tooltip: L10n.shared.t("editor.createdAt", currentNote.createdAt.homeDisplayFormat),
                 )
 
                 Spacer()

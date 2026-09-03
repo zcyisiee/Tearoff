@@ -501,7 +501,7 @@ struct NoteBoardView: View {
                 // cards sit above and their own context menus win.
                 .contentShape(Rectangle())
                 .onTapGesture { handleBackgroundTap() }
-                .nsContextMenu { newItemsMenu() }
+                .nsContextMenu(isEnabled: noteStore.selectedNote == nil) { newItemsMenu() }
                 .coordinateSpace(name: BoardCardSpace.name)
                 .overlay(alignment: .topLeading) {
                     BoardDragReplica(session: dragSession)
@@ -645,7 +645,7 @@ struct NoteBoardView: View {
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .nsContextMenu {
+                    .nsContextMenu(isEnabled: noteStore.selectedNote == nil) {
                         NoteListMenus.folderMenu(
                             folder: folder,
                             noteStore: noteStore,
@@ -768,7 +768,7 @@ struct NoteBoardView: View {
             },
             onDragEnded: { handleDragEnd() },
         )
-        .nsContextMenu {
+        .nsContextMenu(isEnabled: noteStore.selectedNote == nil) {
             if noteStore.selection.contains(.note(note.id)), noteStore.selection.count > 1 {
                 NoteListMenus.selectionMenu(noteStore: noteStore, l10n: l10n)
             } else {
@@ -818,7 +818,7 @@ struct NoteBoardView: View {
                 }
             },
         )
-        .nsContextMenu {
+        .nsContextMenu(isEnabled: noteStore.selectedNote == nil) {
             if noteStore.selection.contains(.finderCard(card.id)), noteStore.selection.count > 1 {
                 NoteListMenus.selectionMenu(noteStore: noteStore, l10n: l10n)
             } else {
