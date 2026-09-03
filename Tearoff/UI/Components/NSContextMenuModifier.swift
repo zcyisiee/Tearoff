@@ -68,12 +68,14 @@ struct NSContextMenuModifier: ViewModifier {
     static var menuGeneration = 0
 
     func body(content: Content) -> some View {
-        // The catcher goes UNDER the content, not over it: as an overlay its
-        // NSView sits topmost and swallows every right-click in its frame —
-        // e.g. the board-wide new-items menu shadowed each card's own menus
-        // (path bar, card chrome, file lists). As a background layer it is a
-        // fallback: embedded NSViews (file lists, deeper catchers) hit-test
-        // first, and this menu fires only over SwiftUI-drawn regions.
+        // The catcher sits BEHIND the content purely for geometry: it sizes to
+        // the menu's region and the router resolves which catcher a right-click
+        // belongs to (see ContextMenuRouter). It never takes part in AppKit
+        // hit-testing — NSHostingView discards hit-test claims from
+        // background-mounted representables anyway, and staying passive keeps
+        // left-clicks, hovers and gestures flowing to the SwiftUI content in
+        // front. (As an `.overlay` the catcher DID receive right-clicks, but
+        // it sat topmost and shadowed every deeper menu in its frame.)
         content.background {
             NSContextMenuCatcherView(menuBuilder: menuBuilder)
         }
@@ -87,53 +89,137 @@ extension View {
     }
 }
 
+// MARK: - Right-click routing
+
+/// Routes right-clicks that land on pure SwiftUI content to the deepest
+/// catcher under the pointer.
+///
+/// SwiftUI's `NSHostingView` swallows the hit-test for representables mounted
+/// behind content (`.background`): the catcher's `hitTest` may be consulted,
+/// but its claim is discarded, so `rightMouseDown` lands on the hosting view
+/// and dies inside SwiftUI's gesture system — every `nsContextMenu` over
+/// pure-SwiftUI regions (tab buttons, path bar segments, chips, cards) goes
+/// dead. Content-positioned representables (the Finder file lists, overlays)
+/// still receive their events through normal dispatch.
+///
+/// A process-wide local monitor intercepts right-clicks before dispatch:
+/// - clicks that hit-test to an embedded platform view dispatch normally, so
+///   the file lists' own menus keep winning over any enclosing catcher;
+/// - otherwise the deepest catcher containing the point pops its menu — a
+///   path segment beats the bar's fallback menu, a card beats the board-wide
+///   new-items menu.
+private enum ContextMenuRouter {
+    private static let catchers = NSHashTable<ContextMenuCatcher>.weakObjects()
+    private static var monitor: Any?
+
+    static func register(_ catcher: ContextMenuCatcher) {
+        catchers.add(catcher)
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { event in
+            route(event)
+        }
+    }
+
+    private static func route(_ event: NSEvent) -> NSEvent? {
+        guard let window = event.window, let contentView = window.contentView else { return event }
+        let location = event.locationInWindow
+        // Embedded platform views keep their own right-click handling — only
+        // clicks that would land on pure SwiftUI content are rerouted.
+        guard let hit = contentView.hitTest(location), isSwiftUIRegion(hit) else { return event }
+
+        let candidates = catchers.allObjects.filter {
+            $0.window === window && $0.convert($0.bounds, to: nil).contains(location)
+        }
+        guard let best = candidates.min(by: Self.isDeeper) else { return event }
+        best.popMenu(for: event)
+        return nil
+    }
+
+    /// The hit counts as pure SwiftUI content when its responder chain reaches
+    /// the hosting view without crossing a platform-view host (an embedded
+    /// NSViewRepresentable such as the Finder file lists).
+    private static func isSwiftUIRegion(_ hit: NSView) -> Bool {
+        var current: NSView? = hit
+        while let view = current {
+            let name = NSStringFromClass(type(of: view))
+            if name.contains("PlatformViewHost") {
+                return false
+            }
+            if name.contains("NSHostingView") {
+                return true
+            }
+            current = view.superview
+        }
+        return false
+    }
+
+    /// Deeper catchers are more specific (segment > bar, card > board); at
+    /// equal depth the smaller frame wins.
+    private static func isDeeper(_ lhs: ContextMenuCatcher, _ rhs: ContextMenuCatcher) -> Bool {
+        if lhs.depth != rhs.depth {
+            return lhs.depth > rhs.depth
+        }
+        return lhs.bounds.width * lhs.bounds.height < rhs.bounds.width * rhs.bounds.height
+    }
+}
+
 // MARK: - NSViewRepresentable background catcher
 
 private struct NSContextMenuCatcherView: NSViewRepresentable {
     let menuBuilder: () -> NSMenu
 
     func makeNSView(context _: Context) -> ContextMenuCatcher {
-        ContextMenuCatcher()
+        let catcher = ContextMenuCatcher()
+        ContextMenuRouter.register(catcher)
+        return catcher
     }
 
     func updateNSView(_ nsView: ContextMenuCatcher, context _: Context) {
         nsView.menuBuilder = menuBuilder
     }
+}
 
-    /// Transparent NSView that intercepts right-clicks to show an NSMenu,
-    /// while passing all other events (left-click, scroll, drag) through to SwiftUI.
-    final class ContextMenuCatcher: NSView {
-        var menuBuilder: (() -> NSMenu)?
+/// Transparent NSView sized to the menu's region. Purely passive: it never
+/// participates in hit-testing (right-clicks reach it through
+/// ContextMenuRouter, everything else flows to the SwiftUI content in front).
+private final class ContextMenuCatcher: NSView {
+    var menuBuilder: (() -> NSMenu)?
 
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            // Only intercept right-clicks; pass everything else through
-            if let event = NSApp.currentEvent, event.type == .rightMouseDown {
-                let local = convert(point, from: superview)
-                if bounds.contains(local) {
-                    return self
-                }
-            }
-            return nil
+    /// Superview-chain length, for the router's deepest-wins comparison.
+    var depth: Int {
+        var value = 0
+        var current: NSView? = self
+        while let view = current {
+            value += 1
+            current = view.superview
         }
+        return value
+    }
 
-        override func rightMouseDown(with event: NSEvent) {
-            if let menu = menuBuilder?() {
-                NSContextMenuModifier.menuGeneration += 1
-                let generation = NSContextMenuModifier.menuGeneration
-                NSContextMenuModifier.isShowingMenu = true
-                NSMenu.popUpContextMenu(menu, with: event, for: self)
-                // Reset the flag on the next turn, not synchronously: AppKit
-                // delivers the synthesized exit / re-dispatched click events
-                // right after this method returns, and they must still read
-                // as "menu open" (see lastMenuDismissAt).
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    guard generation == NSContextMenuModifier.menuGeneration else { return }
-                    NSContextMenuModifier.isShowingMenu = false
-                    NSContextMenuModifier.lastMenuDismissAt = Date()
-                }
-                MenuDispatch.shared.clear()
-            }
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        popMenu(for: event)
+    }
+
+    func popMenu(for event: NSEvent) {
+        guard let menu = menuBuilder?() else { return }
+        NSContextMenuModifier.menuGeneration += 1
+        let generation = NSContextMenuModifier.menuGeneration
+        NSContextMenuModifier.isShowingMenu = true
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+        // Reset the flag on the next turn, not synchronously: AppKit
+        // delivers the synthesized exit / re-dispatched click events
+        // right after this method returns, and they must still read
+        // as "menu open" (see lastMenuDismissAt).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard generation == NSContextMenuModifier.menuGeneration else { return }
+            NSContextMenuModifier.isShowingMenu = false
+            NSContextMenuModifier.lastMenuDismissAt = Date()
         }
+        MenuDispatch.shared.clear()
     }
 }
 

@@ -1187,7 +1187,7 @@ final class FinderIconCollectionView: NSCollectionView {
         guard !menu.items.isEmpty else { return }
 
         // Bracket the popup with the panel's menu-suppression flag (same
-        // pattern as NSContextMenuModifier.ContextMenuCatcher.rightMouseDown).
+        // pattern as NSContextMenuModifier.swift's ContextMenuCatcher.popMenu).
         NSContextMenuModifier.menuGeneration += 1
         let generation = NSContextMenuModifier.menuGeneration
         NSContextMenuModifier.isShowingMenu = true
