@@ -84,7 +84,10 @@ final class SidecarStore {
 
     // MARK: - In-memory state
 
-    var data = Payload()
+    private(set) var isDirty: Bool = false
+    var data = Payload() {
+        didSet { isDirty = true }
+    }
 
     var sidecarURL: URL {
         FileStorage.sidecarDirectoryURL(in: FileStorage.rootURL)
@@ -104,6 +107,7 @@ final class SidecarStore {
         }
         let raw = try Data(contentsOf: sidecarURL)
         data = try decoder.decode(Payload.self, from: raw)
+        isDirty = false
         let count = data.notes.count
         let version = data.version
         Log.storage.info("[Sidecar] loaded \(count) note entries (v\(version))")
@@ -112,16 +116,18 @@ final class SidecarStore {
         // to disk.
         if data.version < 4 {
             data.version = 4
-            try? save()
+            try? save(force: true)
             Log.storage.info("[Sidecar] migrated payload v\(version) → v4")
         }
     }
 
-    func save() throws {
+    func save(force: Bool = false) throws {
+        guard isDirty || force else { return }
         let dir = sidecarURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let encoded = try encoder.encode(data)
         try encoded.write(to: sidecarURL, options: .atomic)
+        isDirty = false
     }
 
     // MARK: - Notes
@@ -266,4 +272,48 @@ final class SidecarStore {
         d.dateDecodingStrategy = .iso8601
         return d
     }()
+}
+
+// MARK: - Payload Lookup Helpers
+
+extension SidecarStore.Payload {
+    func noteEntry(forPath path: String) -> (id: UUID, entry: SidecarStore.NoteEntry)? {
+        for (uuidStr, entry) in notes {
+            if entry.path == path, let id = UUID(uuidString: uuidStr) {
+                return (id, entry)
+            }
+        }
+        return nil
+    }
+
+    func trashEntry(forFilename filename: String) -> (id: UUID, entry: SidecarStore.TrashEntry)? {
+        for (uuidStr, entry) in trash {
+            if entry.filename == filename, let id = UUID(uuidString: uuidStr) {
+                return (id, entry)
+            }
+        }
+        return nil
+    }
+
+    func makeNotesByPath() -> [String: (id: UUID, entry: SidecarStore.NoteEntry)] {
+        var dict: [String: (UUID, SidecarStore.NoteEntry)] = [:]
+        dict.reserveCapacity(notes.count)
+        for (uuidStr, entry) in notes {
+            if let id = UUID(uuidString: uuidStr) {
+                dict[entry.path] = (id, entry)
+            }
+        }
+        return dict
+    }
+
+    func makeTrashByFilename() -> [String: (id: UUID, entry: SidecarStore.TrashEntry)] {
+        var dict: [String: (UUID, SidecarStore.TrashEntry)] = [:]
+        dict.reserveCapacity(trash.count)
+        for (uuidStr, entry) in trash {
+            if let id = UUID(uuidString: uuidStr) {
+                dict[entry.filename] = (id, entry)
+            }
+        }
+        return dict
+    }
 }

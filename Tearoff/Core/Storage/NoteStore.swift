@@ -399,111 +399,203 @@ final class NoteStore {
 
     // MARK: - Lifecycle
 
-    func loadFromDisk() {
-        do {
-            let loaded = try FileStorage.loadAllNotes()
-            // Auto-correct duplicate UUIDs — reassign a new UUID to any duplicate and re-save
-            // to disk so both notes survive (e.g. user copied a .md file in Finder)
-            var seen = Set<UUID>()
-            notes = loaded.map { note in
-                guard seen.insert(note.id).inserted else {
-                    let newID = UUID()
-                    Log.storage.warning("[NoteStore] duplicate UUID '\(note.id)' for '\(note.title, privacy: .public)' — reassigning to \(newID)")
-                    let fixed = Note(
-                        id: newID,
-                        title: note.title,
-                        content: note.content,
-                        createdAt: note.createdAt,
-                        modifiedAt: note.modifiedAt,
-                        savedAt: note.savedAt,
-                        folder: note.folder,
-                        trashedAt: note.trashedAt,
-                        savedFilename: note.savedFilename,
-                    )
-                    do {
-                        try FileStorage.writeNote(fixed) // return value intentionally discarded (dedup path)
-                    } catch {
-                        Log.storage.error("[NoteStore] failed to re-save deduped note — \(error)")
+    private var loadGeneration: Int = 0
+    private(set) var isLoadingNotes: Bool = false
+
+    func loadFromDisk(completion: (() -> Void)? = nil) {
+        loadGeneration &+= 1
+        let currentGen = loadGeneration
+        isLoadingNotes = true
+
+        let root = FileStorage.rootURL
+        let sidecar = SidecarStore.shared.data
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let loaded = try FileStorage.loadAllNotes(rootURL: root, sidecar: sidecar)
+                let trashedN = try FileStorage.loadTrashedNotes(rootURL: root, sidecar: sidecar)
+                let trashedF = try FileStorage.loadTrashedFolders(rootURL: root, sidecar: sidecar)
+                let folders = Set((try? FileStorage.discoverFolders(rootURL: root)) ?? [])
+                let finderCards = sidecar.finderCards.compactMap { uuidStr, entry -> FinderCard? in
+                    guard let id = UUID(uuidString: uuidStr) else { return nil }
+                    return FinderCard(id: id, entry: entry)
+                }.sorted { $0.createdAt < $1.createdAt }
+
+                await MainActor.run {
+                    guard self.loadGeneration == currentGen else {
+                        Log.storage.debug("[NoteStore] loadFromDisk generation mismatch (\(currentGen) vs \(self.loadGeneration)), skipping")
+                        return
                     }
-                    return fixed
+                    self.isLoadingNotes = false
+
+                    // Auto-correct duplicate UUIDs — reassign a new UUID to any duplicate and re-save
+                    // to disk so both notes survive (e.g. user copied a .md file in Finder)
+                    var seen = Set<UUID>()
+                    self.notes = loaded.map { note in
+                        guard seen.insert(note.id).inserted else {
+                            let newID = UUID()
+                            Log.storage.warning("[NoteStore] duplicate UUID '\(note.id)' for '\(note.title, privacy: .public)' — reassigning to \(newID)")
+                            let fixed = Note(
+                                id: newID,
+                                title: note.title,
+                                content: note.content,
+                                createdAt: note.createdAt,
+                                modifiedAt: note.modifiedAt,
+                                savedAt: note.savedAt,
+                                folder: note.folder,
+                                trashedAt: note.trashedAt,
+                                savedFilename: note.savedFilename,
+                            )
+                            do {
+                                try FileStorage.writeNote(fixed) // return value intentionally discarded (dedup path)
+                            } catch {
+                                Log.storage.error("[NoteStore] failed to re-save deduped note — \(error)")
+                            }
+                            return fixed
+                        }
+                        return note
+                    }
+                    self.trashedNotes = trashedN
+                    self.trashedFolders = trashedF
+                    self.autoPurgeExpiredTrash()
+                    self.diskFolderNames = folders
+                    self.refreshFolders()
+                    self.finderCards = finderCards
+                    self.focusedFinderCardID = nil
+                    let noteCount = self.notes.count
+                    let cardCount = self.finderCards.count
+                    let trashCount = self.trashedNotes.count + self.trashedFolders.count
+                    Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(cardCount) Finder cards, \(trashCount) trashed items")
+                    completion?()
                 }
-                return note
+            } catch {
+                await MainActor.run {
+                    guard self.loadGeneration == currentGen else { return }
+                    self.isLoadingNotes = false
+                    Log.storage.error("[NoteStore] loadFromDisk failed — \(error)")
+                    completion?()
+                }
             }
-            trashedNotes = try FileStorage.loadTrashedNotes()
-            trashedFolders = try FileStorage.loadTrashedFolders()
-            autoPurgeExpiredTrash()
-            diskFolderNames = Set((try? FileStorage.discoverFolders()) ?? [])
-            refreshFolders()
-            finderCards = SidecarStore.shared.allFinderCardEntries
-                .map { FinderCard(id: $0.id, entry: $0.entry) }
-                .sorted { $0.createdAt < $1.createdAt }
-            focusedFinderCardID = nil
-            let noteCount = notes.count
-            let cardCount = finderCards.count
-            let trashCount = trashedNotes.count + trashedFolders.count
-            Log.storage.info("[NoteStore] loaded \(noteCount) notes, \(cardCount) Finder cards, \(trashCount) trashed items")
-        } catch {
-            Log.storage.error("[NoteStore] loadFromDisk failed — \(error)")
         }
     }
 
-    /// Called on every app foreground transition. Checks each note for external modifications
-    /// and reloads or prompts based on dirty state.
+    // MARK: - External Change Detection
+
+    private var isCheckingExternalChanges = false
+    private var needsExternalRecheck = false
+
+    private struct DetectedExternalChange {
+        let noteID: UUID
+        let diskDate: Date
+        let diskContent: String
+        let diskModifiedAt: Date
+        let diskSavedAt: Date
+        let diskTags: [TagColor]
+    }
+
+    /// Called on every app foreground transition / showPanel. Checks each note for external modifications
+    /// in the background and reloads or prompts based on dirty state.
     func checkForExternalChanges() {
-        let count = notes.count
-        Log.storage.debug("[ExternalSync] checking \(count) notes")
-        for i in notes.indices {
-            let note = notes[i]
-            guard let diskDate = FileStorage.modificationDate(for: note) else {
-                let t = note.title
-                Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — file not found on disk")
+        if isCheckingExternalChanges {
+            needsExternalRecheck = true
+            return
+        }
+        isCheckingExternalChanges = true
+        let snapshot = notes
+        let root = FileStorage.rootURL
+
+        Task.detached(priority: .utility) {
+            var changes: [DetectedExternalChange] = []
+            for note in snapshot {
+                guard let diskDate = FileStorage.modificationDate(for: note, rootURL: root) else {
+                    continue
+                }
+                // Compare file mtime against savedAt (last time Tearoff wrote this file).
+                // Using savedAt instead of modifiedAt prevents false positives from auto-saves
+                // that write the file without changing content.
+                let diff = diskDate.timeIntervalSince(note.savedAt)
+                guard diff > 1 else { continue }
+
+                guard let reloaded = FileStorage.reloadContent(for: note, rootURL: root) else { continue }
+                changes.append(DetectedExternalChange(
+                    noteID: note.id,
+                    diskDate: diskDate,
+                    diskContent: reloaded.content,
+                    diskModifiedAt: reloaded.modifiedAt,
+                    diskSavedAt: reloaded.savedAt,
+                    diskTags: reloaded.tags,
+                ))
+            }
+
+            await MainActor.run {
+                self.applyExternalChanges(changes)
+            }
+        }
+    }
+
+    private func applyExternalChanges(_ changes: [DetectedExternalChange]) {
+        defer {
+            isCheckingExternalChanges = false
+            if needsExternalRecheck {
+                needsExternalRecheck = false
+                checkForExternalChanges()
+            }
+        }
+
+        guard !changes.isEmpty else { return }
+
+        var sidecarChanged = false
+        for change in changes {
+            guard let i = notes.firstIndex(where: { $0.id == change.noteID }) else {
                 continue
             }
-            // Compare file mtime against savedAt (last time Tearoff wrote this file).
-            // Using savedAt instead of modifiedAt prevents false positives from auto-saves
-            // that write the file without changing content.
-            let diff = diskDate.timeIntervalSince(note.savedAt)
-            let t = note.title
-            Log.storage.debug("[ExternalSync] '\(t, privacy: .public)' — diff: \(String(format: "%.3f", diff))s")
-            guard diff > 1 else { continue }
 
-            let noteID = notes[i].id
+            let noteID = change.noteID
             let isOpen = selectedNote?.id == noteID
             let isDirty = dirtyNoteIDs.contains(noteID)
-
-            guard let reloaded = FileStorage.reloadContent(for: notes[i]) else { continue }
-            let diskContent = reloaded.content
-            let diskModifiedAt = reloaded.modifiedAt
-            let diskSavedAt = reloaded.savedAt
-            let diskTags = reloaded.tags
-
             let title = notes[i].title
-            if isOpen, isDirty {
-                // Both Tearoff and external have changes — prompt user
-                Log.storage.info("[NoteStore] external conflict on open note '\(title, privacy: .public)'")
-                pendingExternalChange = PendingExternalChange(noteID: noteID, diskContent: diskContent, diskDate: diskDate, diskTags: diskTags)
+
+            if isDirty {
+                if isOpen {
+                    // Both Tearoff and external have changes — prompt user
+                    Log.storage.info("[NoteStore] external conflict on open note '\(title, privacy: .public)'")
+                    pendingExternalChange = PendingExternalChange(
+                        noteID: noteID,
+                        diskContent: change.diskContent,
+                        diskDate: change.diskDate,
+                        diskTags: change.diskTags,
+                    )
+                } else {
+                    // Closed note has unsaved local edits — preserve local edits and do not overwrite
+                    Log.storage.info("[NoteStore] external change detected for closed dirty note '\(title, privacy: .public)' — preserving local edits")
+                }
             } else {
-                // Safe to auto-reload: note not open, or open but no Tearoff edits
+                // Safe to auto-reload: note not dirty
                 Log.storage.info("[NoteStore] auto-syncing '\(title, privacy: .public)' from external change")
-                notes[i].content = diskContent
-                notes[i].modifiedAt = diskModifiedAt
-                notes[i].savedAt = diskSavedAt
-                notes[i].tags = diskTags
+                notes[i].content = change.diskContent
+                notes[i].modifiedAt = change.diskModifiedAt
+                notes[i].savedAt = change.diskSavedAt
+                notes[i].tags = change.diskTags
                 dirtyNoteIDs.remove(noteID)
+
                 // Persist updated savedAt to sidecar so the watcher doesn't re-fire on next launch
                 if var entry = SidecarStore.shared.noteEntry(for: noteID) {
-                    entry.savedAt = diskSavedAt
-                    entry.modifiedAt = diskModifiedAt
-                    entry.tags = diskTags.map(\.rawValue)
+                    entry.savedAt = change.diskSavedAt
+                    entry.modifiedAt = change.diskModifiedAt
+                    entry.tags = change.diskTags.map(\.rawValue)
                     SidecarStore.shared.upsertNote(entry, for: noteID)
-                    try? SidecarStore.shared.save()
+                    sidecarChanged = true
                 }
                 if isOpen {
                     selectedNote = notes[i]
-                    onNeedEditorReload?(diskContent)
+                    onNeedEditorReload?(change.diskContent)
                 }
-                recomputeAllUsedTags()
             }
+        }
+
+        if sidecarChanged {
+            try? SidecarStore.shared.save()
+            recomputeAllUsedTags()
         }
     }
 
@@ -2043,10 +2135,10 @@ final class NoteStore {
     /// Persist a single note to disk immediately (including file rename, asset directory move,
     /// and sidecar entry update) and clear its dirty flag.
     @discardableResult
-    func saveNoteImmediately(_ noteID: UUID) -> Bool {
+    func saveNoteImmediately(_ noteID: UUID, deferSidecarSave: Bool = false) -> Bool {
         guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return false }
         do {
-            let result = try FileStorage.writeNote(notes[index])
+            let result = try FileStorage.writeNote(notes[index], deferSidecarSave: deferSidecarSave)
             notes[index].savedFilename = result.filename
             notes[index].savedAt = result.savedAt
             if let updated = result.updatedContent {
@@ -2081,8 +2173,14 @@ final class NoteStore {
             Log.storage.debug("[NoteStore] saving \(count) dirty notes")
         }
         let idsToSave = dirtyNoteIDs
+        var didSave = false
         for noteID in idsToSave {
-            saveNoteImmediately(noteID)
+            if saveNoteImmediately(noteID, deferSidecarSave: true) {
+                didSave = true
+            }
+        }
+        if didSave {
+            try? SidecarStore.shared.save()
         }
     }
 
