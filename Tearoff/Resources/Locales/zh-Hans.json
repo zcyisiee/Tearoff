@@ -370,5 +370,12 @@
   "finder.file.quickLook": "快速查看",
   "finder.file.getInfo": "显示简介",
   "finder.iconSize.menu": "图标大小",
-  "finder.chipFont.menu": "文件夹标记字体"
+  "finder.chipFont.menu": "文件夹标记字体",
+  "finder.conflict.message": "此位置已存在名为“{0}”的项目。",
+  "finder.conflict.informative.move": "要替换为正在移动的项目吗？替换将覆盖其当前内容。",
+  "finder.conflict.informative.copy": "要替换为正在拷贝的项目吗？替换将覆盖其当前内容。",
+  "finder.conflict.replace": "替换",
+  "finder.conflict.keepBoth": "保留两者",
+  "finder.conflict.stop": "停止",
+  "finder.conflict.applyToAll": "全部应用"
 }

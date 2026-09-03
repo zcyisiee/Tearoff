@@ -339,10 +339,11 @@ struct FinderPathBar: View {
         }
 
         do {
+            let window = NSApp.keyWindow ?? AppDelegate.shared?.panelController?.window
             if copy {
-                try browser.copy(urls, into: target)
+                try browser.copy(urls, into: target, window: window)
             } else {
-                try browser.move(urls, into: target)
+                try browser.move(urls, into: target, window: window)
             }
         } catch {
             onError?(error)

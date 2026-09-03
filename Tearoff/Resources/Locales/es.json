@@ -338,5 +338,12 @@
   "settings.storage.imageLocation": "Ubicación de las imágenes",
   "settings.storage.images.shared": "Carpeta assets compartida (estilo Typora)",
   "settings.storage.images.hidden": "Carpeta oculta por nota",
-  "settings.storage.images.hint": "El modo compartido guarda las imágenes en la carpeta assets/ junto a las notas, visible en el Finder. El modo oculto mantiene la carpeta .NombreDeNota/ por nota de la versión anterior. Las notas existentes funcionan en ambos modos."
+  "settings.storage.images.hint": "El modo compartido guarda las imágenes en la carpeta assets/ junto a las notas, visible en el Finder. El modo oculto mantiene la carpeta .NombreDeNota/ por nota de la versión anterior. Las notas existentes funcionan en ambos modos.",
+  "finder.conflict.message": "Ya existe un elemento llamado «{0}» en esta ubicación.",
+  "finder.conflict.informative.move": "¿Deseas reemplazarlo con el elemento que estás moviendo? Al reemplazarlo se sobrescribirá su contenido actual.",
+  "finder.conflict.informative.copy": "¿Deseas reemplazarlo con el elemento que estás copiando? Al reemplazarlo se sobrescribirá su contenido actual.",
+  "finder.conflict.replace": "Reemplazar",
+  "finder.conflict.keepBoth": "Conservar ambos",
+  "finder.conflict.stop": "Detener",
+  "finder.conflict.applyToAll": "Aplicar a todo"
 }

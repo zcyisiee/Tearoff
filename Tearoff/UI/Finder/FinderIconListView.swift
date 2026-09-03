@@ -806,10 +806,11 @@ extension FinderIconListView {
             guard let plan, !plan.urls.isEmpty else { return false }
 
             do {
+                let window = collection?.window
                 if plan.isCopy {
-                    try parent.browser.copy(plan.urls, into: plan.target)
+                    try parent.browser.copy(plan.urls, into: plan.target, window: window)
                 } else {
-                    try parent.browser.move(plan.urls, into: plan.target)
+                    try parent.browser.move(plan.urls, into: plan.target, window: window)
                 }
             } catch {
                 parent.actions.onError(error)

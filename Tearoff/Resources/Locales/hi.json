@@ -338,5 +338,12 @@
   "settings.storage.imageLocation": "छवि संग्रहण स्थान",
   "settings.storage.images.shared": "साझा assets फ़ोल्डर (Typora-शैली)",
   "settings.storage.images.hidden": "प्रति नोट छिपा फ़ोल्डर",
-  "settings.storage.images.hint": "साझा मोड छवियों को नोट्स के बगल के assets/ फ़ोल्डर में सहेजता है, जो Finder में दिखता है। छिपा मोड पुराने प्रति-नोट .नोटनाम/ फ़ोल्डर को बनाए रखता है। मौजूदा नोट्स दोनों मोड में काम करते हैं।"
+  "settings.storage.images.hint": "साझा मोड छवियों को नोट्स के बगल के assets/ फ़ोल्डर में सहेजता है, जो Finder में दिखता है। छिपा मोड पुराने प्रति-नोट .नोटनाम/ फ़ोल्डर को बनाए रखता है। मौजूदा नोट्स दोनों मोड में काम करते हैं।",
+  "finder.conflict.message": "इस स्थान पर “{0}” नाम का आइटम पहले से मौजूद है.",
+  "finder.conflict.informative.move": "क्या आप इसे उस आइटम से बदलना चाहते हैं जिसे आप ले जा रहे हैं? बदलने से इसकी वर्तमान सामग्री बदल जाएगी.",
+  "finder.conflict.informative.copy": "क्या आप इसे उस आइटम से बदलना चाहते हैं जिसे आप कॉपी कर रहे हैं? बदलने से इसकी वर्तमान सामग्री बदल जाएगी.",
+  "finder.conflict.replace": "बदलें",
+  "finder.conflict.keepBoth": "दोनों रखें",
+  "finder.conflict.stop": "रोकें",
+  "finder.conflict.applyToAll": "सभी पर लागू करें"
 }

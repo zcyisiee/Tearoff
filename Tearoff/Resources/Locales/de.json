@@ -338,5 +338,12 @@
   "settings.storage.imageLocation": "Bildspeicherort",
   "settings.storage.images.shared": "Gemeinsamer assets-Ordner (wie Typora)",
   "settings.storage.images.hidden": "Versteckter Ordner pro Notiz",
-  "settings.storage.images.hint": "Im gemeinsamen Modus werden Bilder im Ordner assets/ neben den Notizen gespeichert und im Finder angezeigt. Der versteckte Modus behält den bisherigen Ordner .Notizname/ pro Notiz. Bestehende Notizen funktionieren in beiden Modi."
+  "settings.storage.images.hint": "Im gemeinsamen Modus werden Bilder im Ordner assets/ neben den Notizen gespeichert und im Finder angezeigt. Der versteckte Modus behält den bisherigen Ordner .Notizname/ pro Notiz. Bestehende Notizen funktionieren in beiden Modi.",
+  "finder.conflict.message": "Ein Objekt mit dem Namen „{0}“ existiert bereits an diesem Ort.",
+  "finder.conflict.informative.move": "Möchtest du es durch das zu bewegende Objekt ersetzen? Das Ersetzen überschreibt den aktuellen Inhalt.",
+  "finder.conflict.informative.copy": "Möchtest du es durch das zu kopierende Objekt ersetzen? Das Ersetzen überschreibt den aktuellen Inhalt.",
+  "finder.conflict.replace": "Ersetzen",
+  "finder.conflict.keepBoth": "Beide behalten",
+  "finder.conflict.stop": "Stoppen",
+  "finder.conflict.applyToAll": "Auf alle anwenden"
 }

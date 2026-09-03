@@ -370,5 +370,12 @@
   "finder.file.quickLook": "Quick Look",
   "finder.file.getInfo": "Get Info",
   "finder.iconSize.menu": "Icon Size",
-  "finder.chipFont.menu": "Folder Chip Font Size"
+  "finder.chipFont.menu": "Folder Chip Font Size",
+  "finder.conflict.message": "An item named “{0}” already exists in this location.",
+  "finder.conflict.informative.move": "Do you want to replace it with the one you’re moving? Replacing it will overwrite its current contents.",
+  "finder.conflict.informative.copy": "Do you want to replace it with the one you’re copying? Replacing it will overwrite its current contents.",
+  "finder.conflict.replace": "Replace",
+  "finder.conflict.keepBoth": "Keep Both",
+  "finder.conflict.stop": "Stop",
+  "finder.conflict.applyToAll": "Apply to All"
 }
