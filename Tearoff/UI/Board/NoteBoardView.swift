@@ -1563,6 +1563,14 @@ struct NoteBoardView: View {
     /// New Finder card in the current folder, selected and ready to rename
     /// from its card menu (no scroll needed — creation is user-triggered).
     private func createFinderCard() {
+        if isSearching {
+            dismissSearch()
+        }
+        if let folder = noteStore.selectedFolder?.name {
+            collapsedSections.remove(folder)
+        } else {
+            collapsedSections.remove("__root__")
+        }
         commitFinderCardRenameIfActive()
         let card = noteStore.createFinderCard(in: noteStore.selectedFolder?.name ?? "")
         renamingFinderCardID = nil

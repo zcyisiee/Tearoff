@@ -581,8 +581,10 @@ struct FinderCardView: View {
     /// the browser directly so the list fills in with no "empty folder" flash.
     private func addFavoriteAndSelect(_ url: URL) {
         guard let favorite = noteStore.addFavorite(url, to: card) else { return }
-        noteStore.selectFavorite(id: favorite.id, in: card)
-        browser.navigate(to: favorite.url, recordsHistory: false)
+        let browser = browser
+        Task { @MainActor in
+            browser.navigate(to: favorite.url, recordsHistory: false)
+        }
     }
 
     /// Presents the folder picker for the empty state's primary button.
@@ -844,16 +846,19 @@ struct FinderCardView: View {
         let store = noteStore
         let cardID = card.id
         browser.onCurrentURLChanged = { url in
-            guard let current = store.finderCards.first(where: { $0.id == cardID }) else { return }
-            let storedPath: String? = {
-                guard let url else { return nil }
-                let path = url.standardizedFileURL.path
-                let home = current.selectedFavorite?.url.standardizedFileURL.path
-                return path == home ? nil : path
-            }()
-            store.setCurrentPath(storedPath, for: current, persist: false)
-            persistDebouncer.call {
-                store.saveSidecar()
+            Task { @MainActor in
+                guard let current = store.finderCards.first(where: { $0.id == cardID }) else { return }
+                let storedPath: String? = {
+                    guard let url else { return nil }
+                    let path = url.standardizedFileURL.path
+                    let home = current.selectedFavorite?.url.standardizedFileURL.path
+                    return path == home ? nil : path
+                }()
+                guard current.currentPath != storedPath else { return }
+                store.setCurrentPath(storedPath, for: current, persist: false)
+                persistDebouncer.call {
+                    store.saveSidecar()
+                }
             }
         }
 
@@ -862,8 +867,11 @@ struct FinderCardView: View {
         browser.sortKey = card.sortKey
         browser.sortAscending = card.sortAscending
 
-        browser.navigate(to: card.currentURL, recordsHistory: false)
-        browser.startWatching()
+        Task { @MainActor in
+            guard let live = store.finderCards.first(where: { $0.id == cardID }) else { return }
+            browser.navigate(to: live.currentURL, recordsHistory: false)
+            browser.startWatching()
+        }
     }
 
     private func unmountBrowser() {
@@ -901,13 +909,17 @@ struct FinderCardView: View {
     }
 
     /// Re-applies the card's sort column/direction to the browser and reloads.
-    /// Called on mount and whenever the card's sort settings change from the
-    /// store (header menu, external sidecar reload).
+    /// Deferred to the main actor to avoid mutating @Observable state mid-update.
     private func syncBrowserSort() {
-        guard browser.sortKey != card.sortKey || browser.sortAscending != card.sortAscending else { return }
-        browser.sortKey = card.sortKey
-        browser.sortAscending = card.sortAscending
-        browser.reload()
+        let cardSortKey = card.sortKey
+        let cardSortAscending = card.sortAscending
+        let browser = browser
+        Task { @MainActor in
+            guard browser.sortKey != cardSortKey || browser.sortAscending != cardSortAscending else { return }
+            browser.sortKey = cardSortKey
+            browser.sortAscending = cardSortAscending
+            browser.reload()
+        }
     }
 
     private func reportFrame(_ geo: GeometryProxy) {
