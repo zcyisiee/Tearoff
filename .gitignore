@@ -77,6 +77,9 @@ build_*/
 pi-briefs/
 subagents-plan/
 
+# Screen recordings — convert to GIF before adding demo assets
+*.mov
+
 # Agent's plan
 AGENTS.md
 .codebuddy/
