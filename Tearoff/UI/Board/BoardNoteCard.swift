@@ -416,6 +416,7 @@ struct BoardNoteCard: View {
             onContentChanged: { id, newContent in
                 onContentChanged?(id, newContent)
             },
+            showsHeadingLineInBody: true,
             focusTitleOnAppear: isNewlyCreated,
         )
         .frame(height: 280)
