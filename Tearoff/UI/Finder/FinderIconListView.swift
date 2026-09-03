@@ -265,11 +265,12 @@ struct FinderIconListView: NSViewRepresentable {
         collection.focusRingType = .none
         collection.register(FinderIconItem.self, forItemWithIdentifier: FinderIconItem.reuseIdentifier)
         collection.registerForDraggedTypes([.fileURL])
-        // External destinations only get a copy — allowing `.move` makes Finder
-        // choose move for iCloud-synced sources, which triggers the system
-        // "remove from iCloud Drive" confirmation. The card-internal drag
-        // (`forLocal: true`) keeps move so items can be reordered/filed.
-        collection.setDraggingSourceOperationMask([.copy], forLocal: false)
+        // External destinations allow both move and copy ([.move, .copy]). Finder
+        // defaults to move on the same volume (with ⌥ forcing a copy).
+        // Note: For iCloud-synced sources, moving out of the card triggers macOS's
+        // system "remove from iCloud Drive" confirmation dialog; this side effect
+        // is accepted to ensure consistent move-by-default drag semantics.
+        collection.setDraggingSourceOperationMask([.move, .copy], forLocal: false)
         collection.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
         collection.delegate = context.coordinator
