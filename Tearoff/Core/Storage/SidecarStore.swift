@@ -100,6 +100,37 @@ final class SidecarStore {
 
     // MARK: - Load / Save
 
+    private let debouncer = Debouncer(delay: 0.5)
+
+    /// Schedules a debounced save, moving JSON serialization and disk I/O off the main thread.
+    func scheduleSave(delay _: TimeInterval = 0.5) {
+        debouncer.call { [weak self] in
+            guard let self else { return }
+            saveInBackground()
+        }
+    }
+
+    /// Background save: snapshots the payload on the main actor, clears isDirty,
+    /// and performs directory creation, JSON encoding, and atomic disk write on a background queue.
+    private func saveInBackground() {
+        guard isDirty else { return }
+        let snapshot = data
+        let targetURL = sidecarURL
+        isDirty = false
+
+        DispatchQueue.global(qos: .utility).async { [encoder] in
+            do {
+                let dir = targetURL.deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let encoded = try encoder.encode(snapshot)
+                try encoded.write(to: targetURL, options: .atomic)
+                Log.storage.debug("[Sidecar] asynchronously saved metadata to disk")
+            } catch {
+                Log.storage.error("[Sidecar] background save failed: \(error)")
+            }
+        }
+    }
+
     func load() throws {
         guard FileManager.default.fileExists(atPath: sidecarURL.path) else {
             // File not found — keep whatever is already in data (e.g. populated by migration).
@@ -122,6 +153,7 @@ final class SidecarStore {
     }
 
     func save(force: Bool = false) throws {
+        debouncer.cancel()
         guard isDirty || force else { return }
         let dir = sidecarURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

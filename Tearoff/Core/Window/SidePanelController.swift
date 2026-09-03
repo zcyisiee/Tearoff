@@ -592,7 +592,7 @@ final class SidePanelController: NSWindowController {
         // Leaving the panel ends an in-place card edit session (flushes its save).
         noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
-        noteStore.saveSidecar()
+        noteStore.saveSidecar(immediately: true)
         FinderBrowserRegistry.shared.suspendAllWatching()
         isShown = false
         let gen = animationGeneration &+ 1

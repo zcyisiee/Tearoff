@@ -949,10 +949,15 @@ final class NoteStore {
         SidecarStore.shared.upsertFinderCard(SidecarStore.FinderCardEntry(card), for: card.id)
     }
 
-    /// Flush pending sidecard metadata to disk — the escape hatch for callers
-    /// that batched cheap updates with `persist: false`.
-    func saveSidecar() {
-        try? SidecarStore.shared.save()
+    /// Save pending sidecar metadata to disk. When `immediately` is false (default),
+    /// saving is debounced and performed in the background.
+    /// When `immediately` is true, it synchronously flushes to disk (used on panel hide / app terminate).
+    func saveSidecar(immediately: Bool = false) {
+        if immediately {
+            try? SidecarStore.shared.save()
+        } else {
+            SidecarStore.shared.scheduleSave()
+        }
     }
 
     // MARK: - Finder Card CRUD
@@ -970,7 +975,7 @@ final class NoteStore {
         }
         finderCards.append(card)
         persistFinderCard(card)
-        try? SidecarStore.shared.save()
+        saveSidecar()
         Log.storage.info("[NoteStore] created Finder card \(card.id) in '\(folder, privacy: .public)'")
         return card
     }
@@ -984,7 +989,7 @@ final class NoteStore {
         if focusedFinderCardID == card.id {
             focusedFinderCardID = nil
         }
-        try? SidecarStore.shared.save()
+        saveSidecar()
         Log.storage.info("[NoteStore] deleted Finder card \(card.id)")
     }
 
@@ -998,7 +1003,7 @@ final class NoteStore {
         finderCards[index] = updated
         persistFinderCard(updated)
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -1012,7 +1017,7 @@ final class NoteStore {
         finderCards[index].title = newTitle
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set (or clear) the card's identity color.
@@ -1022,7 +1027,7 @@ final class NoteStore {
         finderCards[index].color = color
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Move a Finder card between folders. Cards can't collide — they have no
@@ -1034,7 +1039,7 @@ final class NoteStore {
         finderCards[index].folder = folder
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set the card's file-list height in points. The view passes
@@ -1047,7 +1052,7 @@ final class NoteStore {
         finderCards[index].listHeight = height
         persistFinderCard(finderCards[index])
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -1060,7 +1065,7 @@ final class NoteStore {
         finderCards[index].viewMode = mode
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's sort column and direction. Persisted to the sidecar
@@ -1074,7 +1079,7 @@ final class NoteStore {
         finderCards[index].sortAscending = ascending
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's icon-grid icon size in points. Persisted
@@ -1087,7 +1092,7 @@ final class NoteStore {
         finderCards[index].iconSize = size
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Set a Finder card's favourites chip font size in points. Persisted
@@ -1099,7 +1104,7 @@ final class NoteStore {
         finderCards[index].chipFontSize = size
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Add a directory to the card's favourites and select it. Non-directories
@@ -1117,7 +1122,7 @@ final class NoteStore {
             finderCards[index].selectedFavoriteID = existing.id
             finderCards[index].currentPath = nil
             persistFinderCard(finderCards[index])
-            try? SidecarStore.shared.save()
+            saveSidecar()
             return existing
         }
         let favorite = FinderFavorite(path: path)
@@ -1126,7 +1131,7 @@ final class NoteStore {
         finderCards[index].currentPath = nil
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
         return favorite
     }
 
@@ -1144,7 +1149,7 @@ final class NoteStore {
         }
         finderCards[index].modifiedAt = Date()
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Point the card's browser at a favourite as its home.
@@ -1156,7 +1161,7 @@ final class NoteStore {
         finderCards[index].selectedFavoriteID = favoriteID
         finderCards[index].currentPath = nil
         persistFinderCard(finderCards[index])
-        try? SidecarStore.shared.save()
+        saveSidecar()
     }
 
     /// Record where the browser currently sits. Navigation is cheap, so this
@@ -1169,7 +1174,7 @@ final class NoteStore {
         finderCards[index].currentPath = path
         persistFinderCard(finderCards[index])
         if persist {
-            try? SidecarStore.shared.save()
+            saveSidecar()
         }
     }
 
@@ -2180,7 +2185,7 @@ final class NoteStore {
             }
         }
         if didSave {
-            try? SidecarStore.shared.save()
+            saveSidecar(immediately: true)
         }
     }
 
