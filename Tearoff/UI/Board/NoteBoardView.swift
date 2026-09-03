@@ -259,7 +259,13 @@ struct NoteBoardView: View {
             closeEditor()
         }
         .onChange(of: noteStore.inlineEditingNoteID) { _, editingID in
-            if editingID != nil {
+            if let editingID {
+                // Editing a different note ends the previous note's
+                // newly-created naming session (its card shows the heading
+                // line in the editor body).
+                if let created = newlyCreatedNoteID, created != editingID {
+                    newlyCreatedNoteID = nil
+                }
                 if editOrderSnapshot == nil {
                     editOrderSnapshot = boardItems.map(\.id)
                 }

@@ -408,7 +408,10 @@ struct BoardNoteCard: View {
 
     /// The note's rich editor embedded in the card. `MarkdownEditorView`
     /// flushes its debounced save on disappearance, so collapsing the card
-    /// can't lose keystrokes.
+    /// can't lose keystrokes. The leading "# Title" line only stays in the
+    /// body during a newly created note's naming session (`focusTitleOnAppear`
+    /// needs it in the text to select the title); existing notes strip it —
+    /// the card's title row already shows the title.
     private var inlineEditor: some View {
         MarkdownEditorView(
             noteID: note.id,
@@ -418,7 +421,7 @@ struct BoardNoteCard: View {
             onContentChanged: { id, newContent in
                 onContentChanged?(id, newContent)
             },
-            showsHeadingLineInBody: true,
+            showsHeadingLineInBody: isNewlyCreated,
             focusTitleOnAppear: isNewlyCreated,
         )
         .frame(height: 280)
