@@ -54,6 +54,10 @@ struct NoteBoardView: View {
     /// Card that just received a dropped image — pulses its border so the
     /// append is discoverable. Cleared shortly after the drop.
     @State private var droppedFlashID: UUID?
+    /// Note that was just newly created — its card inline editor will focus and select the title on mount.
+    @State private var newlyCreatedNoteID: UUID?
+    /// Target note to scroll into view.
+    @State private var scrollToNoteID: UUID?
 
     // Folder delete confirmation
     @State private var deletingFolderName: String?
@@ -257,6 +261,7 @@ struct NoteBoardView: View {
                     editOrderSnapshot = boardItems.map(\.id)
                 }
             } else {
+                newlyCreatedNoteID = nil
                 editOrderSnapshot = nil
             }
         }
@@ -278,11 +283,13 @@ struct NoteBoardView: View {
             noteStore.pendingNewFolder = false
             startCreatingFolder()
         }
-        .onChange(of: noteStore.pendingRenameNote) { _, note in
-            guard let note else { return }
-            // A brand-new note opens expanded and ready to type — SideNotes-style.
-            noteStore.pendingRenameNote = nil
-            openEditorWithoutCard { noteStore.openNote(note) }
+        .onChange(of: noteStore.pendingNewNote) { _, pending in
+            guard pending else { return }
+            noteStore.pendingNewNote = false
+            if noteStore.selectedNote != nil {
+                closeEditor()
+            }
+            createNote()
         }
         .onChange(of: noteStore.pendingSearchOnHome) { _, pending in
             guard pending else { return }
@@ -295,6 +302,13 @@ struct NoteBoardView: View {
                 noteStore.pendingSearchOnHome = false
                 isSearching = true
                 DispatchQueue.main.async { isSearchFieldFocused = true }
+            }
+            if noteStore.pendingNewNote {
+                noteStore.pendingNewNote = false
+                if noteStore.selectedNote != nil {
+                    closeEditor()
+                }
+                createNote()
             }
         }
     }
@@ -484,29 +498,40 @@ struct NoteBoardView: View {
     private var boardContent: some View {
         GeometryReader { geo in
             ScrollView {
-                VStack(spacing: 0) {
-                    if appSettings.boardLayout == .tabs {
-                        tabsBoard
-                    } else {
-                        sectionsBoard
+                ScrollViewReader { scrollProxy in
+                    VStack(spacing: 0) {
+                        if appSettings.boardLayout == .tabs {
+                            tabsBoard
+                        } else {
+                            sectionsBoard
+                        }
+                    }
+                    .padding(.horizontal, DesignToken.Space.lg)
+                    .padding(.vertical, DesignToken.Space.md)
+                    .padding(.bottom, 44) // clearance for the floating selection toolbar
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+                    // Clicking any blank area (card gaps, margins) dismisses the
+                    // in-place card editor and an active selection — Finder-style.
+                    // Right-click on the same gaps opens the new-note/new-card menu;
+                    // cards sit above and their own context menus win.
+                    .contentShape(Rectangle())
+                    .onTapGesture { handleBackgroundTap() }
+                    .nsContextMenu(isEnabled: noteStore.selectedNote == nil) { newItemsMenu() }
+                    .coordinateSpace(name: BoardCardSpace.name)
+                    .overlay(alignment: .topLeading) {
+                        BoardDragReplica(session: dragSession)
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
+                    .onChange(of: scrollToNoteID) { _, targetID in
+                        guard let targetID else { return }
+                        scrollToNoteID = nil
+                        DispatchQueue.main.async {
+                            withAnimation(DesignToken.Motion.morph) {
+                                scrollProxy.scrollTo(targetID, anchor: .top)
+                            }
+                        }
                     }
                 }
-                .padding(.horizontal, DesignToken.Space.lg)
-                .padding(.vertical, DesignToken.Space.md)
-                .padding(.bottom, 44) // clearance for the floating selection toolbar
-                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-                // Clicking any blank area (card gaps, margins) dismisses the
-                // in-place card editor and an active selection — Finder-style.
-                // Right-click on the same gaps opens the new-note/new-card menu;
-                // cards sit above and their own context menus win.
-                .contentShape(Rectangle())
-                .onTapGesture { handleBackgroundTap() }
-                .nsContextMenu(isEnabled: noteStore.selectedNote == nil) { newItemsMenu() }
-                .coordinateSpace(name: BoardCardSpace.name)
-                .overlay(alignment: .topLeading) {
-                    BoardDragReplica(session: dragSession)
-                }
-                .animation(.easeInOut(duration: 0.2), value: noteStore.rootSwitchToken)
             }
             .overlay(alignment: .bottom) {
                 SelectionToolbar()
@@ -725,16 +750,19 @@ struct NoteBoardView: View {
     private func itemGrid(_ items: [BoardItem]) -> some View {
         LazyVStack(spacing: DesignToken.Space.lg) {
             ForEach(items) { item in
-                switch item {
-                case let .note(note):
-                    if noteRename.renamingNoteID == note.id {
-                        boardRenameCard(for: note)
-                    } else {
-                        card(for: note, in: items)
+                Group {
+                    switch item {
+                    case let .note(note):
+                        if noteRename.renamingNoteID == note.id {
+                            boardRenameCard(for: note)
+                        } else {
+                            card(for: note, in: items)
+                        }
+                    case let .finder(card):
+                        finderCard(for: card, in: items)
                     }
-                case let .finder(card):
-                    finderCard(for: card, in: items)
                 }
+                .id(item.id)
             }
         }
     }
@@ -750,6 +778,7 @@ struct NoteBoardView: View {
             note: note,
             isSelected: noteStore.selection.contains(.note(note.id)),
             isEditing: noteStore.inlineEditingNoteID == note.id,
+            isNewlyCreated: newlyCreatedNoteID == note.id,
             isDragging: dragSession.noteID == note.id,
             hoverEnabled: dragSession.noteID == nil,
             isDropped: droppedFlashID == note.id,
@@ -1449,9 +1478,19 @@ struct NoteBoardView: View {
     // MARK: - Actions
 
     private func createNote() {
+        if isSearching {
+            dismissSearch()
+        }
+        if let folder = noteStore.selectedFolder?.name {
+            collapsedSections.remove(folder)
+        } else {
+            collapsedSections.remove("__root__")
+        }
         let folder = noteStore.selectedFolder?.name ?? ""
         let note = noteStore.createNote(in: folder)
-        openEditorWithoutCard { noteStore.openNote(note) }
+        newlyCreatedNoteID = note.id
+        noteStore.beginInlineEdit(note)
+        scrollToNoteID = note.id
     }
 
     /// Folder delete entry point, shared by the tab-bar and chip-row context

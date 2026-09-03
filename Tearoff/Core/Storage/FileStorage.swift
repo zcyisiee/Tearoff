@@ -394,7 +394,7 @@ enum FileStorage {
 
     static func sanitizeForFilename(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Untitled" }
+        guard !trimmed.isEmpty else { return L10n.shared["common.untitled"] }
 
         let illegal = CharacterSet(charactersIn: "/\\:*?\"<>|\0")
         let cleaned = trimmed.unicodeScalars
@@ -412,7 +412,7 @@ enum FileStorage {
         }
         result = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 
-        return result.isEmpty ? "Untitled" : result
+        return result.isEmpty ? L10n.shared["common.untitled"] : result
     }
 
     // MARK: - Note I/O
@@ -1258,6 +1258,6 @@ enum FileStorage {
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         // Strip leading # for markdown headings
         let stripped = firstLine.drop { $0 == "#" || $0 == " " }
-        return stripped.isEmpty ? "Untitled" : String(stripped)
+        return stripped.isEmpty ? L10n.shared["common.untitled"] : String(stripped)
     }
 }

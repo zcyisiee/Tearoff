@@ -113,8 +113,8 @@ final class NoteStore {
     var pendingSearchOnHome = false
     /// Set to true by the shortcut handler to trigger "new folder" in the currently visible list view.
     var pendingNewFolder = false
-    /// Set by shortcut handler after creating a note to trigger inline rename in the list view.
-    var pendingRenameNote: Note?
+    /// Set to true by the shortcut handler to trigger note creation in the board view.
+    var pendingNewNote = false
     /// Set to true by the ⌘F shortcut handler when a note is open — consumed by EditorScreen
     /// to show the in-editor find bar.
     var pendingEditorFind: Bool = false
@@ -577,10 +577,11 @@ final class NoteStore {
     // MARK: - Note CRUD
 
     func createNote(in folder: String = "") -> Note {
-        var title = "Untitled"
+        let baseTitle = L10n.shared["common.untitled"]
+        var title = baseTitle
         var counter = 2
         while noteTitleExists(title, in: folder) {
-            title = "Untitled \(counter)"
+            title = "\(baseTitle) \(counter)"
             counter += 1
         }
         let now = Date()
@@ -2077,6 +2078,6 @@ final class NoteStore {
     private static func extractTitle(from content: String) -> String {
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         let stripped = firstLine.drop { $0 == "#" || $0 == " " }
-        return stripped.isEmpty ? "Untitled" : String(stripped)
+        return stripped.isEmpty ? L10n.shared["common.untitled"] : String(stripped)
     }
 }

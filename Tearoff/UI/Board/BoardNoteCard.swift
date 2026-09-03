@@ -99,6 +99,8 @@ struct BoardNoteCard: View {
     var isSelected: Bool = false
     /// True while this card is expanded into its in-place editor.
     var isEditing: Bool = false
+    /// True when this card was just created and should focus/select the title on mount.
+    var isNewlyCreated: Bool = false
     /// True while this card is the source of an active drag: the card hides in
     /// its slot (keeping the height) while the floating replica carries the
     /// visuals.
@@ -414,6 +416,7 @@ struct BoardNoteCard: View {
             onContentChanged: { id, newContent in
                 onContentChanged?(id, newContent)
             },
+            focusTitleOnAppear: isNewlyCreated,
         )
         .frame(height: 280)
         .frame(maxWidth: .infinity)
