@@ -1,22 +1,29 @@
-![Tearoff](.github/assets/Tearoff.svg)
+<img src=".github/assets/Tearoff.svg" alt="Tearoff" width="128" align="left" />
 
-**Tearoff**
+<b><font>Tearoff</font></b>
 
- 一个可以随手记录的便签。
+随手记录，顺手取用
 
-  
+<br clear="all" />
 
+<p align="center">
+  <b>简体中文</b> · <a href="README-en.md">English</a>
+</p>
 
-**简体中文** · [English](README-en.md)
+<p align="center">
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/v/release/zcyisiee/Tearoff?label=Latest%20Release&color=green" alt="Latest Release" /></a>
+  <a href="https://github.com/zcyisiee/Tearoff/releases"><img src="https://img.shields.io/github/downloads/zcyisiee/Tearoff/total?color=green" alt="Total Downloads" /></a>
+  <br />
+  <img src="https://img.shields.io/badge/Swift-6.2-orange?logo=swift" alt="Swift" />
+  <img src="https://img.shields.io/badge/macOS-15.7+-black?logo=apple" alt="macOS" />
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
+</p>
 
-![Latest Release](https://img.shields.io/github/v/release/zcyisiee/Tearoff?label=Latest%20Release&color=green)![Total Downloads](https://img.shields.io/github/downloads/zcyisiee/Tearoff/total?color=green)  
-![Swift](https://img.shields.io/badge/Swift-6.2-orange?logo=swift)![macOS](https://img.shields.io/badge/macOS-15.7+-black?logo=apple)![License](https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue)
-
-**Tearoff** 的目标：找到传统纸媒‘随手记录’的感觉。Tearoff 最大的优势是便捷性，只需将鼠标滑到屏幕边缘即可唤出 Tearoff。每一张卡片都对应一个 markdown 文件，单击即可就地编辑，双击则进入编辑器进行深入编辑。
+**Tearoff** 的目标：找到传统纸媒**随手记录**的感觉。Tearoff 最大的优势是便捷性，只需将鼠标滑到屏幕边缘即可唤出 Tearoff。Tearoff的核心对象是卡片，目前分为**笔记卡片**和**文件夹卡片**。笔记卡片对应一个 markdown 文件，单击即可就地编辑，双击则进入编辑器进行深入编辑。文件夹卡片可以直接操纵文件，具备常见的拖拽、删除、查看文件等功能。
 
 你可以将卡片作为日程表、备忘录、日记本或随笔使用。我对日程表场景进行了优化，在卡片内点击待办(`- [ ]`)即可打勾或取消勾选。
 
-![Tearoff Card View](.github/assets/screenshot-cards.png)
+![Tearoff Card View](.github/assets/screenshot-cards.gif)
 
 ---
 
