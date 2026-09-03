@@ -53,6 +53,7 @@ struct NoteBoardView: View {
     /// Finder card currently being renamed in place (board-owned, like note
     /// rename) — `FinderCardView` shows the title editor when set.
     @State private var renamingFinderCardID: UUID?
+    @State private var renamingFinderCardDraft: String = ""
     /// Card that just received a dropped image — pulses its border so the
     /// append is discoverable. Cleared shortly after the drop.
     @State private var droppedFlashID: UUID?
@@ -830,6 +831,7 @@ struct NoteBoardView: View {
             hoverEnabled: dragSession.itemID == nil,
             layout: cardLayout,
             isRenamingTitle: renamingFinderCardID == card.id,
+            titleDraft: renamingFinderCardID == card.id ? $renamingFinderCardDraft : nil,
             onTap: { flags in
                 handleFinderCardTap(card, flags: flags, visible: visible)
             },
@@ -841,8 +843,12 @@ struct NoteBoardView: View {
             onRenameCommit: { title in
                 noteStore.renameFinderCard(card, to: title)
                 renamingFinderCardID = nil
+                renamingFinderCardDraft = ""
             },
-            onRenameCancel: { renamingFinderCardID = nil },
+            onRenameCancel: {
+                renamingFinderCardID = nil
+                renamingFinderCardDraft = ""
+            },
             onFileDragSessionChanged: { active in
                 if active {
                     AppDelegate.shared?.panelController?.suspendAutoHide()
@@ -856,7 +862,9 @@ struct NoteBoardView: View {
                 NoteListMenus.selectionMenu(noteStore: noteStore, l10n: l10n)
             } else {
                 FinderCardMenus.cardMenu(card: card, noteStore: noteStore, l10n: l10n, onRename: {
+                    commitFinderCardRenameIfActive()
                     renamingFinderCardID = card.id
+                    renamingFinderCardDraft = card.title ?? card.displayTitle
                 })
             }
         }
@@ -870,6 +878,15 @@ struct NoteBoardView: View {
         FinderCardBrowser.revealInFinder(urls)
     }
 
+    private func commitFinderCardRenameIfActive() {
+        guard let cardID = renamingFinderCardID else { return }
+        if let card = noteStore.finderCards.first(where: { $0.id == cardID }) {
+            noteStore.renameFinderCard(card, to: renamingFinderCardDraft)
+        }
+        renamingFinderCardID = nil
+        renamingFinderCardDraft = ""
+    }
+
     /// Finder-style click semantics for the Finder card's body: the body is
     /// mostly the AppKit file list which consumes its own clicks, so this
     /// fires for chrome only. A quick second plain click reveals the card's
@@ -877,6 +894,9 @@ struct NoteBoardView: View {
     /// selects the range to the anchor; a plain click clears an active
     /// selection.
     private func handleFinderCardTap(_ card: FinderCard, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        if renamingFinderCardID != card.id {
+            commitFinderCardRenameIfActive()
+        }
         resignFinderListFocus()
         noteStore.selectedTitleNoteID = nil
         lastTitleTap = nil
@@ -913,6 +933,7 @@ struct NoteBoardView: View {
     /// ⇧-click selects the range to the anchor. The in-place editor opens from
     /// the title row's trailing area (`handleTitleAreaTap`).
     private func handleCardTap(_ note: Note, flags: NSEvent.ModifierFlags, visible: [BoardItem]) {
+        commitFinderCardRenameIfActive()
         resignFinderListFocus()
         noteStore.selectedTitleNoteID = nil
         lastTitleTap = nil
@@ -1053,7 +1074,7 @@ struct NoteBoardView: View {
         if noteStore.inlineEditingNoteID != nil {
             noteStore.endInlineEdit()
         }
-        renamingFinderCardID = nil
+        commitFinderCardRenameIfActive()
         resignFinderListFocus()
         if !noteStore.selection.isEmpty {
             noteStore.clearSelection()
@@ -1542,8 +1563,10 @@ struct NoteBoardView: View {
     /// New Finder card in the current folder, selected and ready to rename
     /// from its card menu (no scroll needed — creation is user-triggered).
     private func createFinderCard() {
+        commitFinderCardRenameIfActive()
         let card = noteStore.createFinderCard(in: noteStore.selectedFolder?.name ?? "")
         renamingFinderCardID = nil
+        renamingFinderCardDraft = ""
         noteStore.replaceSelection(with: .finderCard(card.id))
     }
 

@@ -136,6 +136,10 @@ final class NoteStore {
     /// mutators that touch tags.
     private(set) var allUsedTags: Set<TagColor> = []
 
+    /// Timestamp of recent rename operations per note. Used to guard `updateContent`
+    /// against stale editor debounced callbacks reverting the new title.
+    private var recentlyRenamedNotes: [UUID: Date] = [:]
+
     private func recomputeAllUsedTags() {
         allUsedTags = Set(notes.flatMap(\.tags))
     }
@@ -620,16 +624,34 @@ final class NoteStore {
     func updateContent(for noteID: UUID, content: String) {
         guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return }
         guard notes[index].content != content else { return }
-        notes[index].content = content
-        notes[index].modifiedAt = Date()
+
+        let now = Date()
+        recentlyRenamedNotes = recentlyRenamedNotes.filter { now.timeIntervalSince($0.value) < 10.0 }
+
+        var effectiveContent = content
         // Only derive title from content when an explicit # heading is present.
         // Without this guard, a rename on a headingless note reverts within ~150ms
         // because the editor fires contentChanged on load and extractTitle returns
         // the raw first line, overwriting the manually-set title.
         let firstLine = content.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
         if firstLine.hasPrefix("#") {
-            notes[index].title = Self.extractTitle(from: content)
+            let extracted = Self.extractTitle(from: content)
+            let isRecentlyRenamed = recentlyRenamedNotes[noteID].map { now.timeIntervalSince($0) < 5.0 } ?? false
+            if isRecentlyRenamed, extracted != notes[index].title {
+                // Editor callback carrying a stale heading from before rename.
+                // Reconstruct the first heading line using the store's current title instead of reverting.
+                var lines = content.components(separatedBy: "\n")
+                if let headingIndex = lines.firstIndex(where: { $0.hasPrefix("#") }) {
+                    let prefix = String(lines[headingIndex].prefix(while: { $0 == "#" }))
+                    lines[headingIndex] = "\(prefix) \(notes[index].title)"
+                    effectiveContent = lines.joined(separator: "\n")
+                }
+            } else {
+                notes[index].title = extracted
+            }
         }
+        notes[index].content = effectiveContent
+        notes[index].modifiedAt = now
         dirtyNoteIDs.insert(noteID)
 
         // Also update selectedNote if it matches
@@ -644,8 +666,10 @@ final class NoteStore {
         guard !trimmed.isEmpty else { return }
         guard !noteTitleExists(trimmed, in: note.folder, excluding: note.id) else { return }
 
+        let now = Date()
         notes[index].title = trimmed
-        notes[index].modifiedAt = Date()
+        notes[index].modifiedAt = now
+        recentlyRenamedNotes[note.id] = now
 
         // Update the first # heading line in content to match the new title
         var lines = notes[index].content.components(separatedBy: "\n")
@@ -655,11 +679,14 @@ final class NoteStore {
             notes[index].content = lines.joined(separator: "\n")
         }
 
-        dirtyNoteIDs.insert(note.id)
-
         if selectedNote?.id == note.id {
             selectedNote = notes[index]
+            onNeedEditorReload?(notes[index].content)
         }
+
+        // Persist immediately on rename (disk file rename + sidecar save),
+        // consistent with renameFinderCard.
+        saveNoteImmediately(note.id)
     }
 
     /// Toggle a single tag on a note. Updates in-memory state and marks the note dirty.
@@ -2013,40 +2040,50 @@ final class NoteStore {
 
     // MARK: - Save
 
+    /// Persist a single note to disk immediately (including file rename, asset directory move,
+    /// and sidecar entry update) and clear its dirty flag.
+    @discardableResult
+    func saveNoteImmediately(_ noteID: UUID) -> Bool {
+        guard let index = notes.firstIndex(where: { $0.id == noteID }) else { return false }
+        do {
+            let result = try FileStorage.writeNote(notes[index])
+            notes[index].savedFilename = result.filename
+            notes[index].savedAt = result.savedAt
+            if let updated = result.updatedContent {
+                notes[index].content = updated
+                if selectedNote?.id == noteID {
+                    selectedNote?.content = updated
+                    let noteTitle = notes[index].title
+                    Log.storage.info("[Image] reloading editor after image path rewrite for '\(noteTitle, privacy: .public)'")
+                    onNeedEditorReload?(updated)
+                }
+            }
+            if selectedNote?.id == noteID {
+                selectedNote?.savedFilename = result.filename
+                selectedNote?.savedAt = result.savedAt
+            }
+            // Clean up orphaned images (deleted from body but file still on disk).
+            // Shared-assets mode keeps files until explicitly deleted (Typora-like).
+            if AppSettings.shared.imageStorageMode == .hiddenDirectory {
+                FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
+            }
+            dirtyNoteIDs.remove(noteID)
+            return true
+        } catch {
+            Log.storage.error("[NoteStore] saveNoteImmediately failed for \(noteID) — \(error)")
+            return false
+        }
+    }
+
     func saveDirtyNotes() {
         if !dirtyNoteIDs.isEmpty {
             let count = dirtyNoteIDs.count
             Log.storage.debug("[NoteStore] saving \(count) dirty notes")
         }
-        for noteID in dirtyNoteIDs {
-            guard let index = notes.firstIndex(where: { $0.id == noteID }) else { continue }
-            do {
-                let result = try FileStorage.writeNote(notes[index])
-                notes[index].savedFilename = result.filename
-                notes[index].savedAt = result.savedAt
-                if let updated = result.updatedContent {
-                    notes[index].content = updated
-                    if selectedNote?.id == noteID {
-                        selectedNote?.content = updated
-                        let noteTitle = notes[index].title
-                        Log.storage.info("[Image] reloading editor after image path rewrite for '\(noteTitle, privacy: .public)'")
-                        onNeedEditorReload?(updated)
-                    }
-                }
-                if selectedNote?.id == noteID {
-                    selectedNote?.savedFilename = result.filename
-                    selectedNote?.savedAt = result.savedAt
-                }
-                // Clean up orphaned images (deleted from body but file still on disk).
-                // Shared-assets mode keeps files until explicitly deleted (Typora-like).
-                if AppSettings.shared.imageStorageMode == .hiddenDirectory {
-                    FileStorage.cleanOrphanedImages(forNote: notes[index], body: notes[index].content)
-                }
-            } catch {
-                Log.storage.error("[NoteStore] saveDirtyNotes failed for \(noteID) — \(error)")
-            }
+        let idsToSave = dirtyNoteIDs
+        for noteID in idsToSave {
+            saveNoteImmediately(noteID)
         }
-        dirtyNoteIDs.removeAll()
     }
 
     // MARK: - Private

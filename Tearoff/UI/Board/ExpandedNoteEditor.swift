@@ -71,9 +71,10 @@ struct ExpandedNoteEditor: View {
         guard !isConflicting else { return }
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, trimmed != currentNote.title {
+            let oldContent = currentNote.content
             noteStore.renameNote(currentNote, to: trimmed)
             if let updated = noteStore.notes.first(where: { $0.id == currentNote.id }),
-               updated.content != currentNote.content
+               updated.content != oldContent
             {
                 pendingEditorReload = updated.content
             }

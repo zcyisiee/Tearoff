@@ -327,6 +327,15 @@ struct MarkdownEditorView: View {
                     }
                 }
             }
+            .onChange(of: noteTitle) { _, newTitle in
+                guard !showsHeadingLineInBody, !AppSettings.shared.editorRawSourceMode else { return }
+                saveDebouncer.cancel()
+                if let prefix = hiddenHeadingLine.components(separatedBy: " ").first, prefix.hasPrefix("#") {
+                    hiddenHeadingLine = "\(prefix) \(newTitle)"
+                } else {
+                    hiddenHeadingLine = "# \(newTitle)"
+                }
+            }
             .onChange(of: pendingReload) { _, newContent in
                 guard let newContent else { return }
                 saveDebouncer.cancel()
