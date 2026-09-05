@@ -423,6 +423,8 @@ struct BoardNoteCard: View {
             },
             showsHeadingLineInBody: isNewlyCreated,
             focusTitleOnAppear: isNewlyCreated,
+            accentColor: accentColor,
+            useBoardTypography: true,
         )
         .frame(height: 280)
         .frame(maxWidth: .infinity)
