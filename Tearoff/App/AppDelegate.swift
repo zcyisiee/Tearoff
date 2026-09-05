@@ -44,7 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         try? SidecarStore.shared.load()
-        panelController?.noteStore.loadFromDisk()
+        panelController?.noteStore.loadFromDisk { [weak self] in
+            guard let noteStore = self?.panelController?.noteStore else { return }
+            // Daily notes: one-time migration of legacy date-titled root notes,
+            // then archive anything older than today.
+            DailyNoteService.migrateIfNeeded(in: noteStore)
+            DailyNoteService.archivePastDailies(in: noteStore)
+        }
         ShortcutManager.shared.setup(panelController: panelController!)
 
         // "Choose on launch": if the toggle is on and ≥2 roots are configured, show the

@@ -38,6 +38,9 @@ final class SidePanelController: NSWindowController {
     let edgeDetector: EdgeDetector
     let noteStore = NoteStore()
     let appSettings = AppSettings.shared
+    /// The ISO date string seen on the last `showPanel` call. Used to detect day rollovers
+    /// so DailyNoteService can archive stale dailies only when the date actually changes.
+    private var lastSeenDate: String = DailyNoteService.dateString()
 
     // MARK: - Init
 
@@ -312,6 +315,11 @@ final class SidePanelController: NSWindowController {
                 noteStore.pendingNewFolder = true
                 return nil
             }
+            if s.dailyNoteShortcut?.matches(event) == true {
+                guard !noteStore.showTrash else { return event }
+                DailyNoteService.openOrCreateToday(in: noteStore)
+                return nil
+            }
             return event
         }
 
@@ -540,6 +548,12 @@ final class SidePanelController: NSWindowController {
         // Check for external file changes every time the panel becomes visible
         noteStore.checkForExternalChanges()
         FinderBrowserRegistry.shared.resumeAllWatching()
+        // Archive stale daily notes when the calendar day has rolled over since last check.
+        let today = DailyNoteService.dateString()
+        if today != lastSeenDate {
+            lastSeenDate = today
+            DailyNoteService.archivePastDailies(in: noteStore)
+        }
 
         isShown = true
         let gen = animationGeneration &+ 1

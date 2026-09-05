@@ -237,6 +237,8 @@
   "settings.keyboard.redo": "Redo",
   "settings.keyboard.previousNote": "पिछला नोट",
   "settings.keyboard.nextNote": "अगला नोट",
+
+  "settings.keyboard.dailyNote": "दैनिक नोट",
   "settings.keyboard.formatting": "एडिटर फ़ॉर्मैटिंग",
   "settings.keyboard.bold": "बोल्ड",
   "settings.keyboard.italic": "इटैलिक",

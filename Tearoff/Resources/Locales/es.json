@@ -237,6 +237,8 @@
   "settings.keyboard.redo": "Rehacer",
   "settings.keyboard.previousNote": "Nota anterior",
   "settings.keyboard.nextNote": "Nota siguiente",
+
+  "settings.keyboard.dailyNote": "Nota diaria",
   "settings.keyboard.formatting": "Formato del editor",
   "settings.keyboard.bold": "Negrita",
   "settings.keyboard.italic": "Cursiva",

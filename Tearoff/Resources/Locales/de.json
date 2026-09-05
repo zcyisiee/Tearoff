@@ -237,6 +237,8 @@
   "settings.keyboard.redo": "Wiederholen",
   "settings.keyboard.previousNote": "Vorherige Notiz",
   "settings.keyboard.nextNote": "Nächste Notiz",
+
+  "settings.keyboard.dailyNote": "Tägliche Notiz",
   "settings.keyboard.formatting": "Editor-Formatierung",
   "settings.keyboard.bold": "Fett",
   "settings.keyboard.italic": "Kursiv",

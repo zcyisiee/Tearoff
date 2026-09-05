@@ -83,6 +83,10 @@ final class ShortcutSettings {
         didSet { save(shortcut: nextNoteShortcut, forKey: nextNoteKey) }
     }
 
+    var dailyNoteShortcut: KeyboardShortcut? {
+        didSet { save(shortcut: dailyNoteShortcut, forKey: dailyNoteKey) }
+    }
+
     // MARK: - Defaults
 
     static let defaultTogglePanel = KeyboardShortcut(keyCode: UInt16(kVK_Space), modifiers: UInt32(controlKey | shiftKey))
@@ -92,6 +96,7 @@ final class ShortcutSettings {
     static let defaultPin = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_P), modifiers: UInt32(cmdKey))
     static let defaultPreviousNote = KeyboardShortcut(keyCode: UInt16(kVK_LeftArrow), modifiers: UInt32(cmdKey))
     static let defaultNextNote = KeyboardShortcut(keyCode: UInt16(kVK_RightArrow), modifiers: UInt32(cmdKey))
+    static let defaultDailyNote = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
 
     // MARK: - Conflict detection
 
@@ -106,6 +111,7 @@ final class ShortcutSettings {
             ("settings.keyboard.pinPanel", pinShortcut),
             ("settings.keyboard.previousNote", previousNoteShortcut),
             ("settings.keyboard.nextNote", nextNoteShortcut),
+            ("settings.keyboard.dailyNote", dailyNoteShortcut),
         ]
         for (key, s) in configurable where key != ownKey {
             if s == shortcut {
@@ -142,6 +148,7 @@ final class ShortcutSettings {
     private let pinKey = "pinShortcut"
     private let previousNoteKey = "previousNoteShortcut"
     private let nextNoteKey = "nextNoteShortcut"
+    private let dailyNoteKey = "dailyNoteShortcut"
 
     // MARK: - Init
 
@@ -171,6 +178,7 @@ final class ShortcutSettings {
         pinShortcut = load(forKey: pinKey, default: Self.defaultPin)
         previousNoteShortcut = load(forKey: previousNoteKey, default: Self.defaultPreviousNote)
         nextNoteShortcut = load(forKey: nextNoteKey, default: Self.defaultNextNote)
+        dailyNoteShortcut = load(forKey: dailyNoteKey, default: Self.defaultDailyNote)
     }
 
     /// Returns the saved shortcut, or `fallback` if the key was never written.
