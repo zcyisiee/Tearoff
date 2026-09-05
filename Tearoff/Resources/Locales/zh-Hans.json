@@ -226,6 +226,8 @@
   "settings.keyboard.redo": "重做",
   "settings.keyboard.previousNote": "上一篇笔记",
   "settings.keyboard.nextNote": "下一篇笔记",
+
+  "settings.keyboard.dailyNote": "Daily 便签",
   "settings.keyboard.formatting": "编辑器格式化",
   "settings.keyboard.bold": "粗体",
   "settings.keyboard.italic": "斜体",

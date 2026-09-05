@@ -44,6 +44,7 @@ struct BoardSettingsView: View {
     @State private var pinShortcut: KeyboardShortcut? = ShortcutSettings.shared.pinShortcut
     @State private var previousNoteShortcut: KeyboardShortcut? = ShortcutSettings.shared.previousNoteShortcut
     @State private var nextNoteShortcut: KeyboardShortcut? = ShortcutSettings.shared.nextNoteShortcut
+    @State private var dailyNoteShortcut: KeyboardShortcut? = ShortcutSettings.shared.dailyNoteShortcut
 
     @State private var selectedLocale = L10n.shared.locale
 
@@ -410,6 +411,13 @@ struct BoardSettingsView: View {
                 defaultValue: ShortcutSettings.defaultNextNote,
                 ownKey: "settings.keyboard.nextNote",
                 apply: { ShortcutSettings.shared.nextNoteShortcut = $0 },
+            )
+            shortcutRow(
+                l10n["settings.keyboard.dailyNote"],
+                shortcut: $dailyNoteShortcut,
+                defaultValue: ShortcutSettings.defaultDailyNote,
+                ownKey: "settings.keyboard.dailyNote",
+                apply: { ShortcutSettings.shared.dailyNoteShortcut = $0 },
             )
 
             Divider()

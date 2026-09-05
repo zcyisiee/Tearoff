@@ -113,6 +113,10 @@ struct MarkdownEditorView: View {
     /// already shown in the editor header).
     var showsHeadingLineInBody: Bool = false
     var focusTitleOnAppear: Bool = false
+    /// Identity accent color to thread into the editor config (heading marker tint).
+    var accentColor: Color?
+    /// When true, uses board-scale font size and heading multipliers for compact display.
+    var useBoardTypography: Bool = false
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
@@ -147,6 +151,8 @@ struct MarkdownEditorView: View {
         outline: OutlineState? = nil,
         showsHeadingLineInBody: Bool = false,
         focusTitleOnAppear: Bool = false,
+        accentColor: Color? = nil,
+        useBoardTypography: Bool = false,
     ) {
         self.noteID = noteID
         self.noteTitle = noteTitle
@@ -160,6 +166,8 @@ struct MarkdownEditorView: View {
         self.outline = outline
         self.showsHeadingLineInBody = showsHeadingLineInBody
         self.focusTitleOnAppear = focusTitleOnAppear
+        self.accentColor = accentColor
+        self.useBoardTypography = useBoardTypography
         if showsHeadingLineInBody {
             _text = State(initialValue: initialContent)
             _hiddenHeadingLine = State(initialValue: "")
@@ -183,6 +191,11 @@ struct MarkdownEditorView: View {
         let appSettings = AppSettings.shared
         let fontName = Self.resolvedFontFamily(from: appSettings.editorFontName) ?? "SF Pro"
         let isRawSource = appSettings.editorRawSourceMode
+        // When board typography is requested, render at board font size so the inline
+        // editor and expanded editor match the card preview scale.
+        let activeFontSize = useBoardTypography
+            ? CGFloat(appSettings.boardFontSize)
+            : CGFloat(appSettings.editorFontSize)
 
         var config = MarkdownEditorConfiguration.makeTearoffConfig(
             noteFolder: noteFolder,
@@ -199,6 +212,8 @@ struct MarkdownEditorView: View {
                 findClearHighlights: .editorFindClearHighlights,
             ),
             rawSourceMode: isRawSource,
+            accentColor: accentColor,
+            useBoardTypography: useBoardTypography,
         )
         config.spellChecking = SpellCheckingPolicy(
             continuousSpellChecking: appSettings.spellCheckingEnabled,
@@ -217,7 +232,7 @@ struct MarkdownEditorView: View {
                 text: $text,
                 configuration: config,
                 fontName: fontName,
-                fontSize: CGFloat(appSettings.editorFontSize),
+                fontSize: activeFontSize,
                 documentId: noteID.uuidString,
                 onPasteImage: { [noteID, noteTitle, noteFolder] pasteboard in
                     // Pasting a file URL (Finder copy) keeps the original bytes

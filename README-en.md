@@ -19,9 +19,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
-**Tearoff** aims to bring back the feel of **jotting things down** on torn-off paper. Its biggest advantage is convenience: just slide your mouse to the screen edge to summon Tearoff. The core object in Tearoff is the card, which now comes in two kinds: **note cards** and **folder cards**. A note card maps to a markdown file — single-click to edit in place, double-click to open the full editor. A folder card works with your files directly, with familiar drag-and-drop, delete, and file browsing built in.
+**Tearoff** aims to bring back the feel of jotting things down on paper. Slide your mouse to the screen edge to summon it; move away and it tucks itself away. Grab it, use it, done. If you need it to stay put for a while, click the pin in the top-right corner.
 
-You can use cards as a schedule, memo pad, journal, or scratch pad. I've optimized for the schedule use case — click a to-do (`- [ ]`) directly on a card to check or uncheck it.
+The core object in Tearoff is the card. A **file card** maps to a markdown file. A **folder card** lets you browse and work with files right inside the panel. There's also a special kind of file card: the **Daily card** — one per day, for planning that day's to-dos. Use cards as a schedule, a memo pad, a journal, or a scratch pad. I've tuned the schedule use case specifically: click a to-do (`- [ ]`) right on the card to check or uncheck it. Very handy.
 
 <p align="center">
   <img alt="Tearoff Card View" src=".github/assets/screenshot-cards.gif" width="800" />
@@ -48,36 +48,47 @@ xattr -cr /Applications/Tearoff.app
 
 ## Why I Built Tearoff
 
-Before I switched to CS, my desk was always piled with books and paper. When an idea hit, I'd just tear off a sheet and write it down. It never interrupted what I was doing — and that felt freeing.
+Before I switched to CS, my desk was always piled with reference books and scratch paper. When an idea hit, I'd tear off a sheet and write it down. It never interrupted what I was doing, and that felt freeing.
 
-On a computer, jotting something down means opening an app, creating a file, picking a folder, naming it. Editors like Typora and Obsidian are great, but they're too "formal" — every time you open one, it takes over your workspace and forces you into a different context. For quick, spontaneous notes, that kind of intrusive interaction isn't friendly at all.
+On a computer, jotting something down means opening an app, creating a file, naming it. Editors like Typora and Obsidian are excellent, but they're too "formal" — every time you open one, it takes over your workspace and forces you into another context. For quick, spontaneous notes, that kind of intrusive interaction isn't friendly. Worse, the constant context switching distracts me, and I end up in decision paralysis 🥲
 
-Tearoff is my attempt to bring the "tear off a sheet and write" feeling to the screen. Slide to the edge and start writing; click elsewhere and it tucks away — never interrupting whatever you're working on.
+Tearoff's goal is to bring the "tear off a sheet and write" feeling to the screen. Slide to the edge and start writing; click elsewhere and it tucks away — never interrupting whatever you're working on.
 
 ---
 
 ## Features
 
-- **Non-intrusive**: Slides out from the screen edge, disappears when you click elsewhere. Doesn't take over your workflow or occupy the Dock.
-- **Frictionless**: From "I want to note something" to "it's written down" — no creating files, picking paths, or naming things.
+- **Non-intrusive**: Slides out from the screen edge, disappears when you click elsewhere. Doesn't interrupt your work or occupy the Dock and desktop.
+- **Frictionless**: From "I want to note something" to "it's written down" — no creating files, picking paths, or naming things in between.
+- **Daily card**: Automatically generates a card named after the current date, dedicated to that day's to-dos. Check items off as you go and see the day at a glance.
+- **Folder card**: Put your frequently used folders in a card — browse, open, rename, and drag files in and out, all without opening Finder.
 - **ADHD-friendly**: Doesn't steal focus, doesn't pop up dialogs, doesn't ask you to leave your workspace. Write and go, come back anytime.
 - **Local storage**: Notes are plain `.md` files on disk. No proprietary format, no account. Open them with any editor, sync and back up however you like.
 - **Beautiful UI**: Native SwiftUI interface with carefully tuned colors, animations, and gestures — designed to feel like a built-in part of macOS.
 
 ---
 
+## How It's Organized
+
+Tearoff has just two levels of interface: the main view and the editor view.
+
+The core object of the main view is the card, which currently comes in two kinds: file cards and folder cards. A file card maps to a markdown file; a folder card maps to a folder on disk. The Daily card is a special file card — it maps to the markdown file named after the current date.
+
+Each card has three states. By default it's in card state, showing a content preview. Click the blank area to the right of the title to enter quick-edit state, where you can write a few lines in place. Double-click the same area to enter the editor view, for longer writing.
+
+The main view is divided into three zones from top to bottom: the pinned zone at the top, holding the cards you've pinned manually; the Daily zone in the middle, which always shows today's Daily card; and the timeline at the bottom, where the remaining cards are arranged by time.
+
+Once you're in the editor view, Tearoff behaves like a full-featured Markdown editor: WYSIWYG rendering, code highlighting, and LaTeX formula rendering are all built in.
+
+---
+
 ## Quick Start
 
-Tearoff has just two levels of interface.
+Slide your mouse to the screen edge to summon Tearoff; move away and it hides automatically.
 
-The **main view** is a card list — each card corresponds to a markdown file and shows a content preview.
+The top row holds folder tabs; on the right are search, new folder, new card, and settings. The pin button on the far right keeps the panel open — by default Tearoff auto-hides when your mouse leaves, but pinning it keeps the panel expanded, handy for copy-pasting back and forth between windows. Click the pin again to restore auto-hide.
 
-- Click the blank area to the right of a card's title to enter **quick edit** — an inline input field, great for a one-liner.
-- Double-click a card to open the **editor** for longer writing.
-- Click a to-do item directly on a card to check or uncheck it without entering the editor — this is my optimization for the schedule use case.
-- Right-click empty space (or right-click the "New Card" button) to create a **folder card**: drag your favorite folders onto its top bar, and the card becomes a mini Finder — browse, open, rename, and drag files in and out without leaving the panel.
-
-The top row has folder tabs; on the right are search, new folder, new card, and settings. The **pin** button on the far right keeps the panel open — by default Tearoff auto-hides when your mouse leaves, but pinning it lets you copy-paste between windows. Click the pin again to restore auto-hide.
+Click a to-do item directly on a card to check or uncheck it — no need to enter the editor. Right-click empty space (or right-click the "New Card" button) to create a folder card, then drag a frequently used folder onto the card's top bar to bookmark it.
 
 <p align="center">
   <img alt="Tearoff Editor" src=".github/assets/screenshot-editor.png" width="800" />
@@ -85,20 +96,21 @@ The top row has folder tabs; on the right are search, new folder, new card, and 
 
 ---
 
-## TODO
+## What's Next
 
-The current focus is on the editor experience — the goal is to match Typora's writing feel. Specific directions:
+The focus going forward is the editor view's user experience and features — the goal is to match Typora's writing feel. Planned work includes visual table editing, image drag-and-drop with preview, a more complete keyboard shortcut system, and multi-window and multi-monitor support.
 
-- Visual table editing
-- Image drag-and-drop with preview
-- A more complete keyboard shortcut system
-- Multi-window / multi-monitor support
+---
+
+## Known Issues
+
+Folder cards currently have one unresolved bug: if you drag a folder too quickly, the card may go blank and freeze. When this happens, drag the folder card to a different position and it recovers on its own. I'm working on a fix.
 
 ---
 
 ## Tech Stack
 
-Swift 6.2 + SwiftUI. The editor is built on TextKit 2, with no dependency on WebKit or JavaScript. Beyond functionality, a significant amount of effort went into animation curves, gesture response, and transition effects — these details determine whether the app feels "right."
+Swift 6.2 + SwiftUI. The editor is built on TextKit 2, with no dependency on WebKit or JavaScript. Beyond functionality, a significant amount of effort went into animation curves, gesture response, and transition effects — these details determine whether the app feels right in hand.
 
 For architecture overview, source tree, key patterns, and dev environment setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 

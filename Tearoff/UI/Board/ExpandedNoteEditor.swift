@@ -362,6 +362,8 @@ struct ExpandedNoteEditor: View {
             onNavigateNext: { noteStore.navigateToNextNote(sortedBy: appSettings) },
             onNavigatePrevious: { noteStore.navigateToPreviousNote(sortedBy: appSettings) },
             outline: outline,
+            accentColor: accentColor,
+            useBoardTypography: true,
         )
         .onAppear {
             noteStore.onNeedEditorReload = { content in

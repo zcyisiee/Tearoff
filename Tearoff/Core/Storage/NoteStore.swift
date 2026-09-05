@@ -124,6 +124,8 @@ final class NoteStore {
     /// Set to true by the ⌘F shortcut handler when a note is open — consumed by EditorScreen
     /// to show the in-editor find bar.
     var pendingEditorFind: Bool = false
+    /// Set to true by the daily-note shortcut handler; consumed by NoteBoardView to open/create today's daily.
+    var pendingDailyNote: Bool = false
 
     /// Folder to return to when the user dismisses search (set when search is triggered from a subfolder).
     var searchReturnFolder: Folder?
@@ -2191,7 +2193,7 @@ final class NoteStore {
 
     // MARK: - Private
 
-    private func refreshFolders() {
+    func refreshFolders() {
         let folderNames = Set(notes.map(\.folder)).filter { !$0.isEmpty }
         let allNames = folderNames.union(diskFolderNames).sorted()
 

@@ -145,6 +145,37 @@ struct NoteBoardView: View {
         return result
     }
 
+    // MARK: Root zones (pinned / daily / time flow)
+
+    /// True on the root/All view (no folder open) — where the three-zone
+    /// layout (pinned → daily → time flow) applies.
+    private var isRootView: Bool {
+        noteStore.selectedFolder == nil
+    }
+
+    /// Today's daily note, shown in its own zone at the top of the root view.
+    /// Its file lives in `Daily/`; older dailies are archived into
+    /// `Daily/Archive/` and never surface here.
+    private var todayDailyNote: Note? {
+        DailyNoteService.todayNote(in: noteStore)
+    }
+
+    /// The daily zone as board items: today's daily only, empty (zone hidden)
+    /// when there is no daily for today.
+    private var dailyZoneItems: [BoardItem] {
+        guard let today = todayDailyNote else { return [] }
+        return [.note(today)]
+    }
+
+    /// Root time-flow stream: the normal board ordering minus archived daily
+    /// notes and today's daily (which lives in its own zone above).
+    private var timeFlowItems: [BoardItem] {
+        boardItems.filter { item in
+            guard case let .note(note) = item else { return true }
+            return !DailyNoteService.isDaily(note)
+        }
+    }
+
     private var isEmpty: Bool {
         boardItems.isEmpty && childFolders.isEmpty && !folderRename.isCreating
     }
@@ -302,6 +333,11 @@ struct NoteBoardView: View {
             }
             createNote()
         }
+        .onChange(of: noteStore.pendingDailyNote) { _, pending in
+            guard pending else { return }
+            noteStore.pendingDailyNote = false
+            focusTodayDaily()
+        }
         .onChange(of: noteStore.pendingSearchOnHome) { _, pending in
             guard pending else { return }
             noteStore.pendingSearchOnHome = false
@@ -320,6 +356,10 @@ struct NoteBoardView: View {
                     closeEditor()
                 }
                 createNote()
+            }
+            if noteStore.pendingDailyNote {
+                noteStore.pendingDailyNote = false
+                focusTodayDaily()
             }
         }
     }
@@ -663,8 +703,26 @@ struct NoteBoardView: View {
                     subtitle: l10n["noteList.empty.subtitle"],
                 )
                 .padding(.top, DesignToken.Space.xl)
+            } else if isRootView {
+                rootZonesBoard
             } else {
                 itemGrid(boardItems)
+            }
+        }
+    }
+
+    /// Root/All view: pinned notes zone → Daily zone (today only, hidden when
+    /// empty) → the remaining time flow. Zones have no headers — a slightly
+    /// larger gap separates them. Pinned notes already float to the top of
+    /// `sortedBoardItems`, so the time flow keeps the existing interleaving
+    /// with Finder cards untouched.
+    private var rootZonesBoard: some View {
+        VStack(alignment: .leading, spacing: DesignToken.Space.lg + DesignToken.Space.sm) {
+            if !dailyZoneItems.isEmpty {
+                itemGrid(dailyZoneItems)
+            }
+            if !timeFlowItems.isEmpty {
+                itemGrid(timeFlowItems)
             }
         }
     }
@@ -1575,6 +1633,24 @@ struct NoteBoardView: View {
         newlyCreatedNoteID = note.id
         noteStore.beginInlineEdit(note)
         scrollToNoteID = note.id
+    }
+
+    /// Daily-note shortcut handoff: surface today's daily (created already by
+    /// `DailyNoteService` if missing) at home in in-place edit mode, scrolled
+    /// into view. Mirrors the new-note flow: close any open editor first.
+    private func focusTodayDaily() {
+        if isSearching {
+            dismissSearch()
+        }
+        if noteStore.selectedNote != nil {
+            closeEditor()
+        }
+        if noteStore.selectedFolder != nil {
+            noteStore.navigateToHome()
+        }
+        guard let today = DailyNoteService.todayNote(in: noteStore) else { return }
+        noteStore.beginInlineEdit(today)
+        scrollToNoteID = today.id
     }
 
     /// Folder delete entry point, shared by the tab-bar and chip-row context
