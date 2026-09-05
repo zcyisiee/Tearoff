@@ -96,7 +96,7 @@ final class ShortcutSettings {
     static let defaultPin = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_P), modifiers: UInt32(cmdKey))
     static let defaultPreviousNote = KeyboardShortcut(keyCode: UInt16(kVK_LeftArrow), modifiers: UInt32(cmdKey))
     static let defaultNextNote = KeyboardShortcut(keyCode: UInt16(kVK_RightArrow), modifiers: UInt32(cmdKey))
-    static let defaultDailyNote = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_D), modifiers: UInt32(cmdKey | shiftKey))
+    static let defaultDailyNote = KeyboardShortcut(keyCode: UInt16(kVK_ANSI_D), modifiers: UInt32(cmdKey))
 
     // MARK: - Conflict detection
 
