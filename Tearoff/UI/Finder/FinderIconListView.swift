@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import QuickLookUI
 import SwiftUI
 
@@ -291,6 +292,21 @@ struct FinderIconListView: NSViewRepresentable {
         context.coordinator.attach(scrollView: scrollView, collection: collection, rubberBand: rubberBand)
         context.coordinator.registerCommands()
         context.coordinator.sync()
+        FileLog.shared.event("finder", "icon list makeNSView")
+
+        // Drag-blank diagnostics: did the freshly created view actually
+        // install into the window? A view still windowless/superviewless 0.4s
+        // after creation means SwiftUI's attach step dropped it — one known
+        // signature of the blank-card failure mode.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            let attached = collection.window != nil && collection.superview != nil
+            let f = collection.frame
+            FileLog.shared.event(
+                "finder",
+                "post-mount check: attached=\(attached) frame=\(Int(f.width))x\(Int(f.height)) visItems=\(collection.visibleItems().count) win=\(collection.window != nil)",
+            )
+            AppDelegate.shared?.panelController?.debugDumpPanelState("post-mount")
+        }
         return scrollView
     }
 
@@ -300,6 +316,7 @@ struct FinderIconListView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_: FinderScrollView, coordinator: Coordinator) {
+        FileLog.shared.event("finder", "icon list dismantleNSView")
         coordinator.teardown()
     }
 }
@@ -741,8 +758,10 @@ extension FinderIconListView {
             _: NSCollectionView,
             draggingSession _: NSDraggingSession,
             willBeginAt _: NSPoint,
-            forItemsAt _: Set<IndexPath>,
+            forItemsAt indexPaths: Set<IndexPath>,
         ) {
+            Log.finder.debug("[FinderIconList] drag session willBegin")
+            FileLog.shared.event("finder", "icon list drag willBegin (items=\(indexPaths.count))")
             parent.actions.onDragSessionChanged(true)
         }
 
@@ -750,8 +769,10 @@ extension FinderIconListView {
             _: NSCollectionView,
             draggingSession _: NSDraggingSession,
             endedAt _: NSPoint,
-            dragOperation _: NSDragOperation,
+            dragOperation: NSDragOperation,
         ) {
+            Log.finder.debug("[FinderIconList] drag session ended")
+            FileLog.shared.event("finder", "icon list drag ended (op=\(dragOperation.rawValue))")
             parent.actions.onDragSessionChanged(false)
         }
 

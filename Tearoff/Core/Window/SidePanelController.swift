@@ -339,6 +339,18 @@ final class SidePanelController: NSWindowController {
             object: nil,
         )
 
+        #if DEBUG
+            // Debug-only external trigger for the structural dump, so sandbox
+            // probes can snapshot the panel state at any moment.
+            DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name("TearoffDebugDump"),
+                object: nil,
+                queue: .main,
+            ) { [weak self] _ in
+                self?.debugDumpPanelState("notify")
+            }
+        #endif
+
         // Listen for pin state changes to toggle window draggability
         NotificationCenter.default.addObserver(
             self,
@@ -490,13 +502,18 @@ final class SidePanelController: NSWindowController {
 
     override func mouseExited(with _: NSEvent) {
         guard isShown, !isAnimating, !isEditorFocused, !isAutoHideSuspended,
+              Date() >= dismissalDeferralDeadline,
               PanelSettings.shared.autoHideOnMouseExit,
               PanelSettings.shared.dismissalMode == .auto,
               !PanelSettings.shared.isPanelPinned,
               // Moving onto a context menu window counts as exiting the panel
               // bounds — the user is mid-interaction, not leaving.
               !isMenuWindowOpen
-        else { return }
+        else {
+            let state = "suspended=\(isAutoHideSuspended), shown=\(isShown), animating=\(isAnimating)"
+            Log.window.debug("[SidePanelController] mouseExited ignored (\(state, privacy: .public))")
+            return
+        }
         let delay = PanelSettings.shared.hideDelay
         if delay == 0 {
             hidePanel()
@@ -518,6 +535,7 @@ final class SidePanelController: NSWindowController {
         let visibleFrame = targetScreen.visibleFrame
         let side = PanelSettings.shared.edgeSide
         Log.window.info("[SidePanelController] showPanel (\(side.rawValue, privacy: .public) edge)")
+        FileLog.shared.event("panel", "showPanel (side=\(side.rawValue))")
 
         // Check for external file changes every time the panel becomes visible
         noteStore.checkForExternalChanges()
@@ -589,6 +607,7 @@ final class SidePanelController: NSWindowController {
     func hidePanel(restoreFocus: Bool = true) {
         guard let window, isShown else { return }
         Log.window.info("[SidePanelController] hidePanel")
+        FileLog.shared.event("panel", "hidePanel")
         // Leaving the panel ends an in-place card edit session (flushes its save).
         noteStore.inlineEditingNoteID = nil
         noteStore.saveDirtyNotes()
@@ -697,8 +716,15 @@ final class SidePanelController: NSWindowController {
 
     /// A safe off-screen parking position that can't overlap any monitor in any arrangement.
     /// The window is invisible (alphaValue = 0) and ignoresMouseEvents when parked here.
+    /// Preserves the window's current height: squashing to a stub forced the whole
+    /// SwiftUI tree to relayout at stub geometry and back on the next show — after a
+    /// Finder-card drag-out session that relayout's render tree could wedge mid-spring,
+    /// leaving the card body permanently blank. A pure move keeps the laid-out tree intact.
     private func parkedFrame(panelWidth: CGFloat) -> NSRect {
-        NSRect(x: -panelWidth - 1000, y: -10000, width: panelWidth, height: 100)
+        let height = window?.frame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? 800
+        return NSRect(x: -panelWidth - 1000, y: -10000, width: panelWidth, height: height)
     }
 
     /// Returns (shown, hidden) frames for the given edge side using the persisted panel width.
@@ -785,26 +811,224 @@ final class SidePanelController: NSWindowController {
 
     /// Park every dismissal path while a Finder card drag session is in flight.
     func suspendAutoHide() {
+        Log.window.debug("[SidePanelController] suspendAutoHide")
+        FileLog.shared.event("panel", "suspendAutoHide")
         isAutoHideSuspended = true
         cancelHideTimer()
+    }
+
+    /// Minimum delay before auto-hiding after a suspended interaction (file
+    /// drag-out, card/panel resize) ends. Hiding parks the window off-screen;
+    /// when that runs in the same runloop turn as an AppKit drag-session
+    /// teardown (`draggingSession ended` with `hideDelay = 0`), the drag
+    /// source's collection view survives with its frame but its rendering
+    /// layer is never re-attached — the card comes back blank on the next
+    /// show. A short grace lets AppKit finish drag cleanup first.
+    private static let postInteractionHideGrace: TimeInterval = 0.35
+
+    /// Until when every dismissal path (mouse-exit, hide timer) is parked.
+    /// Set by `resumeAutoHide` after a suspended interaction ends; the plain
+    /// `isAutoHideSuspended` flag is cleared synchronously, so without this
+    /// deadline the `hideDelay = 0` mouse-exit path would hide instantly
+    /// anyway.
+    private var dismissalDeferralDeadline = Date.distantPast
+
+    /// Drag-blank recovery: detect any SwiftUI graphics-container views whose
+    /// alpha was stuck at 0 by the drag-session animation teardown, restore
+    /// them to 1, and then force a synchronous display pass.
+    ///
+    /// Root cause (confirmed by user logs 2026-09-05): the drag animation runs
+    /// an opacity transition on the Finder-card body's `_NSGraphicsView`
+    /// containers. When the drag session tears down it interrupts the render-
+    /// server commit, leaving the presentation layer opacity at 0.0 — with no
+    /// subsequent SwiftUI state change to trigger a new commit. The old
+    /// `window.display()` poke was proven ineffective by the diagnostic logs
+    /// (`viewsNeedDisplay=false`; no damage queued, nothing to display).
+    /// Directly resetting alphaValue + layer.opacity + removing stale
+    /// animations is the only reliable fix.
+    func forceDisplayRecovery(after delay: Double) {
+        guard let window, isShown else { return }
+        debugDumpPanelState("poke(+\(delay)s)")
+
+        // ── Alpha recovery ─────────────────────────────────────────────────
+        // Walk the entire content-view tree. For every view that is:
+        //   • not hidden (isHidden == false)
+        //   • has a non-empty frame
+        //   • has alphaValue essentially 0 (< 0.01)
+        //   • is an `_NSGraphicsView` — the private SwiftUI rendering container
+        //     that wraps NSViewRepresentable-backed content inside an NSHostingView
+        // … restore alphaValue and layer.opacity to 1, strip stale animations,
+        // then mark it dirty for repaint.
+        //
+        // Safety: we only touch _NSGraphicsView instances (SwiftUI rendering
+        // containers). Views intentionally invisible via SwiftUI's own alpha/
+        // transition system *also* use _NSGraphicsView, but those are either
+        // already hidden (`isHidden = true`, which we skip) or have a zero
+        // *frame* (not yet laid out). We further guard against zero frames.
+        // The only pathological case — a legitimately zero-alpha but unhidden
+        // _NSGraphicsView — would be an active SwiftUI opacity(0) modifier,
+        // which we would erroneously raise to 1; this is acceptable given the
+        // very narrow recovery window (called only 0.1s/0.7s/2.0s after a
+        // drag session ends, not continuously).
+        var recovered = 0
+        if let contentView = window.contentView {
+            var stack: [NSView] = [contentView]
+            while !stack.isEmpty {
+                let view = stack.removeLast()
+                // Only candidate: unhidden, has area, alpha effectively 0.
+                if !view.isHidden,
+                   !view.frame.isEmpty,
+                   view.alphaValue < 0.01
+                {
+                    let className = NSStringFromClass(type(of: view))
+                    // Target _NSGraphicsView (SwiftUI rendering container).
+                    // Class name check: private API name may carry a prefix like
+                    // "SwiftUI." — accept any class whose name ends with the token.
+                    if className.hasSuffix("_NSGraphicsView") || className == "_NSGraphicsView" {
+                        // Restore this container.
+                        view.alphaValue = 1
+                        if let layer = view.layer {
+                            layer.removeAllAnimations()
+                            layer.opacity = 1
+                        }
+                        // Walk up and clear any ancestor layer that is also stuck < 1.
+                        var ancestor: NSView? = view.superview
+                        while let anc = ancestor {
+                            if let al = anc.layer, al.opacity < 0.99 {
+                                al.removeAllAnimations()
+                                al.opacity = 1
+                            }
+                            ancestor = anc.superview
+                        }
+                        view.needsDisplay = true
+                        recovered += 1
+                    }
+                }
+                // Always recurse — even into alpha=0 subtrees (the children
+                // we want to fix live there).
+                for sub in view.subviews {
+                    stack.append(sub)
+                }
+            }
+        }
+
+        if recovered > 0 {
+            FileLog.shared.event(
+                "panel",
+                "alpha-recovery restored \(recovered) container(s) (+\(String(format: "%.1f", delay))s)",
+            )
+        }
+
+        // ── Original display poke (keep as belt-and-suspenders) ────────────
+        let pending = window.viewsNeedDisplay
+        window.contentView?.needsDisplay = true
+        window.display()
+        FileLog.shared.event("panel", "display-recovery poke (+\(delay)s) viewsNeedDisplay=\(pending)")
+    }
+
+    // MARK: - Debug Dump (blank-card investigation; runs only while debug logging is on)
+
+    /// Structural dump of the panel window: full AppKit view tree (with layer
+    /// attachment) plus the layer-superlayer chain of every embedded file
+    /// list, so the post-drag blank state can be compared against a healthy
+    /// baseline from the log alone.
+    func debugDumpPanelState(_ tag: String) {
+        guard FileLog.shared.isEnabled, let window, let contentView = window.contentView else { return }
+        var lines: [String] = []
+        var stack: [(view: NSView, depth: Int)] = [(contentView, 0)]
+        var collections: [NSCollectionView] = []
+        var tables: [NSTableView] = []
+        while let (view, depth) = stack.popLast() {
+            let indent = String(repeating: ". ", count: min(depth, 16))
+            let layerDesc = if let layer = view.layer {
+                "layer=\(type(of: layer))(super=\(layer.superlayer == nil ? "nil" : "set"))"
+            } else {
+                "layer=nil"
+            }
+            lines.append("\(indent)\(type(of: view)) \(Int(view.frame.width))x\(Int(view.frame.height)) hidden=\(view.isHidden) alpha=\(view.alphaValue) \(layerDesc)")
+            if let cv = view as? NSCollectionView {
+                collections.append(cv)
+            }
+            if let tv = view as? NSTableView, !(tv is NSOutlineView) {
+                tables.append(tv)
+            }
+            for subview in view.subviews.reversed() {
+                stack.append((subview, depth + 1))
+            }
+        }
+        FileLog.shared.event("dump", "\(tag) win=\(window.frame) viewsNeedDisplay=\(window.viewsNeedDisplay) tree:\n\(lines.joined(separator: "\n"))")
+        for cv in collections {
+            var chain: [String] = []
+            var layer = cv.layer
+            var depth = 0
+            var containsContentLayer = false
+            while let current = layer, depth < 24 {
+                let originInRoot = contentView.layer.map { current.convert(CGPoint.zero, to: $0) } ?? .zero
+                if let cl = contentView.layer, current === cl {
+                    containsContentLayer = true
+                }
+                chain.append("\(type(of: current)){f=\(current.frame) hid=\(current.isHidden) op=\(current.opacity) o@root=\(Int(originInRoot.x)),\(Int(originInRoot.y)) contents=\(current.contents != nil)}")
+                layer = current.superlayer
+                depth += 1
+            }
+            FileLog.shared.event("dump", "collection window=\(cv.window != nil) visibleItems=\(cv.visibleItems().count) chainContainsContentLayer=\(containsContentLayer) layerChain=[\(chain.joined(separator: " > "))]")
+            var ancestors: [String] = []
+            var v: NSView? = cv.superview
+            while let cur = v {
+                ancestors.append("\(type(of: cur)){f=\(cur.frame) a=\(cur.alphaValue) layerOp=\(cur.layer?.opacity ?? -1)}")
+                v = cur.superview
+            }
+            FileLog.shared.event("dump", "collection viewAncestors=[\(ancestors.joined(separator: " > "))]")
+            // Visual probe: render the card area through the normal display
+            // machinery (which skips zero-alpha subtrees) and count ink pixels,
+            // so the log reflects what is actually on screen.
+            let rect = cv.convert(cv.bounds, to: contentView).intersection(contentView.bounds)
+            var ink = 0
+            if !rect.isEmpty, let rep = contentView.bitmapImageRepForCachingDisplay(in: rect) {
+                contentView.cacheDisplay(in: rect, to: rep)
+                if let cg = rep.cgImage, let data = cg.dataProvider?.data, let ptr = CFDataGetBytePtr(data) {
+                    let total = CFDataGetLength(data)
+                    var i = 0
+                    while i + 3 < total {
+                        let c0 = ptr[i], c1 = ptr[i + 1], c2 = ptr[i + 2], alpha = ptr[i + 3]
+                        if alpha > 8, c0 < 235 || c1 < 235 || c2 < 235 {
+                            ink += 1
+                        }
+                        i += 97 * 4
+                    }
+                }
+            }
+            FileLog.shared.event("dump", "visualProbe ink=\(ink) rect=\(rect)")
+        }
+        for tv in tables {
+            FileLog.shared.event("dump", "table window=\(tv.window != nil) rows=\(tv.numberOfRows)")
+        }
     }
 
     /// `treatAsMouseExit`: after a drop the pointer is usually outside — run the normal
     /// hide-delay path once so the panel tidies itself away exactly as if the user had left.
     func resumeAutoHide(treatAsMouseExit: Bool) {
+        let wasSuspended = isAutoHideSuspended
+        Log.window.debug("[SidePanelController] resumeAutoHide(treatAsMouseExit=\(treatAsMouseExit, privacy: .public)) suspended=\(wasSuspended, privacy: .public)")
+        FileLog.shared.event("panel", "resumeAutoHide(treatAsMouseExit=\(treatAsMouseExit)) suspended=\(wasSuspended)")
         isAutoHideSuspended = false
+        dismissalDeferralDeadline = Date().addingTimeInterval(Self.postInteractionHideGrace)
         guard treatAsMouseExit, isShown, !isMouseInPanel(),
               !PanelSettings.shared.isPanelPinned,
               PanelSettings.shared.autoHideOnMouseExit,
               PanelSettings.shared.dismissalMode == .auto
         else { return }
-        startHideTimer(delay: PanelSettings.shared.hideDelay)
+        let delay = max(PanelSettings.shared.hideDelay, Self.postInteractionHideGrace)
+        Log.window.debug("[SidePanelController] resumeAutoHide → hide timer (\(delay)s)")
+        startHideTimer(delay: delay)
     }
 
     private func startHideTimer(delay: Double) {
         cancelHideTimer()
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self, isShown, !isMouseInPanel(), !isAutoHideSuspended else { return }
+            guard let self, isShown, !isMouseInPanel(), !isAutoHideSuspended,
+                  Date() >= dismissalDeferralDeadline
+            else { return }
             // A context menu opened after the exit began — the user is picking
             // an item; let the interaction finish instead of yanking the panel.
             guard !isMenuWindowOpen else { return }

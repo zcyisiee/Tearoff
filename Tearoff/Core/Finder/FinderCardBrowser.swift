@@ -122,6 +122,7 @@ final class FinderCardBrowser {
     /// which establish the canonical location without adding a history entry.
     func navigate(to url: URL?, recordsHistory: Bool = true) {
         let standardized = url?.standardizedFileURL
+        FileLog.shared.event("finder", "navigate → \(standardized?.path ?? "nil") (history=\(recordsHistory))")
 
         if recordsHistory, let previous = currentURL, previous != standardized {
             backStack.append(previous)
@@ -224,6 +225,12 @@ final class FinderCardBrowser {
                 guard generation == self.generation else { return }
                 let elapsed = Date().timeIntervalSince(startedAt)
                 Log.finder.debug("Enumerated \(url.lastPathComponent, privacy: .public) in \(String(format: "%.1f", elapsed * 1000), privacy: .public) ms")
+                switch result {
+                case let .success(items):
+                    FileLog.shared.event("finder", "reload \(url.lastPathComponent) → \(items.count) entries in \(String(format: "%.0f", elapsed * 1000))ms")
+                case let .failure(error):
+                    FileLog.shared.event("finder", "reload \(url.lastPathComponent) FAILED: \(String(describing: error))")
+                }
                 self.apply(result)
             }
         }
@@ -437,10 +444,12 @@ final class FinderCardBrowser {
     private func handleWatchEvent(_ event: DirectoryWatcher.Event) {
         switch event {
         case .contentsChanged:
+            FileLog.shared.event("finder", "watcher: contentsChanged \(currentURL?.lastPathComponent ?? "?")")
             reload()
         case .directoryVanished:
             // Release the fd on the dead directory; `isWatching` stays true so
             // the next navigate re-arms. reload() surfaces `.notFound`.
+            FileLog.shared.event("finder", "watcher: directoryVanished \(currentURL?.lastPathComponent ?? "?")")
             watcher?.stop()
             watcher = nil
             reload()

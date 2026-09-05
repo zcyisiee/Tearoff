@@ -781,11 +781,13 @@ final class FinderTableView: NSTableView {
 
     override func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
         super.draggingSession(session, willBeginAt: screenPoint)
+        FileLog.shared.event("finder", "file list drag willBegin")
         coordinator?.parent.actions.onDragSessionChanged(true)
     }
 
     override func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         super.draggingSession(session, endedAt: screenPoint, operation: operation)
+        FileLog.shared.event("finder", "file list drag ended (op=\(operation.rawValue))")
         coordinator?.parent.actions.onDragSessionChanged(false)
     }
 }

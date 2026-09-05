@@ -198,6 +198,21 @@ final class AppSettings {
         }
     }
 
+    /// Debug mode: when on, key diagnostics (panel lifecycle, drag sessions,
+    /// context-menu routing, directory watchers) are recorded to rotating
+    /// files under `~/Library/Logs/Tearoff/` — see `FileLog`. Off by default;
+    /// the on/off transition is stamped into the log itself.
+    var debugLoggingEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(debugLoggingEnabled, forKey: "debugLoggingEnabled")
+            if debugLoggingEnabled {
+                FileLog.shared.start()
+            } else {
+                FileLog.shared.stop()
+            }
+        }
+    }
+
     func applyAppearance() {
         switch appearanceMode {
         case .system:
@@ -331,6 +346,10 @@ final class AppSettings {
         }
         autoCheckUpdates = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
         launchAtLogin = UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? false
+        debugLoggingEnabled = UserDefaults.standard.bool(forKey: "debugLoggingEnabled")
+        if debugLoggingEnabled {
+            FileLog.shared.start()
+        }
         if let raw = UserDefaults.standard.object(forKey: "spellCheckingEnabled") as? Bool {
             spellCheckingEnabled = raw
         }

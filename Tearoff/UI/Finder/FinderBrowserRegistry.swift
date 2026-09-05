@@ -40,6 +40,7 @@ final class FinderBrowserRegistry {
 
     /// Panel hidden: release every watcher (zero idle fds).
     func suspendAllWatching() {
+        FileLog.shared.event("finder", "registry suspendAllWatching (cards=\(boxes.count))")
         for box in boxes.values {
             box.browser?.stopWatching()
         }
@@ -48,6 +49,7 @@ final class FinderBrowserRegistry {
     /// Panel shown: re-enumerate once and re-arm watchers for registered (mounted) cards.
     /// Staggers subsequent cards slightly to avoid concurrent enumeration and UI reload storms.
     func resumeAllWatching() {
+        FileLog.shared.event("finder", "registry resumeAllWatching (cards=\(boxes.count))")
         var delay: TimeInterval = 0
         for box in boxes.values {
             guard let browser = box.browser, browser.currentURL != nil else { continue }

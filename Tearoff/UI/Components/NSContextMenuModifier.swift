@@ -1,4 +1,5 @@
 import Cocoa
+import OSLog
 import SwiftUI
 
 // MARK: - Singleton menu action dispatcher
@@ -164,11 +165,15 @@ private enum ContextMenuRouter {
     }
 
     private static func route(_ event: NSEvent) -> NSEvent? {
-        guard let window = event.window, let contentView = window.contentView else { return event }
+        guard let window = event.window, let contentView = window.contentView else {
+            return event
+        }
         let location = event.locationInWindow
         // Embedded platform views keep their own right-click handling — only
         // clicks that would land on pure SwiftUI content are rerouted.
-        guard let hit = contentView.hitTest(location), isSwiftUIRegion(hit) else { return event }
+        guard let hit = contentView.hitTest(location), isSwiftUIRegion(hit) else {
+            return event
+        }
 
         // Find active barriers in this window containing the click location
         let activeBarriers = barriers.allObjects.filter {
@@ -197,6 +202,7 @@ private enum ContextMenuRouter {
             }
             return event
         }
+        FileLog.shared.event("contextmenu", "right-click routed: \(candidates.count) candidates, best frame=\(String(describing: best.frameInWindow))")
         best.popMenu(for: event)
         return nil
     }
@@ -274,8 +280,20 @@ private enum ContextMenuRouter {
         return idxA > idxB
     }
 
-    /// Views rendered in front take priority; at equal hierarchy, deeper/smaller wins.
+    /// Picks the most specific catcher for the click. Nested frames win over
+    /// enclosing ones: catchers are passive background plates sized to their
+    /// menu's region, so a catcher fully contained inside another marks the
+    /// more targeted menu (card inside board, chip inside card). The SwiftUI
+    /// hosting hierarchy can order their backing views either way, so pure
+    /// z-order comparison between nested plates is an artifact, not intent.
     private static func isDeeper(_ lhs: ContextMenuCatcher, _ rhs: ContextMenuCatcher) -> Bool {
+        if let lhsFrame = lhs.frameInWindow, let rhsFrame = rhs.frameInWindow {
+            let lhsNested = rhsFrame.contains(lhsFrame)
+            let rhsNested = lhsFrame.contains(rhsFrame)
+            if lhsNested != rhsNested {
+                return lhsNested
+            }
+        }
         if isViewAbove(lhs, than: rhs) {
             return true
         }
@@ -327,6 +345,13 @@ private final class ContextMenuCatcher: NSView {
         return value
     }
 
+    /// The catcher's frame in window coordinates — the specificity measure
+    /// for the router's nested-wins comparison. nil before it joins a window.
+    var frameInWindow: NSRect? {
+        guard window != nil else { return nil }
+        return convert(bounds, to: nil)
+    }
+
     override func hitTest(_: NSPoint) -> NSView? {
         nil
     }
@@ -337,11 +362,16 @@ private final class ContextMenuCatcher: NSView {
     }
 
     func popMenu(for event: NSEvent) {
-        guard isEnabled, let menu = menuBuilder?() else { return }
+        guard isEnabled, let menu = menuBuilder?() else {
+            FileLog.shared.event("contextmenu", "popMenu skipped (disabled or no builder)")
+            return
+        }
+        FileLog.shared.event("contextmenu", "popMenu with \(menu.items.count) items")
         NSContextMenuModifier.menuGeneration += 1
         let generation = NSContextMenuModifier.menuGeneration
         NSContextMenuModifier.isShowingMenu = true
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+
         // Reset the flag on the next turn, not synchronously: AppKit
         // delivers the synthesized exit / re-dispatched click events
         // right after this method returns, and they must still read

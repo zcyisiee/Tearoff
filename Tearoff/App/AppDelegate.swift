@@ -31,6 +31,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         panelController = SidePanelController()
         SidecarMigration.runIfNeeded()
+
+        // Debug/testing convenience: pin this session to a fixture storage
+        // root so scripted GUI runs never touch the user's real vault.
+        // Session override — not persisted, clears on restart.
+        let launchArgs = ProcessInfo.processInfo.arguments
+        if let flagIndex = launchArgs.firstIndex(of: "--storage-root"),
+           flagIndex + 1 < launchArgs.count
+        {
+            let rootURL = URL(fileURLWithPath: launchArgs[flagIndex + 1])
+            StorageSettings.shared.sessionRootOverride = StorageRoot(id: "launch-arg", url: rootURL, label: nil)
+        }
+
         try? SidecarStore.shared.load()
         panelController?.noteStore.loadFromDisk()
         ShortcutManager.shared.setup(panelController: panelController!)
@@ -63,6 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Request notification permission for background update alerts
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         UNUserNotificationCenter.current().delegate = self
+
+        // Debug/testing convenience: show the panel immediately on launch
+        // instead of waiting for the edge trigger (used by scripted GUI runs).
+        if ProcessInfo.processInfo.arguments.contains("--show-panel") {
+            panelController?.showPanel()
+        }
     }
 
     func applicationWillTerminate(_: Notification) {

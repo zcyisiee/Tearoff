@@ -22,6 +22,8 @@ struct NoteBoardView: View {
     /// the replica leaf only, so per-tick pointer updates never re-render the
     /// board.
     @State private var dragSession = BoardDragSession()
+    /// Generation guard for post-drag display-recovery pokes.
+    @State private var displayRecoveryGeneration = 0
     /// Live card frames in `BoardCardSpace`, reported by each card — lets the
     /// drag-reorder hit-test which card the pointer is over. Plain class on
     /// purpose: frame writes must not invalidate the board body.
@@ -502,6 +504,27 @@ struct NoteBoardView: View {
         .buttonStyle(.plain)
     }
 
+    /// After a file drag-out session ends, restore any SwiftUI rendering
+    /// containers whose alpha was stuck at 0 by the drag-animation teardown.
+    ///
+    /// Root cause (confirmed by logs 2026-09-05): the drag session's opacity
+    /// animation leaves `_NSGraphicsView` containers with alphaValue/layer
+    /// opacity permanently at 0.0 — SwiftUI never commits a correction because
+    /// no state change follows. `forceDisplayRecovery` detects and restores
+    /// them directly. Three pokes at increasing offsets cover early, mid, and
+    /// late animation teardown timing; the generation guard cancels stale pokes
+    /// when a new drag begins before all pokes fire.
+    private func scheduleDisplayRecovery() {
+        displayRecoveryGeneration += 1
+        let generation = displayRecoveryGeneration
+        for delay in [0.1, 0.7, 2.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard generation == displayRecoveryGeneration else { return }
+                AppDelegate.shared?.panelController?.forceDisplayRecovery(after: delay)
+            }
+        }
+    }
+
     // MARK: - Board Content
 
     private var boardContent: some View {
@@ -856,10 +879,12 @@ struct NoteBoardView: View {
                 renamingFinderCardDraft = ""
             },
             onFileDragSessionChanged: { active in
+                Log.finder.debug("[Board] file drag session \(active ? "began" : "ended", privacy: .public)")
                 if active {
                     AppDelegate.shared?.panelController?.suspendAutoHide()
                 } else {
                     AppDelegate.shared?.panelController?.resumeAutoHide(treatAsMouseExit: true)
+                    scheduleDisplayRecovery()
                 }
             },
         )

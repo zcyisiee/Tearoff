@@ -932,6 +932,7 @@ struct FinderCardView: View {
     private func handleError(_ error: Error) {
         let message = error.localizedDescription
         Log.finder.error("Finder card operation failed: \(message, privacy: .public)")
+        FileLog.shared.event("finder", "card operation failed: \(message)")
         errorMessage = message
         Task {
             try? await Task.sleep(for: .seconds(3))

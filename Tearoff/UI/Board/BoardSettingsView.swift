@@ -624,6 +624,22 @@ struct BoardSettingsView: View {
             Toggle(l10n["settings.general.autoCheckUpdates"], isOn: $settings.autoCheckUpdates)
             Toggle(l10n["settings.general.launchAtLogin"], isOn: $settings.launchAtLogin)
 
+            Toggle(l10n["settings.about.debugLogging"], isOn: $settings.debugLoggingEnabled)
+            if settings.debugLoggingEnabled {
+                HStack {
+                    Text(l10n["settings.about.debugLogging.hint"])
+                        .font(DesignToken.Typography.caption)
+                        .foregroundStyle(DesignToken.mutedSoft)
+                    Spacer()
+                    Button {
+                        NSWorkspace.shared.open(FileLog.logDirectory)
+                    } label: {
+                        Label(l10n["settings.about.debugLogging.openFolder"], systemImage: "folder")
+                    }
+                    .controlSize(.small)
+                }
+            }
+
             Link(destination: URL(string: "https://github.com/zcyisiee/Tearoff")!) {
                 Label(l10n["settings.about.viewOnGitHub"], systemImage: "arrow.up.right.square")
                     .font(DesignToken.Typography.callout)
