@@ -117,6 +117,16 @@ struct MarkdownEditorView: View {
     var accentColor: Color?
     /// When true, uses board-scale font size and heading multipliers for compact display.
     var useBoardTypography: Bool = false
+    /// When true, always renders WYSIWYG and ignores the global raw-source
+    /// setting. The card's in-place editor must stay a "longer, editable
+    /// preview" of the card — it inherits neither the editor screen's code
+    /// view nor its mode switch, so raw source there would be a trap.
+    var forceWYSIWYG: Bool = false
+    /// When true, pins the card-preview look in the editor config: zero
+    /// horizontal text inset and circle task checkboxes. Pairs with
+    /// `forceWYSIWYG` for the card's in-place editor; the expanded editor
+    /// keeps the standard insets and the global checkbox preset.
+    var matchCardPreview: Bool = false
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
@@ -153,6 +163,8 @@ struct MarkdownEditorView: View {
         focusTitleOnAppear: Bool = false,
         accentColor: Color? = nil,
         useBoardTypography: Bool = false,
+        forceWYSIWYG: Bool = false,
+        matchCardPreview: Bool = false,
     ) {
         self.noteID = noteID
         self.noteTitle = noteTitle
@@ -168,18 +180,18 @@ struct MarkdownEditorView: View {
         self.focusTitleOnAppear = focusTitleOnAppear
         self.accentColor = accentColor
         self.useBoardTypography = useBoardTypography
+        self.forceWYSIWYG = forceWYSIWYG
+        self.matchCardPreview = matchCardPreview
         if showsHeadingLineInBody {
             _text = State(initialValue: initialContent)
             _hiddenHeadingLine = State(initialValue: "")
+        } else if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
+            _text = State(initialValue: initialContent)
+            _hiddenHeadingLine = State(initialValue: "")
         } else {
-            if AppSettings.shared.editorRawSourceMode {
-                _text = State(initialValue: initialContent)
-                _hiddenHeadingLine = State(initialValue: "")
-            } else {
-                let (heading, body) = Self.splitHeading(initialContent)
-                _text = State(initialValue: body)
-                _hiddenHeadingLine = State(initialValue: heading)
-            }
+            let (heading, body) = Self.splitHeading(initialContent)
+            _text = State(initialValue: body)
+            _hiddenHeadingLine = State(initialValue: heading)
         }
         _stableNoteID = State(initialValue: noteID)
     }
@@ -190,7 +202,10 @@ struct MarkdownEditorView: View {
         // whenever editorFontName or editorFontSize changes.
         let appSettings = AppSettings.shared
         let fontName = Self.resolvedFontFamily(from: appSettings.editorFontName) ?? "SF Pro"
-        let isRawSource = appSettings.editorRawSourceMode
+        // forceWYSIWYG (card in-place editor) pins WYSIWYG regardless of the
+        // editor screen's raw-source toggle — the card is a preview, not a
+        // code view, and offers no switch back.
+        let isRawSource = forceWYSIWYG ? false : appSettings.editorRawSourceMode
         // When board typography is requested, render at board font size so the inline
         // editor and expanded editor match the card preview scale.
         let activeFontSize = useBoardTypography
@@ -214,6 +229,7 @@ struct MarkdownEditorView: View {
             rawSourceMode: isRawSource,
             accentColor: accentColor,
             useBoardTypography: useBoardTypography,
+            matchCardPreview: matchCardPreview,
         )
         config.spellChecking = SpellCheckingPolicy(
             continuousSpellChecking: appSettings.spellCheckingEnabled,
@@ -313,6 +329,7 @@ struct MarkdownEditorView: View {
                 // WYSIWYG keeps the heading split out (`hiddenHeadingLine`); raw shows
                 // the complete on-disk file verbatim. Always cancel the pending
                 // debounce first so the swap can't flush a half-converted state.
+                // Never fires under forceWYSIWYG — isRawSource is pinned false there.
                 saveDebouncer.cancel()
                 guard !showsHeadingLineInBody else { return }
                 if raw {
@@ -343,7 +360,11 @@ struct MarkdownEditorView: View {
                 }
             }
             .onChange(of: noteTitle) { _, newTitle in
-                guard !showsHeadingLineInBody, !AppSettings.shared.editorRawSourceMode else { return }
+                // forceWYSIWYG always splits the heading out, so a title rename
+                // must re-sync it even while the global raw mode is on.
+                guard !showsHeadingLineInBody,
+                      forceWYSIWYG || !AppSettings.shared.editorRawSourceMode
+                else { return }
                 saveDebouncer.cancel()
                 if let prefix = hiddenHeadingLine.components(separatedBy: " ").first, prefix.hasPrefix("#") {
                     hiddenHeadingLine = "\(prefix) \(newTitle)"
@@ -357,7 +378,7 @@ struct MarkdownEditorView: View {
                 if showsHeadingLineInBody {
                     text = newContent
                 } else {
-                    if AppSettings.shared.editorRawSourceMode {
+                    if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
                         // Raw mode shows the complete file — no heading split.
                         hiddenHeadingLine = ""
                         text = newContent

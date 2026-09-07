@@ -324,6 +324,7 @@
   "note.pin": "Pin to Top",
   "note.pinned": "Pinned",
   "note.unpin": "Unpin",
+  "note.endInlineEdit": "Done Editing",
   "selection.count": "{0} selected",
   "selection.clear": "Clear Selection",
   "selection.moveToTrash.button": "Move to Trash",

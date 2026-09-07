@@ -335,6 +335,7 @@
   "note.pin": "Oben anheften",
   "note.pinned": "Angeheftet",
   "note.unpin": "Nicht mehr anheften",
+  "note.endInlineEdit": "Bearbeitung beenden",
   "selection.count": "{0} ausgewählt",
   "selection.clear": "Auswahl aufheben",
   "selection.moveToTrash.button": "In den Papierkorb",

@@ -877,6 +877,7 @@ struct NoteBoardView: View {
             onTap: { flags in handleCardTap(note, flags: flags, visible: visible) },
             onTitleTap: { handleTitleTap(note) },
             onTitleAreaTap: { flags in handleTitleAreaTap(note, flags: flags, visible: visible) },
+            onEditToggle: { noteStore.endInlineEdit() },
             onPinToggle: { noteStore.togglePin(on: note) },
             onToggleTask: { lineIndex in
                 noteStore.toggleTask(at: lineIndex, on: note)

@@ -127,6 +127,10 @@ struct BoardNoteCard: View {
     /// toggle for the in-place editor, so body clicks can stay reserved for
     /// task toggles (modifiers included for ⌘/⇧ multi-select routing).
     var onTitleAreaTap: ((NSEvent.ModifierFlags) -> Void)?
+    /// Click on the corner edit-toggle icon while the card is editing — the
+    /// dedicated collapse switch, mirroring how the editor header's chevron
+    /// collapses the expanded editor. Wired to `endInlineEdit` by the board.
+    var onEditToggle: (() -> Void)?
     var onPinToggle: (() -> Void)?
     /// Direct checkbox tap on a preview task row (source line index).
     var onToggleTask: ((Int) -> Void)?
@@ -208,7 +212,7 @@ struct BoardNoteCard: View {
                 .fill(cardFill)
         }
         .overlay(alignment: .topTrailing) {
-            pinChrome
+            cardCornerChrome
         }
         .overlay {
             RoundedRectangle(cornerRadius: DesignToken.Radius.card)
@@ -411,7 +415,11 @@ struct BoardNoteCard: View {
     /// can't lose keystrokes. The leading "# Title" line only stays in the
     /// body during a newly created note's naming session (`focusTitleOnAppear`
     /// needs it in the text to select the title); existing notes strip it —
-    /// the card's title row already shows the title.
+    /// the card's title row already shows the title. `forceWYSIWYG` +
+    /// `matchCardPreview` keep the card a longer, editable preview of itself —
+    /// the global raw-source toggle and checkbox preset (editor-screen
+    /// affordances) never leak in here, and text sits flush with the
+    /// collapsed preview's left edge.
     private var inlineEditor: some View {
         MarkdownEditorView(
             noteID: note.id,
@@ -425,6 +433,8 @@ struct BoardNoteCard: View {
             focusTitleOnAppear: isNewlyCreated,
             accentColor: accentColor,
             useBoardTypography: true,
+            forceWYSIWYG: true,
+            matchCardPreview: true,
         )
         .frame(height: 280)
         .frame(maxWidth: .infinity)
@@ -466,8 +476,9 @@ struct BoardNoteCard: View {
     /// temporary-edit switch. Single click expands the card into its in-place
     /// editor (or collapses it when already editing), which keeps plain body
     /// clicks readable as task toggles. A quick second click is classified by
-    /// the board as a double click and opens the full editor directly. The pin
-    /// chrome overlays this corner and keeps its own button precedence.
+    /// the board as a double click and opens the full editor directly. The
+    /// corner chrome (pin + edit toggle) overlays this corner and keeps its
+    /// own button precedence.
     private var titleEditToggleArea: some View {
         Color.clear
             .frame(maxWidth: .infinity)
@@ -475,6 +486,46 @@ struct BoardNoteCard: View {
             .onTapGesture {
                 onTitleAreaTap?(NSApp.currentEvent?.modifierFlags ?? [])
             }
+    }
+
+    // MARK: Corner chrome
+
+    /// Top-right corner controls: while this card is editing, the in-place
+    /// editor's collapse switch rides next to the pin in one row — corner
+    /// padding lives here so the buttons stay aligned regardless of which
+    /// are visible. Buttons keep their own precedence over the title row's
+    /// trailing tap area underneath.
+    private var cardCornerChrome: some View {
+        HStack(spacing: DesignToken.Space.xs + 2) {
+            if isEditing {
+                editToggleButton
+            }
+            pinChrome
+        }
+        .padding(.top, DesignToken.Space.xs)
+        .padding(.trailing, DesignToken.Space.xs)
+    }
+
+    /// Collapse switch for the in-place editor, shown only while editing —
+    /// the editor-header icon language (hover plate) at the pin chrome's
+    /// compact scale, tinted with the note's identity color so the active
+    /// editing state reads at a glance.
+    private var editToggleButton: some View {
+        Button {
+            onEditToggle?()
+        } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(accentColor)
+                .frame(width: 18, height: 18)
+                .background {
+                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                        .fill(DesignToken.ink.opacity(isHovered ? DesignToken.Alpha.hover : 0))
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(l10n["note.endInlineEdit"])
     }
 
     // MARK: Pin chrome
@@ -485,28 +536,32 @@ struct BoardNoteCard: View {
             // Pinned state is a button too — clicking again unpins (previously
             // this branch was a static image, so a pinned note could never be
             // unpinned from its own pin icon).
-            Button(action: togglePin) {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(accentColor)
-                    .padding(2)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, DesignToken.Space.xs)
-            .padding(.trailing, DesignToken.Space.xs)
-            .help(l10n["note.unpin"])
+            pinButton(
+                systemName: "pin.fill",
+                tint: accentColor,
+                help: l10n["note.unpin"],
+            )
         } else if isHovered {
-            Button(action: togglePin) {
-                Image(systemName: "pin")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DesignToken.mutedSoft)
-                    .padding(2)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, DesignToken.Space.xs)
-            .padding(.trailing, DesignToken.Space.xs)
-            .help(l10n["note.pin"])
+            pinButton(
+                systemName: "pin",
+                tint: DesignToken.mutedSoft,
+                help: l10n["note.pin"],
+            )
         }
+    }
+
+    /// Compact pin glyph button — corner padding is applied once by
+    /// `cardCornerChrome`, so the two buttons share one aligned row.
+    private func pinButton(systemName: String, tint: Color, help: String) -> some View {
+        Button(action: togglePin) {
+            Image(systemName: systemName)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tint)
+                .padding(2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     /// Pin/unpin through the store's live note — the `note` prop is a value

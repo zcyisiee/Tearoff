@@ -335,6 +335,7 @@
   "note.pin": "ऊपर पिन करें",
   "note.pinned": "पिन किया गया",
   "note.unpin": "पिन हटाएँ",
+  "note.endInlineEdit": "संपादन समाप्त करें",
   "selection.count": "{0} चयनित",
   "selection.clear": "चयन साफ़ करें",
   "selection.moveToTrash.button": "कूड़ेदान में ले जाएँ",

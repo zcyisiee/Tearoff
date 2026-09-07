@@ -22,12 +22,19 @@ extension MarkdownEditorConfiguration {
     ///   - useBoardTypography: When `true`, heading multipliers and paragraph spacing
     ///     match the board card preview scale (compact). Pass `false` (default) for the
     ///     full-page editor scale.
+    ///   - matchCardPreview: When `true`, pins the extras the card's in-place editor
+    ///     needs to read as "the card preview, editable": zero horizontal text inset
+    ///     (the preview pane sits flush at the card padding) and circle task
+    ///     checkboxes (the preview always draws circles). The global checkbox preset
+    ///     stays an editor-screen preference. Pass `false` (default) to keep the
+    ///     standard editor insets/preset.
     static func makeTearoffConfig(
         noteFolder: String,
         bus: MarkdownEditorBus = .default,
         rawSourceMode: Bool = false,
         accentColor: Color? = nil,
         useBoardTypography: Bool = false,
+        matchCardPreview: Bool = false,
     ) -> MarkdownEditorConfiguration {
         let preset = AppSettings.shared.taskCheckboxPreset
         var config = MarkdownEditorConfiguration.default
@@ -76,6 +83,20 @@ extension MarkdownEditorConfiguration {
             config.paragraph = ParagraphStyle(
                 spacingFactor: 0.15,
                 lineHeightExtraSpacing: config.paragraph.lineHeightExtraSpacing,
+            )
+        }
+
+        // Card-preview parity: the preview pane has no horizontal inset inside
+        // the card padding (lineFragmentPadding is already 0), so the in-place
+        // editor's text must sit flush too — 16pt would right-shift every line
+        // the moment the card opens for editing. Vertical 4pt keeps the tight
+        // title→first-block rhythm of the preview stack. Task circles are part
+        // of the card's visual identity regardless of the editor-screen preset.
+        if matchCardPreview {
+            config.textInsets = TextInsets(horizontal: 0, vertical: 4)
+            config.taskCheckbox = TaskCheckboxStyle(
+                uncheckedSymbolName: AppSettings.TaskCheckboxPreset.circle.uncheckedSymbolName,
+                checkedSymbolName: AppSettings.TaskCheckboxPreset.circle.checkedSymbolName,
             )
         }
 

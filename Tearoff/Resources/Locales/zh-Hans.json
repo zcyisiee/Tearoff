@@ -324,6 +324,7 @@
   "note.pin": "置顶",
   "note.pinned": "已置顶",
   "note.unpin": "取消置顶",
+  "note.endInlineEdit": "结束编辑",
   "selection.count": "已选 {0} 项",
   "selection.clear": "取消选择",
   "selection.moveToTrash.button": "移到废纸篓",

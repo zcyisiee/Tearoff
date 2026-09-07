@@ -335,6 +335,7 @@
   "note.pin": "Fijar arriba",
   "note.pinned": "Fijada",
   "note.unpin": "Quitar fijado",
+  "note.endInlineEdit": "Terminar edición",
   "selection.count": "{0} seleccionadas",
   "selection.clear": "Borrar selección",
   "selection.moveToTrash.button": "Mover a la papelera",
