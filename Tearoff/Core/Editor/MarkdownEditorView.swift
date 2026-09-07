@@ -105,14 +105,6 @@ struct MarkdownEditorView: View {
     var onNavigatePrevious: (() -> Void)?
     /// Outline state fed from the editor text; nil disables outline tracking.
     var outline: OutlineState?
-    /// When true, the editor body contains the full markdown text including the
-    /// leading "# Title" heading line (used for card inline editing so users can
-    /// edit the title in place).
-    /// When false (default), the leading heading line is stripped into `hiddenHeadingLine`
-    /// in WYSIWYG mode (used for ExpandedNoteEditor so the body does not duplicate the title
-    /// already shown in the editor header).
-    var showsHeadingLineInBody: Bool = false
-    var focusTitleOnAppear: Bool = false
     /// Identity accent color to thread into the editor config (heading marker tint).
     var accentColor: Color?
     /// When true, uses board-scale font size and heading multipliers for compact display.
@@ -127,13 +119,22 @@ struct MarkdownEditorView: View {
     /// `forceWYSIWYG` for the card's in-place editor; the expanded editor
     /// keeps the standard insets and the global checkbox preset.
     var matchCardPreview: Bool = false
+    /// Increment to move focus into this editor's body with the caret at the
+    /// end. Driven by the card's new-note naming flow: Enter commits the
+    /// title field, then the caret lands in the body so typing continues.
+    /// The token must come from outside as a plain value (not @State here) so
+    /// SwiftUI's `onChange` fires once per bump.
+    var focusBodyToken: Int = 0
 
     @State private var text: String
     @State private var hiddenHeadingLine: String
-    @State private var didFocusTitle = false
     @State private var saveDebouncer = Debouncer(delay: 1.0)
     @State private var slashHandler = SlashCommandHandler()
     @State private var noteNavMonitor: Any?
+    /// Zero-size AppKit anchor inside this view's subtree — `focusBodyEnd`
+    /// climbs its superview chain to reach this editor's own NSTextView
+    /// instead of whatever text view happens to own the window.
+    @State private var textViewLocator = EditorTextViewLocator()
 
     /// Per-note scroll offsets persisted across editor unmount/remount (engine 0.12.0
     /// `onPersistScrollOffset` / `restoreScrollOffset`). Session-level — not persisted
@@ -159,12 +160,11 @@ struct MarkdownEditorView: View {
         onNavigateNext: (() -> Void)? = nil,
         onNavigatePrevious: (() -> Void)? = nil,
         outline: OutlineState? = nil,
-        showsHeadingLineInBody: Bool = false,
-        focusTitleOnAppear: Bool = false,
         accentColor: Color? = nil,
         useBoardTypography: Bool = false,
         forceWYSIWYG: Bool = false,
         matchCardPreview: Bool = false,
+        focusBodyToken: Int = 0,
     ) {
         self.noteID = noteID
         self.noteTitle = noteTitle
@@ -176,19 +176,19 @@ struct MarkdownEditorView: View {
         self.onNavigateNext = onNavigateNext
         self.onNavigatePrevious = onNavigatePrevious
         self.outline = outline
-        self.showsHeadingLineInBody = showsHeadingLineInBody
-        self.focusTitleOnAppear = focusTitleOnAppear
         self.accentColor = accentColor
         self.useBoardTypography = useBoardTypography
         self.forceWYSIWYG = forceWYSIWYG
         self.matchCardPreview = matchCardPreview
-        if showsHeadingLineInBody {
-            _text = State(initialValue: initialContent)
-            _hiddenHeadingLine = State(initialValue: "")
-        } else if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
+        self.focusBodyToken = focusBodyToken
+        if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
+            // Raw mode shows the complete on-disk file verbatim.
             _text = State(initialValue: initialContent)
             _hiddenHeadingLine = State(initialValue: "")
         } else {
+            // WYSIWYG strips the leading "# Title" line into `hiddenHeadingLine`
+            // — the surrounding UI (card title row / editor header) already
+            // shows the title, so the body must not duplicate it.
             let (heading, body) = Self.splitHeading(initialContent)
             _text = State(initialValue: body)
             _hiddenHeadingLine = State(initialValue: heading)
@@ -331,7 +331,6 @@ struct MarkdownEditorView: View {
                 // debounce first so the swap can't flush a half-converted state.
                 // Never fires under forceWYSIWYG — isRawSource is pinned false there.
                 saveDebouncer.cancel()
-                guard !showsHeadingLineInBody else { return }
                 if raw {
                     let heading = hiddenHeadingLine
                     hiddenHeadingLine = ""
@@ -343,28 +342,20 @@ struct MarkdownEditorView: View {
                 }
             }
             .onChange(of: text) { _, newText in
-                outline?.update(body: newText, hiddenHeading: showsHeadingLineInBody ? nil : hiddenHeadingLine)
+                outline?.update(body: newText, hiddenHeading: hiddenHeadingLine)
                 let cursorPos = (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectedRange().location ?? 0
                 slashHandler.contentDidChange(content: newText, cursorPos: cursorPos)
                 let noteIDSnapshot = stableNoteID
-                if showsHeadingLineInBody {
-                    saveDebouncer.call { [onContentChanged] in
-                        onContentChanged(noteIDSnapshot, newText)
-                    }
-                } else {
-                    let heading = hiddenHeadingLine
-                    saveDebouncer.call { [onContentChanged] in
-                        let full = heading.isEmpty ? newText : heading + "\n\n" + newText
-                        onContentChanged(noteIDSnapshot, full)
-                    }
+                let heading = hiddenHeadingLine
+                saveDebouncer.call { [onContentChanged] in
+                    let full = heading.isEmpty ? newText : heading + "\n\n" + newText
+                    onContentChanged(noteIDSnapshot, full)
                 }
             }
             .onChange(of: noteTitle) { _, newTitle in
                 // forceWYSIWYG always splits the heading out, so a title rename
                 // must re-sync it even while the global raw mode is on.
-                guard !showsHeadingLineInBody,
-                      forceWYSIWYG || !AppSettings.shared.editorRawSourceMode
-                else { return }
+                guard forceWYSIWYG || !AppSettings.shared.editorRawSourceMode else { return }
                 saveDebouncer.cancel()
                 if let prefix = hiddenHeadingLine.components(separatedBy: " ").first, prefix.hasPrefix("#") {
                     hiddenHeadingLine = "\(prefix) \(newTitle)"
@@ -375,26 +366,38 @@ struct MarkdownEditorView: View {
             .onChange(of: pendingReload) { _, newContent in
                 guard let newContent else { return }
                 saveDebouncer.cancel()
-                if showsHeadingLineInBody {
+                if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
+                    // Raw mode shows the complete file — no heading split.
+                    hiddenHeadingLine = ""
                     text = newContent
                 } else {
-                    if !forceWYSIWYG, AppSettings.shared.editorRawSourceMode {
-                        // Raw mode shows the complete file — no heading split.
-                        hiddenHeadingLine = ""
-                        text = newContent
-                    } else {
-                        let (heading, body) = Self.splitHeading(newContent)
-                        hiddenHeadingLine = heading
-                        text = body
-                    }
+                    let (heading, body) = Self.splitHeading(newContent)
+                    hiddenHeadingLine = heading
+                    text = body
                 }
                 pendingReload = nil
+            }
+            // Focus request from the card's new-note naming flow: Enter commits
+            // the title field and bumps the token; the caret then lands at the
+            // end of this editor's body so typing continues right below the title.
+            .onChange(of: focusBodyToken) { _, token in
+                guard token > 0 else { return }
+                DispatchQueue.main.async {
+                    focusBodyEnd()
+                }
             }
             .overlay(
                 ImageDropOverlay { [noteID, noteTitle, noteFolder] url in
                     let note = Note(id: noteID, title: noteTitle, folder: noteFolder)
                     Self.insertDroppedImageFile(url, for: note)
                 },
+            )
+            // Mount point for the body-focus locator: a zero-size NSView that
+            // stays inside this subtree so `focusBodyEnd` can climb from it to
+            // this editor's own NSTextView (sibling view, shared host).
+            .background(
+                EditorTextViewAnchor(locator: textViewLocator)
+                    .frame(width: 0, height: 0),
             )
 
             // Find bar overlay — slides in from the bottom when showFindBar is true.
@@ -405,13 +408,7 @@ struct MarkdownEditorView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: showFindBar.wrappedValue)
         .onAppear {
-            outline?.update(body: text, hiddenHeading: showsHeadingLineInBody ? nil : hiddenHeadingLine)
-            if focusTitleOnAppear, !didFocusTitle {
-                didFocusTitle = true
-                DispatchQueue.main.async {
-                    focusAndSelectTitle()
-                }
-            }
+            outline?.update(body: text, hiddenHeading: hiddenHeadingLine)
             // Warm the decode cache off-main so the first style pass (and
             // first scroll to an image) hits cache instead of decoding on the
             // main thread. Capped — a note can reference far more images than
@@ -469,11 +466,7 @@ struct MarkdownEditorView: View {
             // always holds the note that was active when this view was first inserted.
             let capturedID = stableNoteID
             saveDebouncer.cancel()
-            let full: String = if showsHeadingLineInBody {
-                text
-            } else {
-                hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
-            }
+            let full = hiddenHeadingLine.isEmpty ? text : hiddenHeadingLine + "\n\n" + text
             onContentChanged(capturedID, full)
             slashHandler.dismiss()
             if let m = noteNavMonitor {
@@ -482,48 +475,31 @@ struct MarkdownEditorView: View {
         }
     }
 
-    private func focusAndSelectTitle() {
-        let window = NSApp.keyWindow
-        guard let tv = (window?.firstResponder as? NSTextView)
-            ?? findEditorTextView(in: window?.contentView)
-        else {
+    // MARK: - Body focus
+
+    /// Move focus into this editor's own text view with the caret at the end.
+    /// Locates the NSTextView by climbing from a zero-size anchor mounted in
+    /// this view's subtree — never by scanning the window — so the request
+    /// can't land in another editor when several share the panel (e.g. while
+    /// the card's naming field still resigns first responder). Retries once
+    /// on the next runloop if the anchor hasn't been laid out yet.
+    private func focusBodyEnd() {
+        guard let anchor = textViewLocator.anchor else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                focusAndSelectTitleNow()
+                focusBodyEnd()
             }
             return
         }
-        focusAndSelectTitleIn(tv: tv, window: window)
-    }
-
-    private func focusAndSelectTitleNow() {
-        let window = NSApp.keyWindow
-        guard let tv = (window?.firstResponder as? NSTextView)
-            ?? findEditorTextView(in: window?.contentView)
-        else { return }
-        focusAndSelectTitleIn(tv: tv, window: window)
-    }
-
-    private func focusAndSelectTitleIn(tv: NSTextView, window: NSWindow?) {
-        let targetWindow = tv.window ?? window ?? NSApp.keyWindow
-        targetWindow?.makeFirstResponder(tv)
-        let s = tv.string as NSString
-        let firstLine = (s as String).split(separator: "\n", maxSplits: 1).first.map(String.init) ?? (s as String)
-        if let match = firstLine.range(of: #"^#+\s+"#, options: .regularExpression) {
-            let prefixLength = firstLine[match].utf16.count
-            let titleLength = (firstLine as NSString).length - prefixLength
-            if titleLength > 0 {
-                let range = NSRange(location: prefixLength, length: titleLength)
-                tv.setSelectedRange(range)
-                tv.scrollRangeToVisible(range)
-            } else {
-                let range = NSRange(location: prefixLength, length: 0)
-                tv.setSelectedRange(range)
-                tv.scrollRangeToVisible(range)
+        var node = anchor.superview
+        while let superview = node {
+            if let tv = findEditorTextView(in: superview) {
+                tv.window?.makeFirstResponder(tv)
+                let end = NSRange(location: (tv.string as NSString).length, length: 0)
+                tv.setSelectedRange(end)
+                tv.scrollRangeToVisible(end)
+                return
             }
-        } else {
-            let range = NSRange(location: 0, length: (firstLine as NSString).length)
-            tv.setSelectedRange(range)
-            tv.scrollRangeToVisible(range)
+            node = superview.superview
         }
     }
 
@@ -871,6 +847,46 @@ struct MarkdownEditorView: View {
         tv.breakUndoCoalescing()
         let range = NSRange(location: sel.location, length: (inserted as NSString).length)
         InsertedLinkCaret.apply(selectingName ? .selectName : .caretAtName, in: range, to: tv)
+    }
+}
+
+// MARK: - Body focus locator
+
+/// Shared holder for the zero-size anchor NSView mounted inside a
+/// `MarkdownEditorView` subtree. Plain class (not @Observable): the anchor is
+/// written once per mount from the representable's coordinator and read only
+/// from imperative focus requests, so it must never invalidate SwiftUI.
+final class EditorTextViewLocator {
+    weak var anchor: NSView?
+}
+
+/// Zero-size NSView that registers itself with the locator on mount and
+/// deregisters on dismantle. Being a real subview of this editor's host, its
+/// superview chain reliably leads to this editor's own NSTextView.
+private struct EditorTextViewAnchor: NSViewRepresentable {
+    let locator: EditorTextViewLocator
+
+    final class Coordinator {
+        let locator: EditorTextViewLocator
+        init(locator: EditorTextViewLocator) {
+            self.locator = locator
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(locator: locator)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.locator.anchor = view
+        return view
+    }
+
+    func updateNSView(_: NSView, context _: Context) {}
+
+    static func dismantleNSView(_: NSView, coordinator: Coordinator) {
+        coordinator.locator.anchor = nil
     }
 }
 

@@ -101,8 +101,10 @@ struct BoardNoteCard: View {
     var isTitleSelected: Bool = false
     /// True while this card is expanded into its in-place editor.
     var isEditing: Bool = false
-    /// True when this card was just created and should focus/select the title on mount.
-    var isNewlyCreated: Bool = false
+    /// True while this card is in its new-note naming session: the title row
+    /// is a focused, fully-selected text field; Enter commits the title and
+    /// drops the caret into the body editor, Escape/empty blur ends it.
+    var isNaming: Bool = false
     /// True while this card is the source of an active drag: the card hides in
     /// its slot (keeping the height) while the floating replica carries the
     /// visuals.
@@ -132,6 +134,11 @@ struct BoardNoteCard: View {
     /// collapses the expanded editor. Wired to `endInlineEdit` by the board.
     var onEditToggle: (() -> Void)?
     var onPinToggle: (() -> Void)?
+    /// New-note naming session commits its typed title. The board routes this
+    /// to the store's rename (title + on-disk file + content heading sync).
+    var onNameCommit: ((String) -> Void)?
+    /// New-note naming session ends without a rename (Escape or empty blur).
+    var onNameCancel: (() -> Void)?
     /// Direct checkbox tap on a preview task row (source line index).
     var onToggleTask: ((Int) -> Void)?
     /// Rich-editor content changes while editing in place.
@@ -144,6 +151,15 @@ struct BoardNoteCard: View {
     var onDragEnded: (() -> Void)?
 
     @State private var isHovered = false
+    /// Draft of the new-note naming field; emptied whenever the session ends
+    /// so the field's unmount-driven focus-loss lands on the cancel path (a
+    /// no-op) instead of re-committing.
+    @State private var namingDraft = ""
+    @State private var didBeginNaming = false
+    @FocusState private var isNamingFocused: Bool
+    /// Bumped after a committed rename so the inline editor's body takes focus
+    /// (caret at end) — the "Enter moves into the body" step of the flow.
+    @State private var focusBodyToken = 0
 
     private var title: String {
         note.title.isEmpty ? L10n.shared["common.untitled"] : note.title
@@ -412,14 +428,13 @@ struct BoardNoteCard: View {
 
     /// The note's rich editor embedded in the card. `MarkdownEditorView`
     /// flushes its debounced save on disappearance, so collapsing the card
-    /// can't lose keystrokes. The leading "# Title" line only stays in the
-    /// body during a newly created note's naming session (`focusTitleOnAppear`
-    /// needs it in the text to select the title); existing notes strip it —
-    /// the card's title row already shows the title. `forceWYSIWYG` +
-    /// `matchCardPreview` keep the card a longer, editable preview of itself —
-    /// the global raw-source toggle and checkbox preset (editor-screen
-    /// affordances) never leak in here, and text sits flush with the
-    /// collapsed preview's left edge.
+    /// can't lose keystrokes. The leading "# Title" line is always split out
+    /// — the card's title row already shows the title, including during a
+    /// new note's naming session (the field IS the title row then).
+    /// `forceWYSIWYG` + `matchCardPreview` keep the card a longer, editable
+    /// preview of itself — the global raw-source toggle and checkbox preset
+    /// (editor-screen affordances) never leak in here, and text sits flush
+    /// with the collapsed preview's left edge.
     private var inlineEditor: some View {
         MarkdownEditorView(
             noteID: note.id,
@@ -429,12 +444,11 @@ struct BoardNoteCard: View {
             onContentChanged: { id, newContent in
                 onContentChanged?(id, newContent)
             },
-            showsHeadingLineInBody: isNewlyCreated,
-            focusTitleOnAppear: isNewlyCreated,
             accentColor: accentColor,
             useBoardTypography: true,
             forceWYSIWYG: true,
             matchCardPreview: true,
+            focusBodyToken: focusBodyToken,
         )
         .frame(height: 280)
         .frame(maxWidth: .infinity)
@@ -442,32 +456,148 @@ struct BoardNoteCard: View {
 
     // MARK: Title
 
-    /// Card title text with dedicated tap handling and selection styling.
-    /// Single click selects the title; double click enters inline rename.
+    /// Card title with dedicated tap handling and selection styling. Single
+    /// click selects the title; double click enters inline rename. During a
+    /// new note's naming session the row is instead the focused naming field
+    /// (`namingTitleField`) so typing lands in the title, never the body.
+    @ViewBuilder
     private var titleView: some View {
-        Text(title)
-            .font(appSettings.boardTitleFont)
-            .foregroundStyle(accentColor)
-            .lineLimit(1)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background {
-                if isTitleSelected {
-                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
-                        .fill(accentColor.opacity(0.18))
+        if isNaming {
+            namingTitleField
+        } else {
+            Text(title)
+                .font(appSettings.boardTitleFont)
+                .foregroundStyle(accentColor)
+                .lineLimit(1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background {
+                    if isTitleSelected {
+                        RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                            .fill(accentColor.opacity(0.18))
+                    }
                 }
-            }
-            .overlay {
-                if isTitleSelected {
-                    RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
-                        .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                .overlay {
+                    if isTitleSelected {
+                        RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                            .strokeBorder(accentColor.opacity(0.45), lineWidth: 1)
+                    }
                 }
+                .padding(.leading, -4)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onTitleTap?()
+                }
+        }
+    }
+
+    // MARK: New-note naming field
+
+    /// Title-scale rename field for a freshly created card, mirroring the
+    /// board rename card's semantics (Enter commits, Escape cancels, blur
+    /// commits-or-cancels, red pill on a taken name) and the editor header's
+    /// title field look (accent border while editing, full selection on
+    /// focus). Not `InlineRenameEditor` — that one is sized for standalone
+    /// rename rows (leading icon, `.body`, 10pt padding); the card needs the
+    /// title row's own typography and padding so the row reads unchanged.
+    private var namingTitleField: some View {
+        TextField(
+            l10n["common.noteTitlePlaceholder"],
+            text: $namingDraft,
+        )
+        .textFieldStyle(.plain)
+        .font(appSettings.boardTitleFont)
+        .foregroundStyle(DesignToken.bodyStrong)
+        .focused($isNamingFocused)
+        .frame(minWidth: 120, maxWidth: 240, alignment: .leading)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignToken.Radius.xs)
+                .strokeBorder(
+                    isNamingConflicting ? DesignToken.error : accentColor,
+                    lineWidth: 1.5,
+                )
+        }
+        .overlay(alignment: .trailing) {
+            if isNamingConflicting {
+                Text(l10n["common.nameTaken"])
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(.background.opacity(0.9), in: RoundedRectangle(cornerRadius: 3))
+                    .padding(.trailing, 4)
             }
-            .padding(.leading, -4)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onTitleTap?()
+        }
+        .onSubmit {
+            commitNaming(pushFocusToBody: true)
+        }
+        .onExitCommand {
+            cancelNaming()
+        }
+        .onChange(of: isNamingFocused) { _, focused in
+            if focused {
+                // Select the placeholder title so the first keystroke replaces it.
+                DispatchQueue.main.async {
+                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                }
+            } else {
+                // Blur (mount, dismiss, click elsewhere): commit non-empty,
+                // otherwise fall back to the store title untouched.
+                commitNaming(pushFocusToBody: false)
             }
+        }
+        .onAppear {
+            guard !didBeginNaming else { return }
+            didBeginNaming = true
+            namingDraft = title
+            DispatchQueue.main.async {
+                isNamingFocused = true
+            }
+        }
+    }
+
+    /// Live conflict check against the note's folder, excluding the note
+    /// itself — same rule as the board rename coordinator.
+    private var isNamingConflicting: Bool {
+        let trimmed = namingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let live = noteStore.notes.first(where: { $0.id == note.id }) ?? note
+        return noteStore.noteTitleExists(trimmed, in: live.folder, excluding: live.id)
+    }
+
+    /// End the naming session by renaming the note. A conflicting or empty
+    /// draft keeps the session (Enter just shows the pill); an empty draft on
+    /// blur cancels instead. `pushFocusToBody` is only set for the Enter path
+    /// — a blur already moved focus somewhere the user chose.
+    private func commitNaming(pushFocusToBody: Bool) {
+        let trimmed = namingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isNamingConflicting else {
+            if trimmed.isEmpty, !isNamingFocused {
+                cancelNaming()
+            }
+            return
+        }
+        let live = noteStore.notes.first(where: { $0.id == note.id }) ?? note
+        if trimmed != live.title {
+            onNameCommit?(trimmed)
+        } else {
+            onNameCancel?()
+        }
+        namingDraft = ""
+        if pushFocusToBody {
+            DispatchQueue.main.async {
+                focusBodyToken += 1
+            }
+        }
+    }
+
+    /// Abandon the naming session: the note keeps its placeholder title and
+    /// untouched content heading; the card stays in its editing state.
+    private func cancelNaming() {
+        namingDraft = ""
+        onNameCancel?()
     }
 
     // MARK: Title edit toggle

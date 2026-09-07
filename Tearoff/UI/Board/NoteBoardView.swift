@@ -59,8 +59,10 @@ struct NoteBoardView: View {
     /// Card that just received a dropped image — pulses its border so the
     /// append is discoverable. Cleared shortly after the drop.
     @State private var droppedFlashID: UUID?
-    /// Note that was just newly created — its card inline editor will focus and select the title on mount.
-    @State private var newlyCreatedNoteID: UUID?
+    /// Note in its new-card naming session: the card's title row is a
+    /// focused, fully-selected field. Cleared when the session ends (commit,
+    /// cancel, blur, editing another card, or leaving card editing).
+    @State private var namingNoteID: UUID?
     /// Target note to scroll into view.
     @State private var scrollToNoteID: UUID?
 
@@ -293,17 +295,16 @@ struct NoteBoardView: View {
         }
         .onChange(of: noteStore.inlineEditingNoteID) { _, editingID in
             if let editingID {
-                // Editing a different note ends the previous note's
-                // newly-created naming session (its card shows the heading
-                // line in the editor body).
-                if let created = newlyCreatedNoteID, created != editingID {
-                    newlyCreatedNoteID = nil
+                // Editing a different note ends the previous note's naming
+                // session — only one card may name/rename at a time.
+                if let naming = namingNoteID, naming != editingID {
+                    namingNoteID = nil
                 }
                 if editOrderSnapshot == nil {
                     editOrderSnapshot = boardItems.map(\.id)
                 }
             } else {
-                newlyCreatedNoteID = nil
+                namingNoteID = nil
                 editOrderSnapshot = nil
             }
         }
@@ -869,7 +870,7 @@ struct NoteBoardView: View {
             isSelected: noteStore.selection.contains(.note(note.id)),
             isTitleSelected: noteStore.selectedTitleNoteID == note.id,
             isEditing: noteStore.inlineEditingNoteID == note.id,
-            isNewlyCreated: newlyCreatedNoteID == note.id,
+            isNaming: namingNoteID == note.id,
             isDragging: dragSession.noteID == note.id,
             hoverEnabled: dragSession.noteID == nil,
             isDropped: droppedFlashID == note.id,
@@ -879,6 +880,11 @@ struct NoteBoardView: View {
             onTitleAreaTap: { flags in handleTitleAreaTap(note, flags: flags, visible: visible) },
             onEditToggle: { noteStore.endInlineEdit() },
             onPinToggle: { noteStore.togglePin(on: note) },
+            onNameCommit: { title in
+                noteStore.renameNote(note, to: title)
+                namingNoteID = nil
+            },
+            onNameCancel: { namingNoteID = nil },
             onToggleTask: { lineIndex in
                 noteStore.toggleTask(at: lineIndex, on: note)
             },
@@ -1631,7 +1637,7 @@ struct NoteBoardView: View {
         }
         let folder = noteStore.selectedFolder?.name ?? ""
         let note = noteStore.createNote(in: folder)
-        newlyCreatedNoteID = note.id
+        namingNoteID = note.id
         noteStore.beginInlineEdit(note)
         scrollToNoteID = note.id
     }
