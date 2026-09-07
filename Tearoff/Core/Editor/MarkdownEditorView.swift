@@ -425,6 +425,9 @@ struct MarkdownEditorView: View {
                     if key == "x", mods == [.command, .shift] {
                         NotificationCenter.default.post(name: .editorApplyStrikethrough, object: nil); return nil
                     }
+                    if key == "t", mods == [.command] {
+                        Self.insertTodoItem(in: tv); return nil
+                    }
                 }
                 let s = ShortcutSettings.shared
                 if s.previousNoteShortcut?.matches(event) == true {
@@ -504,6 +507,80 @@ struct MarkdownEditorView: View {
     }
 
     // MARK: - Helpers
+
+    /// ⌘T turns the caret's line into a to-do item (Obsidian-style line
+    /// conversion rather than caret-position typing, so the marker can never
+    /// land mid-word):
+    /// - empty/indented line → `- [ ] ` after the indentation, caret at line end;
+    /// - plain text line → prefixed with `- [ ] `, caret at line end;
+    /// - `- `/`* `/`+ ` bullet → `[ ] ` spliced after the bullet (`- x` → `- [ ] x`);
+    /// - heading/quote lines are never prefixed — a fresh item starts on the
+    ///   next line below them instead;
+    /// - a line that is already a task (either checked state) is left alone.
+    static func insertTodoItem(in tv: NSTextView) {
+        let sel = tv.selectedRange()
+        let ns = tv.string as NSString
+        guard sel.location >= 0, sel.location <= ns.length else { return }
+        let line = ns.lineRange(for: NSRange(location: sel.location, length: 0))
+        guard line.length > 0 else { return }
+        // Line content span without the terminator, so the marker never
+        // spills onto the next line.
+        var contentEnd = NSMaxRange(line)
+        if contentEnd > line.location {
+            let last = ns.character(at: contentEnd - 1)
+            if last == 0x0A || last == 0x0D {
+                contentEnd -= 1
+            }
+        }
+        var start = line.location
+        while start < contentEnd {
+            let c = ns.character(at: start)
+            if c == 0x20 /* space */ || c == 0x09 /* tab */ {
+                start += 1
+            } else {
+                break
+            }
+        }
+        let text = ns.substring(with: NSRange(location: start, length: contentEnd - start))
+
+        // Already a task item (either checked state) — nothing to do.
+        if text.hasPrefix("- [ ]") || text.hasPrefix("- [x] ") || text.hasPrefix("- [X] ") {
+            return
+        }
+
+        let marker = "- [ ] "
+        let insertAt: Int, insertion: String, caret: Int
+        if text.isEmpty {
+            // Empty line: just place the marker after any indentation.
+            insertAt = start
+            insertion = marker
+            caret = contentEnd + marker.utf16.count
+        } else if text.hasPrefix("- ") || text.hasPrefix("* ") || text.hasPrefix("+ ") {
+            // Existing bullet: splice `[ ] ` in after the bullet marker.
+            insertAt = start + 2
+            insertion = "[ ] "
+            caret = contentEnd + 4
+        } else if text.hasPrefix("#") || text.hasPrefix(">") {
+            // Headings/quotes must not gain a prefix — start below instead.
+            insertAt = contentEnd
+            insertion = "\n" + marker
+            caret = contentEnd + 1 + marker.utf16.count
+        } else {
+            // Plain text: prefix the whole line, converting it to a task.
+            insertAt = start
+            insertion = marker
+            caret = contentEnd + marker.utf16.count
+        }
+
+        let range = NSRange(location: insertAt, length: 0)
+        tv.breakUndoCoalescing()
+        guard tv.shouldChangeText(in: range, replacementString: insertion) else { return }
+        tv.replaceCharacters(in: range, with: insertion)
+        tv.didChangeText()
+        tv.undoManager?.setActionName(L10n.shared["editor.task.insertTodo"])
+        tv.breakUndoCoalescing()
+        tv.setSelectedRange(NSRange(location: caret, length: 0))
+    }
 
     static func splitHeading(_ content: String) -> (heading: String, body: String) {
         let lines = content.components(separatedBy: "\n")

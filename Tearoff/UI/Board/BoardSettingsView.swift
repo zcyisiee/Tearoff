@@ -430,6 +430,7 @@ struct BoardSettingsView: View {
             staticShortcutRow("⌘E", l10n["settings.keyboard.inlineCode"])
             staticShortcutRow("⌘K", l10n["settings.keyboard.link"])
             staticShortcutRow("⇧⌘X", l10n["settings.keyboard.strikethrough"])
+            staticShortcutRow("⌘T", l10n["settings.keyboard.task"])
             staticShortcutRow("/", l10n["settings.keyboard.slashCommand"])
         }
     }
