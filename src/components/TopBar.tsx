@@ -49,13 +49,13 @@ export function TopBar() {
           <IconButton label="新建笔记  ⌘N" onClick={() => void createNote()}>
             <SquarePen size={16} />
           </IconButton>
-          <IconButton label="添加文件夹卡片" onClick={() => void addFolderCard()}>
+          <IconButton label="添加文件夹" onClick={() => void addFolderCard()}>
             <FolderPlus size={16} />
           </IconButton>
           <IconButton label="设置" active={view === "settings"} onClick={() => setView(view === "settings" ? "home" : "settings")}>
             <Gear size={16} />
           </IconButton>
-          <IconButton label={panelPinned ? "取消固定面板" : "固定面板，不自动收起"} active={panelPinned} onClick={() => void togglePin()}>
+          <IconButton label={panelPinned ? "取消固定" : "固定"} active={panelPinned} onClick={() => void togglePin()}>
             <Pin size={16} />
           </IconButton>
         </>

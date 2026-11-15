@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "./api";
+import { log } from "./log";
 import type { FolderCard, NoteMeta, Settings } from "./types";
 
 export type View = "home" | "settings";
@@ -173,7 +174,9 @@ export const useStore = create<Store>((set, get) => ({
     await get().refresh();
   },
   async addFolderCard() {
+    log.info("add folder card: picking directory");
     const dir = await api.pickDirectory();
+    log.info(`add folder card: picked ${dir ?? "(cancelled)"}`);
     if (!dir) return;
     await api.createFolderCard(dir);
     await get().refresh();

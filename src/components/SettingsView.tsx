@@ -53,7 +53,7 @@ export function SettingsView() {
       </header>
 
       <section className="set">
-        <h2>笔记存在哪里</h2>
+        <h2>笔记库</h2>
         <p className="set__path" title={settings.vaultPath}>{settings.vaultPath}</p>
         <div className="set__row">
           <button
@@ -64,31 +64,30 @@ export function SettingsView() {
               if (dir) void save({ vaultPath: dir });
             }}
           >
-            换一个文件夹
+            更换
           </button>
           <button type="button" className="btn" onClick={() => void api.openPath(settings.vaultPath)}>
-            打开这个文件夹
+            打开
           </button>
         </div>
-        <p className="set__hint">每篇笔记就是这里的一个 .md 文件，可以用任何编辑器打开。</p>
       </section>
 
       <section className="set">
         <h2>面板</h2>
         <div className="set__field">
-          <span>出现在屏幕</span>
-          {choice("side", [["left", "左边"], ["right", "右边"]])}
+          <span>位置</span>
+          {choice("side", [["left", "左"], ["right", "右"]])}
         </div>
         <div className="set__field">
-          <span>鼠标碰到屏幕边缘时滑出</span>
+          <span>边缘唤出</span>
           {choice("edgeActivation", [[true, "开"], [false, "关"]])}
         </div>
         <div className="set__field">
-          <span>碰到边缘多久后滑出</span>
+          <span>唤出延迟</span>
           {num("activationDelayMs", 0, 1000, 50, " 毫秒")}
         </div>
         <div className="set__field">
-          <span>鼠标离开多久后收起</span>
+          <span>收起延迟</span>
           {num("hideDelayMs", 0, 2000, 100, " 毫秒")}
         </div>
         <div className="set__field">
@@ -96,7 +95,7 @@ export function SettingsView() {
           {num("panelWidth", 360, 720, 10, " 点")}
         </div>
         <div className="set__field">
-          <span>随时呼出的快捷键</span>
+          <span>快捷键</span>
           <input
             className="set__text"
             defaultValue={settings.toggleShortcut}
@@ -106,7 +105,6 @@ export function SettingsView() {
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
         </div>
-        <p className="set__hint">快捷键写法如 CmdOrCtrl+Shift+Space、Alt+T。留空则不设快捷键。</p>
       </section>
 
       <section className="set">
@@ -120,12 +118,21 @@ export function SettingsView() {
           {num("fontSize", 13, 20, 1, " 点")}
         </div>
         <div className="set__field">
-          <span>文件夹卡片里显示隐藏文件</span>
+          <span>隐藏文件</span>
           {choice("showHiddenFiles", [[true, "显示"], [false, "不显示"]])}
         </div>
       </section>
 
       <section className="set">
+        <h2>诊断</h2>
+        <div className="set__row">
+          <button type="button" className="btn" onClick={() => void api.openLogs()}>
+            打开日志
+          </button>
+        </div>
+      </section>
+
+      <section className="set set--bare">
         <button type="button" className="btn btn--quiet" onClick={() => void api.quit()}>
           退出 Tearoff
         </button>

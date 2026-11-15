@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { log } from "./log";
 import { useStore } from "./store";
 import { reloadDir } from "../components/FolderCardView";
 
@@ -29,6 +30,7 @@ export function installFileDrops() {
     if (e.type === "over") return setHover(target);
     setHover(null);
     const dest = target?.dataset.dropDir;
+    log.info(`file drop ${e.paths.length} item(s) → ${dest ?? "(no target)"}`);
     if (!dest) return;
     const sources = e.paths.filter((p) => parentOf(p) !== dest.replace(/[\\/]+$/, "") && p !== dest);
     if (!sources.length) return;

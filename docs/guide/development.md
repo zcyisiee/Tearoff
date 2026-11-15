@@ -44,6 +44,8 @@ pnpm dev &   # 调试构建从 devUrl 加载界面
 
 ## 排查
 
+- 先看日志：`~/Library/Logs/io.github.zcyisiee.Tearoff5/tearoff.log`（开发运行与安装版写同一个文件）。找 `WARN`/`ERROR`：命令慢、命令失败、界面线程停顿都在里面。
+
 - 原生窗口一片空白：先看自检的「panel layout」项——它报告面板元素的位置。常见原因是 CSP 拦了脚本（开发用 `devCsp`）或面板还停在滑出位置。
 - 监听事件不来：检查路径是否经过符号链接（`/tmp` → `/private/tmp`），比较前要规范化。
 - macOS 多显示器定位错：只用 `panel.rs` 里的逻辑坐标路径，不要用 tao 的物理坐标。

@@ -129,7 +129,7 @@ fn place(win: &WebviewWindow, r: Rect) {
     }
 }
 
-pub fn show(app: &AppHandle, focus: bool) {
+pub fn show(app: &AppHandle, focus: bool, why: &str) {
     let state = app.state::<AppState>();
     let panel = &state.panel;
     let (side, width) = {
@@ -146,9 +146,11 @@ pub fn show(app: &AppHandle, focus: bool) {
     }
 
     let app2 = app.clone();
+    let why = why.to_string();
     let _ = app.run_on_main_thread(move || {
         let Some(rect) = target_rect(&app2, cursor, &side, width) else { return };
         *app2.state::<AppState>().panel.rect.lock() = rect;
+        log::info!("panel show ({why}) focus={focus} at {rect:?}");
         place(&win, rect);
         #[cfg(target_os = "macos")]
         mac::remember_frontmost(&app2);
@@ -165,12 +167,13 @@ pub fn show(app: &AppHandle, focus: bool) {
     });
 }
 
-pub fn hide(app: &AppHandle) {
+pub fn hide(app: &AppHandle, why: &str) {
     let state = app.state::<AppState>();
     let panel = &state.panel;
     if !panel.shown.swap(false, Ordering::SeqCst) {
         return;
     }
+    log::info!("panel hide ({why})");
     let generation = panel.generation.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = app.emit("panel-hidden", ());
     let app = app.clone();
@@ -191,11 +194,11 @@ pub fn hide(app: &AppHandle) {
     });
 }
 
-pub fn toggle(app: &AppHandle) {
+pub fn toggle(app: &AppHandle, why: &str) {
     if app.state::<AppState>().panel.shown.load(Ordering::SeqCst) {
-        hide(app);
+        hide(app, why);
     } else {
-        show(app, true);
+        show(app, true, why);
     }
 }
 
@@ -203,9 +206,10 @@ pub fn toggle(app: &AppHandle) {
 pub fn on_blur(app: &AppHandle) {
     let panel = &app.state::<AppState>().panel;
     if panel.pinned.load(Ordering::SeqCst) || panel.busy.load(Ordering::SeqCst) > 0 || primary_button_down() {
+        log::debug!("blur ignored (pinned/busy/button down)");
         return;
     }
-    hide(app);
+    hide(app, "lost focus");
 }
 
 pub fn spawn_watcher(app: AppHandle) {
@@ -233,7 +237,7 @@ pub fn spawn_watcher(app: AppHandle) {
                 let since = *at_edge_since.get_or_insert_with(Instant::now);
                 if since.elapsed() >= activation {
                     at_edge_since = None;
-                    show(&app, false);
+                    show(&app, false, "edge hover");
                 }
                 continue;
             }
@@ -256,7 +260,7 @@ pub fn spawn_watcher(app: AppHandle) {
             let since = *outside_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= hide_delay {
                 outside_since = None;
-                hide(&app);
+                hide(&app, "pointer left");
             }
         }
     });

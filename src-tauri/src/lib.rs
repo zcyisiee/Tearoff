@@ -136,6 +136,7 @@ fn start_watcher(app: &AppHandle) {
                     }
                 }
             }
+            log::debug!("fs: {} event(s), vault_changed={}, dirs={}", paths.len(), vault_changed, changed_dirs.len());
             if vault_changed {
                 let _ = app.emit("vault-changed", ());
             }
@@ -147,8 +148,12 @@ fn start_watcher(app: &AppHandle) {
 }
 
 // ── Notes ───────────────────────────────────────────────────────────────
+//
+// Every command that touches the disk is `command(async)`: a plain command runs
+// on the main thread, where one slow read (a cold folder, a permission prompt,
+// a network volume) freezes the whole panel.
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_state(state: State<AppState>) -> AppSnapshot {
     let vault = state.vault.lock();
     AppSnapshot {
@@ -161,47 +166,47 @@ fn get_state(state: State<AppState>) -> AppSnapshot {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_note(state: State<AppState>, path: String) -> Result<NoteContent> {
     state.vault.lock().read_note(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn write_note(state: State<AppState>, path: String, content: String, base_modified: Option<i64>) -> Result<NoteMeta> {
     state.vault.lock().write_note(&path, &content, base_modified)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_note(state: State<AppState>, title: Option<String>) -> Result<NoteMeta> {
     state.vault.lock().create_note(title.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_note(state: State<AppState>, path: String, title: String) -> Result<NoteMeta> {
     state.vault.lock().rename_note(&path, &title)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_note(state: State<AppState>, path: String) -> Result<()> {
     state.vault.lock().delete_note(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_pinned(state: State<AppState>, path: String, pinned: bool) -> Result<()> {
     state.vault.lock().set_pinned(&path, pinned)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reorder_cards(state: State<AppState>, keys: Vec<String>) -> Result<()> {
     state.vault.lock().reorder_cards(&keys)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search(state: State<AppState>, query: String) -> Vec<SearchHit> {
     state.vault.lock().search(&query)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_image(state: State<AppState>, note_path: String, name: String, data_base64: String) -> Result<String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64).map_err(|e| Error::Other(e.to_string()))?;
@@ -210,61 +215,67 @@ fn save_image(state: State<AppState>, note_path: String, name: String, data_base
 
 // ── Folder cards ────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_folder_card(state: State<AppState>, dir: String) -> Result<FolderCard> {
     let card = state.vault.lock().create_folder_card(&dir)?;
     sync_watches(&state);
     Ok(card)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_folder_card(state: State<AppState>, card: FolderCard) -> Result<()> {
     state.vault.lock().update_folder_card(card)?;
     sync_watches(&state);
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_folder_card(state: State<AppState>, id: String) -> Result<()> {
     state.vault.lock().delete_folder_card(&id)?;
     sync_watches(&state);
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_dir(path: String, show_hidden: bool) -> Result<Vec<finder::DirEntry>> {
-    finder::list_dir(Path::new(&path), show_hidden)
+    let t0 = std::time::Instant::now();
+    let out = finder::list_dir(Path::new(&path), show_hidden);
+    let ms = t0.elapsed().as_millis();
+    if ms > 100 {
+        log::warn!("list_dir {path} took {ms}ms on disk");
+    }
+    out
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn fs_move(sources: Vec<String>, dest_dir: String, copy: bool) -> Result<()> {
     let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
     finder::move_into(&sources, Path::new(&dest_dir), copy)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn fs_rename(path: String, new_name: String) -> Result<()> {
     finder::rename(Path::new(&path), new_name.trim())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn fs_trash(paths: Vec<String>) -> Result<()> {
     finder::trash(&paths.into_iter().map(PathBuf::from).collect::<Vec<_>>())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn fs_new_folder(dir: String) -> Result<String> {
     Ok(finder::new_folder(Path::new(&dir))?.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_path(app: AppHandle, path: String) -> Result<()> {
     let is_url = path.split_once(':').is_some_and(|(scheme, _)| scheme.len() > 1 && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c)));
     let result = if is_url { app.opener().open_url(path, None::<&str>) } else { app.opener().open_path(path, None::<&str>) };
     result.map_err(|e| Error::Other(e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_path(app: AppHandle, path: String) -> Result<()> {
     app.opener().reveal_item_in_dir(path).map_err(|e| Error::Other(e.to_string()))
 }
@@ -285,6 +296,7 @@ fn set_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> R
     let mut next = settings;
     next.sanitize();
     let previous = state.settings.lock().clone();
+    log::info!("settings changed: {:?}", next);
     if next.vault_path != previous.vault_path {
         let vault = Vault::open(PathBuf::from(&next.vault_path))?;
         *state.vault.lock() = vault;
@@ -300,7 +312,7 @@ fn set_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> R
     *state.settings.lock() = next;
     sync_watches(&state);
     if reposition && state.panel.shown.load(Ordering::SeqCst) {
-        panel::show(&app, false);
+        panel::show(&app, false, "settings changed");
     }
     Ok(())
 }
@@ -318,9 +330,40 @@ fn set_panel_busy(state: State<AppState>, busy: bool) {
     }
 }
 
+/// Folder picker, attached to the panel as a sheet. The panel floats above
+/// normal windows and may not even be the active app (hover reveal does not
+/// activate), so a free-standing dialog can open *behind* it and look like a
+/// freeze. Activating first and parenting the dialog keeps it in front.
+#[tauri::command]
+async fn pick_directory(app: AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let state = app.state::<AppState>();
+    state.panel.busy.fetch_add(1, Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    log::info!("pick_directory: opening");
+    let mut dialog = app.dialog().file();
+    if let Some(win) = app.get_webview_window(panel::LABEL) {
+        let _ = win.set_focus();
+        dialog = dialog.set_parent(&win);
+    }
+    let picked = dialog.blocking_pick_folder().and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned());
+    log::info!("pick_directory: closed after {:?}, picked={}", started.elapsed(), picked.is_some());
+    if state.panel.busy.fetch_sub(1, Ordering::SeqCst) <= 1 {
+        state.panel.busy.store(0, Ordering::SeqCst);
+    }
+    picked
+}
+
+#[tauri::command]
+fn open_logs(app: AppHandle) -> Result<()> {
+    let dir = app.path().app_log_dir().map_err(|e| Error::Other(e.to_string()))?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| Error::Other(e.to_string()))
+}
+
 #[tauri::command]
 fn hide_panel(app: AppHandle) {
-    panel::hide(&app);
+    log::debug!("hide requested by ui");
+    panel::hide(&app, "ui");
 }
 
 /// Development self-test sink: the frontend reports what it verified through
@@ -352,13 +395,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => panel::show(app, true),
+            "show" => panel::show(app, true, "tray menu"),
             "quit" => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                panel::toggle(tray.app_handle());
+                panel::toggle(tray.app_handle(), "tray click");
             }
         })
         .build(app)?;
@@ -367,6 +410,19 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: Some("tearoff".into()) }))
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+                .level(log::LevelFilter::Debug)
+                .level_for("tao", log::LevelFilter::Warn)
+                .level_for("notify", log::LevelFilter::Warn)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
@@ -374,7 +430,7 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        panel::toggle(app);
+                        panel::toggle(app, "shortcut");
                     }
                 })
                 .build(),
@@ -393,6 +449,10 @@ pub fn run() {
                 settings.vault_path = PathBuf::from(vault).to_string_lossy().into_owned();
             }
             let vault = Vault::open(PathBuf::from(&settings.vault_path))?;
+            log::info!(
+                "tearoff {} starting: vault={} notes={} folder_cards={} side={} edge={}",
+                env!("CARGO_PKG_VERSION"), settings.vault_path, vault.list_notes().len(), vault.folder_cards().len(), settings.side, settings.edge_activation
+            );
             let shortcut = settings.toggle_shortcut.clone();
             let width = settings.panel_width;
 
@@ -421,13 +481,16 @@ pub fn run() {
             panel::configure(&win);
             let blur_handle = handle.clone();
             win.on_window_event(move |event| {
+                if let tauri::WindowEvent::Focused(focused) = event {
+                    log::debug!("panel window focused={focused}");
+                }
                 if let tauri::WindowEvent::Focused(false) = event {
                     panel::on_blur(&blur_handle);
                 }
             });
 
             if let Err(e) = register_shortcut(&handle, &shortcut) {
-                eprintln!("tearoff: {e}");
+                log::warn!("{e}");
             }
             build_tray(&handle)?;
             start_watcher(&handle);
@@ -438,7 +501,7 @@ pub fn run() {
                 let h = handle.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(Duration::from_millis(900));
-                    panel::show(&h, false);
+                    panel::show(&h, false, "TEAROFF_SHOW");
                 });
             }
             Ok(())
@@ -446,7 +509,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_state, read_note, write_note, create_note, rename_note, delete_note, set_pinned, reorder_cards, search, save_image,
             create_folder_card, update_folder_card, delete_folder_card, list_dir, fs_move, fs_rename, fs_trash, fs_new_folder,
-            open_path, reveal_path, set_settings, set_panel_pinned, set_panel_busy, hide_panel, quit, selftest_report,
+            open_path, reveal_path, set_settings, set_panel_pinned, set_panel_busy, hide_panel, quit, selftest_report, pick_directory, open_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tearoff");

@@ -46,13 +46,12 @@ export function Home() {
 
   return (
     <div className="home">
-      <section className="today" aria-label="今天">
+      <section aria-label="今天">
         <Sheet
           key={today}
           path={todayPath(today)}
           modified={todayNote?.modified ?? 0}
           variant="today"
-          placeholder="今天做了什么？直接写，按 / 选格式"
           focusSignal={focusToday}
           heading={
             <h1 className="today__date">
@@ -62,7 +61,6 @@ export function Home() {
           }
         />
       </section>
-      <div className="perforation" aria-hidden="true" />
 
       {cards.length > 0 && (
         <section className="cards" aria-label="固定的卡片">
@@ -85,7 +83,6 @@ export function Home() {
       )}
 
       <section className="history" aria-label="之前的笔记">
-        {groups.length === 0 && cards.length === 0 && <p className="history__empty">还没有别的笔记。今天这张写满了，就新建一张。</p>}
         {groups.map((g) => (
           <div key={g.name} className="history__group">
             <h2 className="history__label">{g.name}</h2>
@@ -104,7 +101,7 @@ export function Home() {
                   <span className="row__when">{shortDay(n.dailyDate ?? dayKey(n.modified), today)}</span>
                   <span className="row__text">
                     {!n.dailyDate && <strong>{n.title}</strong>}
-                    <span>{n.preview || (n.dailyDate ? "空白的一天" : "")}</span>
+                    <span>{n.preview}</span>
                   </span>
                 </button>
               ),
@@ -142,7 +139,7 @@ function SearchResults({ query }: { query: string }) {
   return (
     <div className="home">
       <section className="history">
-        {hits && hits.length === 0 && <p className="history__empty">没有找到“{query}”。换个词试试。</p>}
+        {hits && hits.length === 0 && <p className="history__empty">没有结果</p>}
         {hits?.map((h) => (
           <button key={h.path} type="button" className="row" onClick={() => setPinnedScroll(h.path)}>
             <span className="row__text">

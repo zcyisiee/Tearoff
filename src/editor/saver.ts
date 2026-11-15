@@ -1,4 +1,5 @@
 import { api } from "../lib/api";
+import { log } from "../lib/log";
 import { useStore } from "../lib/store";
 
 /**
@@ -53,7 +54,9 @@ export class NoteSaver {
       const meta = await api.writeNote(this.path, content, this.baseModified);
       this.accept(content, meta.modified);
       store.upsertNote(meta);
+      log.debug(`saved ${this.path} (${content.length} chars)`);
     } catch (e) {
+      log.warn(`save ${this.path} failed: ${e}`);
       if (!String(e).includes("conflict")) {
         this.pending ??= content;
         store.notify(`没有保存成功：${e}`);

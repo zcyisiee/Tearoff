@@ -5,6 +5,7 @@ import { NoteEditor } from "../editor/NoteEditor";
 import { FormatBar } from "../editor/FormatBar";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
+import { log } from "../lib/log";
 import { IconButton, Menu, type MenuState } from "./Menu";
 
 const MORPH_MS = 300;
@@ -52,6 +53,7 @@ export function Sheet({ path, modified, variant, heading, pinned, cardKey, place
   const toggle = () => {
     const node = el.current;
     if (!node) return;
+    log.debug(`sheet ${expanded ? "collapse" : "expand"} ${path}`);
     if (!expanded) {
       fromRect.current = node.getBoundingClientRect();
       setSlotHeight(fromRect.current.height);
@@ -159,7 +161,7 @@ export function Sheet({ path, modified, variant, heading, pinned, cardKey, place
           <div className="sheet__heading">{heading}</div>
           <div className="sheet__tools">
             {variant !== "today" && (
-              <IconButton label={pinned ? "取消固定" : "固定在主页"} active={pinned} onClick={() => void setPinned(path, !pinned)}>
+              <IconButton label={pinned ? "取消固定" : "固定"} active={pinned} onClick={() => void setPinned(path, !pinned)}>
                 {pinned ? <PinOff size={15} /> : <Pin size={15} />}
               </IconButton>
             )}

@@ -1,11 +1,29 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { invoke as rawInvoke, convertFileSrc } from "@tauri-apps/api/core";
+import { log } from "./log";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import type { Api, AppState, Settings } from "./types";
 
 let vaultPath = "";
+
+/** Every backend call is timed and logged; slow or failed ones stand out in the log file. */
+const QUIET = new Set(["set_panel_busy", "get_state", "list_dir"]);
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const t0 = performance.now();
+  try {
+    const out = await rawInvoke<T>(cmd, args);
+    const ms = Math.round(performance.now() - t0);
+    if (ms > 250) log.warn(`ipc ${cmd} slow ${ms}ms`);
+    else if (!QUIET.has(cmd)) log.debug(`ipc ${cmd} ${ms}ms`);
+    return out;
+  } catch (e) {
+    // "conflict" and "exists:…" are answers the UI handles, not faults.
+    const refused = /^(conflict|exists:)/.test(String(e));
+    log[refused ? "info" : "error"](`ipc ${cmd} ${refused ? "refused" : "failed"} after ${Math.round(performance.now() - t0)}ms: ${e}`);
+    throw e;
+  }
+}
 
 /** Drag preview: a paper chip with the file name (and a count for several). */
 function dragIcon(paths: string[]): string {
@@ -97,15 +115,8 @@ export const tauriApi: Api = {
     // Belt and braces: if the plugin never reports the end, do not stay busy forever.
     setTimeout(release, 60_000);
   },
-  async pickDirectory() {
-    await invoke("set_panel_busy", { busy: true });
-    try {
-      const picked = await open({ directory: true, multiple: false });
-      return typeof picked === "string" ? picked : null;
-    } finally {
-      await invoke("set_panel_busy", { busy: false });
-    }
-  },
+  pickDirectory: () => invoke("pick_directory"),
+  openLogs: () => invoke("open_logs"),
 
   async setSettings(settings: Settings) {
     await invoke("set_settings", { settings });

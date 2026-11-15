@@ -12,16 +12,17 @@
   --marker: #ffe566;
   --danger: #b0372d;
   --code-bg: #eef1ee;
-  --shadow: 0 1px 0 rgba(26, 33, 29, 0.06), 0 10px 22px -18px rgba(26, 33, 29, 0.55);
+  --shadow: inset 0 0 0 1px var(--line);
 
   --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", "Noto Sans CJK SC", sans-serif;
   --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "STSong", serif;
   --mono: "SF Mono", ui-monospace, "Cascadia Code", Consolas, "PingFang SC", monospace;
 
   --font-size: 15px;
-  --topbar: 44px;
-  --pad: 18px;
-  --radius: 3px;
+  --topbar: 40px;
+  --pad: 16px;
+  --radius: 12px;
+  --gap: 8px;
   --ease: cubic-bezier(0.22, 0.9, 0.24, 1);
   color-scheme: light;
 }
@@ -39,7 +40,7 @@
   --marker: #6f6212;
   --danger: #ef8478;
   --code-bg: #141b18;
-  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 22px -16px rgba(0, 0, 0, 0.9);
+  --shadow: inset 0 0 0 1px var(--line);
   color-scheme: dark;
 }
 
@@ -57,7 +58,7 @@
     --marker: #6f6212;
     --danger: #ef8478;
     --code-bg: #141b18;
-    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 22px -16px rgba(0, 0, 0, 0.9);
+    --shadow: inset 0 0 0 1px var(--line);
     color-scheme: dark;
   }
 }

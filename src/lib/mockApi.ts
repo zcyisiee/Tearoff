@@ -304,6 +304,7 @@ export const mockApi: Api = {
   async pickDirectory() {
     return ROOT;
   },
+  async openLogs() {},
   async setSettings(s) {
     settings = { ...s };
   },

@@ -284,7 +284,7 @@ export function FolderCardView({ card, cardKey }: { card: FolderCard; cardKey: s
         onContextMenu={(e) => entryMenu(e, null)}
       >
         {error && <p className="files__state">{error}</p>}
-        {!error && entries && sorted.length === 0 && <p className="files__state">空文件夹。把文件拖进来。</p>}
+        {!error && entries && sorted.length === 0 && <p className="files__state">空</p>}
         {sorted.map((entry) => {
           const Icon = iconFor(entry);
           const thumb = card.viewMode === "icon" && isTauri && IMAGE.has(entry.ext);

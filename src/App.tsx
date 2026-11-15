@@ -3,6 +3,7 @@ import { api, isTauri } from "./lib/api";
 import { useStore } from "./lib/store";
 import { flushAll } from "./editor/saver";
 import { installFileDrops } from "./lib/drops";
+import { installDiagnostics, log } from "./lib/log";
 import { Home } from "./components/Home";
 import { SettingsView } from "./components/SettingsView";
 import { TopBar } from "./components/TopBar";
@@ -16,12 +17,15 @@ export function App() {
 
   useEffect(() => {
     const store = useStore.getState();
+    installDiagnostics();
+    log.info("ui started");
     void store.refresh();
     // The panel may already be on screen by the time this UI has loaded.
     void api.getState().then((s) => s.panelShown && setShown(true));
     api.onVaultChanged(() => void useStore.getState().refresh());
     api.onPanelShown((focus) => {
       setShown(true);
+      log.debug(`panel shown focus=${focus}`);
       void useStore.getState().refresh();
       if (focus) useStore.getState().requestTodayFocus();
     });

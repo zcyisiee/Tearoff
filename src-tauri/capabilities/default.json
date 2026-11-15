@@ -2,6 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "The panel webview: app commands, events, folder picker, native file drag.",
-  "windows": ["panel"],
-  "permissions": ["core:default", "dialog:allow-open", "drag:default"]
+  "windows": [
+    "panel"
+  ],
+  "permissions": [
+    "core:default",
+    "drag:default",
+    "log:default"
+  ]
 }

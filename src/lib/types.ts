@@ -110,6 +110,7 @@ export interface Api {
   revealNote(path: string): Promise<void>;
   startFileDrag(paths: string[]): Promise<void>;
   pickDirectory(): Promise<string | null>;
+  openLogs(): Promise<void>;
 
   setSettings(settings: Settings): Promise<void>;
   setPanelPinned(pinned: boolean): Promise<void>;

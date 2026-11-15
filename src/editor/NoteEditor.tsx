@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { api } from "../lib/api";
-import { useStore } from "../lib/store";
+import { log } from "../lib/log";
 import { buildExtensions } from "./extensions";
 import { isLossless, joinFrontMatter, normalizeOutput, splitFrontMatter } from "./markdown";
 import { NoteSaver } from "./saver";
@@ -55,7 +55,9 @@ export function NoteEditor({ path, modified, placeholder, onEditor, focusSignal 
       if (!alive) return;
       const { frontMatter, body } = splitFrontMatter(doc.content);
       saver.current = new NoteSaver(path, doc.content, doc.modified);
-      setLoaded({ frontMatter, body, rich: isLossless(body), version: 0 });
+      const rich = isLossless(body);
+      if (!rich) log.info(`${path} opens in source mode (rich editing would lose content)`);
+      setLoaded({ frontMatter, body, rich, version: 0 });
       saver.current.onExternalContent = (content) => {
         const next = splitFrontMatter(content);
         setLoaded((prev) => ({ ...next, rich: isLossless(next.body), version: (prev?.version ?? 0) + 1 }));
@@ -258,8 +260,6 @@ function SourceEditor({
 }) {
   const [text, setText] = useState(loaded.body);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const notify = useStore((s) => s.notify);
-
   useEffect(() => {
     onEditor?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,13 +274,7 @@ function SourceEditor({
 
   return (
     <div className="source">
-      <button
-        type="button"
-        className="source__note"
-        onClick={() => notify("这篇笔记里有行内 HTML 或脚注等内容，富文本编辑会丢失它们，所以按原文编辑")}
-      >
-        按 Markdown 原文编辑
-      </button>
+      <span className="source__note">MD</span>
       <textarea
         ref={ref}
         className="prose source__text"

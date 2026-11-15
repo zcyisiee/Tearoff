@@ -28,8 +28,8 @@
 .prose strong { font-weight: 650; }
 .prose a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; cursor: text; }
 .prose mark { background: var(--marker); color: inherit; padding: 0.05em 0.1em; border-radius: 2px; }
-.prose code { font: 0.86em var(--mono); background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
-.prose pre { background: var(--code-bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; line-height: 1.5; }
+.prose code { font: 0.86em var(--mono); background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 5px; }
+.prose pre { background: var(--code-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
 .prose pre code { background: none; padding: 0; font-size: 0.84em; }
 .prose blockquote { margin-left: 0; padding-left: 12px; border-left: 2px solid var(--accent); color: var(--muted); }
 .prose hr { border: 0; border-top: 1px dashed var(--line); margin: 1em 0; }
@@ -55,7 +55,7 @@
   height: 15px;
   margin: 0;
   border: 1.5px solid var(--faint);
-  border-radius: 3px;
+  border-radius: 5px;
   background: var(--paper);
   display: grid;
   place-items: center;
@@ -89,5 +89,5 @@
 .prose .hljs-title, .prose .hljs-section { font-weight: 600; }
 
 /* Source mode: same type, plain text. */
-.source__note { margin-bottom: 4px; padding: 1px 8px; font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; }
+.source__note { float: right; margin-left: 8px; padding: 0 6px; font: 600 0.62rem / 1.6 var(--sans); letter-spacing: 0.04em; color: var(--faint); border: 1px solid var(--line); border-radius: 6px; }
 .source__text { display: block; width: 100%; border: 0; background: none; resize: none; padding: 0; overflow: hidden; white-space: pre-wrap; }
