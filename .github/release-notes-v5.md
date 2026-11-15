@@ -1,4 +1,4 @@
-Tearoff 5 是用 Tauri 重写的版本，macOS 和 Windows 共用一套代码。这是预览版，和 4.x 可以并存，互不影响。
+Tearoff 5 是用 Tauri 重写的版本，macOS 和 Windows 共用一套代码。这是预览版，用独立的笔记库和设置，不读写 4.x 的数据。
 
 ## 下载
 
@@ -11,6 +11,7 @@ Tearoff 5 是用 Tauri 重写的版本，macOS 和 Windows 共用一套代码。
 安装包没有开发者签名：
 
 - **macOS**：把 Tearoff 拖进“应用程序”后，在终端执行 `xattr -cr /Applications/Tearoff.app`，再打开。
+  如果已经装了 4.x：两个版本的应用同名，直接拖入会替换 4.x。想两个都留，先把 4.x 改名（例如 `Tearoff 4.app`）。
 - **Windows**：SmartScreen 拦截时点“更多信息 → 仍要运行”。
 
 ## 有什么不同

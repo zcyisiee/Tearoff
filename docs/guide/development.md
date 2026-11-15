@@ -53,5 +53,6 @@ pnpm dev &   # 调试构建从 devUrl 加载界面
 ## 交付
 
 - 在 `v5-tauri` 分支提交；提交信息沿用仓库的 `类型: 中文说明` 风格。
+- 发布 v5：改 `src-tauri/tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号，改 `.github/release-notes-v5.md`，推送标签 `v<版本>`。`.github/workflows/v5-release.yml` 构建 macOS arm64/x64 的 dmg 与 Windows x64 的安装程序，挂到同名的**预发布**上。必须是预发布：4.x 的更新检查读 `releases/latest`，在 v5 正式接替之前它得继续指向 4.x（4.x 里开了测试通道的用户会看到 v5 预发布）。安装包无开发者签名（macOS 为临时签名）。
 - 完成前更新任务状态文件；行为变了更新 `contracts.md`；有可复用结论写进 `docs/lessons/`。
 - 旧版发布流程（`.github/workflows/build.yml`）仍指向仓库根的 Xcode 工程路径，工程已移到 `legacy/swift/`，**再发旧版前需要先改路径**（未改、未验证）。
