@@ -80,9 +80,16 @@ subagents-plan/
 # Screen recordings — convert to GIF before adding demo assets
 *.mov
 
-# Agent's plan
-AGENTS.md
+# Agent scratch (local only)
 .codebuddy/
-
-docs/
 .tasks/
+legacy/history/tasks/
+
+# Large local media and generated diagrams
+docs/gif-for-rednote/
+
+# v5 (Tauri) build output
+dist/
+src-tauri/target/
+src-tauri/gen/
+tmp/

@@ -1,0 +1,93 @@
+/*
+ * The single typographic definition of a note. Cards, the today sheet, opened
+ * rows, the expanded editor and the source-mode textarea all use `.prose` and
+ * nothing overrides it per container.
+ */
+.prose {
+  font: var(--font-size) / 1.65 var(--sans);
+  color: var(--ink);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  word-break: break-word;
+  caret-color: var(--accent);
+  min-height: 1.65em;
+}
+.prose--loading { min-height: 3.3em; }
+.prose > * { margin: 0; }
+.prose > * + * { margin-top: 0.5em; }
+.prose p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--faint); float: left; height: 0; pointer-events: none; }
+
+.prose h1, .prose h2, .prose h3 { font-family: var(--serif); font-weight: 600; line-height: 1.3; }
+.prose h1 { font-size: 1.45em; }
+.prose h2 { font-size: 1.22em; }
+.prose h3 { font-size: 1.06em; }
+.prose > h1:not(:first-child), .prose > h2:not(:first-child), .prose > h3:not(:first-child) { margin-top: 0.9em; }
+
+.prose strong { font-weight: 650; }
+.prose a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; cursor: text; }
+.prose mark { background: var(--marker); color: inherit; padding: 0.05em 0.1em; border-radius: 2px; }
+.prose code { font: 0.86em var(--mono); background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+.prose pre { background: var(--code-bg); padding: 10px 12px; border-radius: 4px; overflow-x: auto; line-height: 1.5; }
+.prose pre code { background: none; padding: 0; font-size: 0.84em; }
+.prose blockquote { margin-left: 0; padding-left: 12px; border-left: 2px solid var(--accent); color: var(--muted); }
+.prose hr { border: 0; border-top: 1px dashed var(--line); margin: 1em 0; }
+.prose img { max-width: 100%; border-radius: 3px; display: block; }
+.prose img.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+
+.prose ul, .prose ol { padding-left: 1.4em; }
+.prose li p { margin: 0; }
+.prose li p + p { margin-top: 0.3em; }
+.prose li + li { margin-top: 0.15em; }
+.prose li > ul, .prose li > ol { margin-top: 0.15em; }
+
+/* To-dos: a square you tick, like a paper checklist. */
+.prose ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.prose ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 8px; }
+.prose ul[data-type="taskList"] > li > label { flex: none; height: 1.65em; display: inline-flex; align-items: center; user-select: none; -webkit-user-select: none; }
+.prose ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+.prose ul[data-type="taskList"] ul[data-type="taskList"] { margin-top: 0.15em; }
+.prose ul[data-type="taskList"] input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 3px;
+  background: var(--paper);
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+.prose ul[data-type="taskList"] input[type="checkbox"]:hover { border-color: var(--accent); }
+.prose ul[data-type="taskList"] input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+.prose ul[data-type="taskList"] input[type="checkbox"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border: solid var(--paper);
+  border-width: 0 0 1.8px 1.8px;
+  transform: translateY(-1px) rotate(-45deg);
+}
+.prose ul[data-type="taskList"] > li[data-checked="true"] > div { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--line); }
+
+.prose .tableWrapper { overflow-x: auto; }
+.prose table { border-collapse: collapse; font-size: 0.93em; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 3px 9px; text-align: left; vertical-align: top; min-width: 3em; }
+.prose th { background: var(--code-bg); font-weight: 600; }
+.prose .selectedCell { background: var(--accent-wash); }
+
+.prose [data-type="inline-math"], .prose [data-type="block-math"] { cursor: default; border-radius: 3px; }
+.prose [data-type="inline-math"]:hover, .prose [data-type="block-math"]:hover { background: var(--accent-wash); }
+.prose [data-type="block-math"] { text-align: center; padding: 4px 0; overflow-x: auto; }
+
+.prose .hljs-comment, .prose .hljs-quote { color: var(--faint); }
+.prose .hljs-keyword, .prose .hljs-selector-tag, .prose .hljs-built_in, .prose .hljs-type { color: var(--accent); }
+.prose .hljs-string, .prose .hljs-attr, .prose .hljs-number, .prose .hljs-literal { color: color-mix(in srgb, var(--danger) 80%, var(--ink)); }
+.prose .hljs-title, .prose .hljs-section { font-weight: 600; }
+
+/* Source mode: same type, plain text. */
+.source__note { margin-bottom: 4px; padding: 1px 8px; font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; }
+.source__text { display: block; width: 100%; border: 0; background: none; resize: none; padding: 0; overflow: hidden; white-space: pre-wrap; }

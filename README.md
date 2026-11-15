@@ -19,6 +19,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zcyisiee/Tearoff?color=blue" alt="License" /></a>
 </p>
 
+> **开发中：5.0（`v5-tauri` 分支）** 正在用 Tauri 重写，以支持 Windows、所见即所得的格式工具栏和“今天优先”的主页。下文描述的是当前发布的 4.x（Swift，源码在 `legacy/swift/`）。新版的现状与开发方法见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [docs/guide/development.md](docs/guide/development.md)。
+
 **Tearoff** 的目标是找回在纸上随手记录的感觉。鼠标滑到屏幕边缘即可唤出Tearoff，划出界面后，Tearoff 自动收起。随拿随用，非常方便。当然，你也可以点击右上角的图钉来临时固定 Tearoff。
 
 Tearoff 的核心对象是卡片。**文件卡片**对应一个 markdown 文件。**文件夹卡片**让你直接在面板里浏览和操作文件。另有一种特殊的文件卡片：**Daily 卡片**，每天一张，用来安排当天的待办。你可以把卡片当成日程表、备忘录、日记本或随笔用。我对日程表场景做了专门优化：在卡片上直接点击待办（`- [ ]`）即可打勾或取消，非常滴方便。

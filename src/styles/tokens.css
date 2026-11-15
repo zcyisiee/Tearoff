@@ -1,0 +1,63 @@
+/* Cutting mat, paper, ink, one green, one highlighter. */
+:root {
+  --mat: #e4e9e5;
+  --mat-deep: #d6ddd8;
+  --paper: #fdfdfb;
+  --ink: #1a211d;
+  --muted: #68736c;
+  --faint: #9aa49e;
+  --line: #d3dad5;
+  --accent: #1b7654;
+  --accent-wash: rgba(27, 118, 84, 0.1);
+  --marker: #ffe566;
+  --danger: #b0372d;
+  --code-bg: #eef1ee;
+  --shadow: 0 1px 0 rgba(26, 33, 29, 0.06), 0 10px 22px -18px rgba(26, 33, 29, 0.55);
+
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", "Noto Sans CJK SC", sans-serif;
+  --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "STSong", serif;
+  --mono: "SF Mono", ui-monospace, "Cascadia Code", Consolas, "PingFang SC", monospace;
+
+  --font-size: 15px;
+  --topbar: 44px;
+  --pad: 18px;
+  --radius: 3px;
+  --ease: cubic-bezier(0.22, 0.9, 0.24, 1);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --mat: #111714;
+  --mat-deep: #0c110f;
+  --paper: #1b2320;
+  --ink: #e3e9e5;
+  --muted: #909c95;
+  --faint: #66716b;
+  --line: #2b3530;
+  --accent: #62c9a0;
+  --accent-wash: rgba(98, 201, 160, 0.14);
+  --marker: #6f6212;
+  --danger: #ef8478;
+  --code-bg: #141b18;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 22px -16px rgba(0, 0, 0, 0.9);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"], :root:not([data-theme]) {
+    --mat: #111714;
+    --mat-deep: #0c110f;
+    --paper: #1b2320;
+    --ink: #e3e9e5;
+    --muted: #909c95;
+    --faint: #66716b;
+    --line: #2b3530;
+    --accent: #62c9a0;
+    --accent-wash: rgba(98, 201, 160, 0.14);
+    --marker: #6f6212;
+    --danger: #ef8478;
+    --code-bg: #141b18;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 10px 22px -16px rgba(0, 0, 0, 0.9);
+    color-scheme: dark;
+  }
+}
