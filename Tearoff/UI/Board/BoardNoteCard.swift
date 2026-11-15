@@ -828,7 +828,7 @@ struct BoardDragReplica: View {
                 // Board content unmounted mid-drag (e.g. keyboard navigation):
                 // release the session so the card can't stay hidden and the
                 // in-memory reorder reaches disk.
-                if session.noteID != nil {
+                if session.itemID != nil {
                     session.end()
                     try? SidecarStore.shared.save()
                 }

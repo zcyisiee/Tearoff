@@ -64,6 +64,15 @@ struct FinderCardView: View {
     /// resignation).
     @State private var lastEmbeddedInteraction = Date.distantPast
 
+    /// Frame of the embedded AppKit file list in `BoardCardSpace`. A press that
+    /// starts inside it belongs to the list (selection, rubber band, file
+    /// drag-out) and must never start a card-reorder drag: SwiftUI gesture
+    /// recognizers observe those mouse events too, and once AppKit's dragging
+    /// session takes over the event stream the gesture's `.onEnded` never
+    /// arrives — the reorder session would leak and leave this card hidden
+    /// (`opacity 0`) forever. See docs/issues/finder-card-blank.md.
+    @State private var embeddedListFrame = CGRect.null
+
     /// Identity color drives the accent tiers; uncolored cards fall back to
     /// the theme accent.
     private var accentColor: Color {
@@ -151,6 +160,7 @@ struct FinderCardView: View {
         .gesture(
             DragGesture(minimumDistance: 8, coordinateSpace: .named(BoardCardSpace.name))
                 .onChanged { value in
+                    guard !embeddedListFrame.contains(value.startLocation) else { return }
                     onDragTick?(value.location, value.startLocation)
                 }
                 .onEnded { _ in
@@ -634,6 +644,11 @@ struct FinderCardView: View {
         }
         .frame(height: card.listHeight ?? 240)
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named(BoardCardSpace.name))
+        } action: { frame in
+            embeddedListFrame = frame
+        }
         .background(DesignToken.surfaceInset.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: DesignToken.Radius.md))
         .overlay { fileListOverlay }

@@ -24,6 +24,8 @@ struct NoteBoardView: View {
     @State private var dragSession = BoardDragSession()
     /// Generation guard for post-drag display-recovery pokes.
     @State private var displayRecoveryGeneration = 0
+    /// True while an AppKit file drag started inside a Finder card is running.
+    @State private var isFileDragActive = false
     /// Live card frames in `BoardCardSpace`, reported by each card — lets the
     /// drag-reorder hit-test which card the pointer is over. Plain class on
     /// purpose: frame writes must not invalidate the board body.
@@ -945,6 +947,11 @@ struct NoteBoardView: View {
             },
             onFileDragSessionChanged: { active in
                 Log.finder.debug("[Board] file drag session \(active ? "began" : "ended", privacy: .public)")
+                // A file drag owns the mouse until release; a card-reorder
+                // session that slipped in on the same fast drag would never
+                // receive its mouse-up. Close it at both edges of the session.
+                isFileDragActive = active
+                cancelCardDrag()
                 if active {
                     AppDelegate.shared?.panelController?.suspendAutoHide()
                 } else {
@@ -1195,6 +1202,7 @@ struct NoteBoardView: View {
     /// pointer, so these commits can never disturb the card in hand. Works
     /// for both notes and Finder cards via the shared `BoardItem` space.
     private func handleDragTick(_ item: BoardItem, location: CGPoint, start: CGPoint, visible: [BoardItem]) {
+        guard !isFileDragActive else { return }
         noteStore.selectedTitleNoteID = nil
         lastTitleTap = nil
         if dragSession.itemID != item.id {
@@ -1231,6 +1239,17 @@ struct NoteBoardView: View {
             }
             return
         }
+    }
+
+    /// Abort a card-reorder drag without the settle animation (used when the
+    /// mouse turned out to belong to an AppKit file drag).
+    private func cancelCardDrag() {
+        guard dragSession.itemID != nil else { return }
+        FileLog.shared.event("finder", "card drag cancelled by file drag session")
+        removeDragMouseUpMonitor()
+        lastReorder = nil
+        dragSession.end()
+        try? SidecarStore.shared.save()
     }
 
     private func handleDragEnd() {
@@ -1282,7 +1301,7 @@ struct NoteBoardView: View {
         dragMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { event in
             removeDragMouseUpMonitor()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                if dragSession.noteID != nil {
+                if dragSession.itemID != nil {
                     handleDragEnd()
                 }
             }
