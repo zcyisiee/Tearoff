@@ -1,0 +1,82 @@
+name: v5 release
+
+# Builds the Tauri app for macOS (arm64, x64) and Windows (x64) and attaches
+# the installers to a GitHub prerelease named after the version in
+# src-tauri/tauri.conf.json. Always a prerelease: the 4.x app's updater reads
+# `releases/latest`, which must keep pointing at 4.x until v5 replaces it.
+
+on:
+  push:
+    tags: ["v5.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: meta
+        run: |
+          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Create the prerelease if it does not exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --prerelease --target "$GITHUB_SHA" --title "Tearoff $TAG" \
+            --notes-file .github/release-notes-v5.md
+
+  build:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            name: macos-arm64
+          - os: macos-15
+            target: x86_64-apple-darwin
+            name: macos-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build --target ${{ matrix.target }}
+      - name: Upload installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          OUT="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SRC=$(ls "$OUT"/nsis/*.exe | head -1); DST="Tearoff-$VERSION-${{ matrix.name }}-setup.exe"
+          else
+            SRC=$(ls "$OUT"/dmg/*.dmg | head -1); DST="Tearoff-$VERSION-${{ matrix.name }}.dmg"
+          fi
+          cp "$SRC" "$DST"
+          gh release upload "$TAG" "$DST" --clobber
